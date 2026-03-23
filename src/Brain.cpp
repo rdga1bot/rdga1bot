@@ -280,11 +280,6 @@ void Brain::HandleTargeting() {
         }
         m_dead_target_esc_count++;
         Log("[TARGETING] Мертвий таргет hp=0 → ESC ×" + std::to_string(m_dead_target_esc_count));
-        // Перший раз — зберігаємо скриншот щоб перевірити позицію target HP бару
-        if (m_dead_target_esc_count == 1) {
-            m_eyes.SaveFrame("tmp/dead_target_debug.png");
-            Log("[TARGETING] Збережено tmp/dead_target_debug.png для перевірки позиції HP бару");
-        }
         if (m_dead_target_esc_count <= 5) {
             // Звичайний мертвий моб — знімаємо одразу
             m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
