@@ -32,6 +32,7 @@ venv/
 .cache/
 
 # clangd index
+.clangd
 .clangd/
 
 # Misc
