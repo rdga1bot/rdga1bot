@@ -1,0 +1,199 @@
+#include "Input.h"
+
+#include <cmath>
+
+#ifdef _WIN32
+#define WIN32_MEAN_AND_LEAN
+#include <Windows.h>
+#else
+#include <thread>
+#include <chrono>
+#include <X11/Xlib.h>
+#endif
+
+// Platform-specific sleep (milliseconds)
+static void platform_sleep(int ms)
+{
+#ifdef _WIN32
+    ::Sleep(static_cast<DWORD>(ms));
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#endif
+}
+
+void Input::MoveMouseSmoothly(const Point &point, Point from, int step, int interval)
+{
+    if (step == 0) {
+        step = 1;
+    }
+
+    const auto distance = std::hypot(point.x - from.x, point.y - from.y);
+    const auto steps = distance / step;
+
+    if (steps == 0) {
+        return;
+    }
+
+    const auto dx = (point.x - from.x) / steps;
+    const auto dy = (point.y - from.y) / steps;
+
+    for (int i = 0; i < steps; ++i) {
+        const Point step_point{
+            static_cast<int>(from.x + i * dx),
+            static_cast<int>(from.y + i * dy)
+        };
+        MoveMouse(step_point);
+
+        Delay(interval);
+    }
+
+    MoveMouse(point);
+}
+
+void Input::HoldKeyboardKey(KeyboardKey key, int ms)
+{
+    KeyboardKeyDown(key);
+    Delay(ms);
+    KeyboardKeyUp(key);
+}
+
+void Input::PressKeyboardKey(KeyboardKey key, int duration, int delay)
+{
+    if (delay == 0) {
+        delay = 1;
+    }
+
+    const auto times = duration / delay + 1;
+
+    for (std::size_t i = 0; i < times; ++i) {
+        KeyboardKeyDown(key);
+        Delay(delay);
+        KeyboardKeyUp(key);
+    }
+}
+
+void Input::PressKeyboardKeyCombination(const std::vector<KeyboardKey> &keys, int duration, int delay)
+{
+    if (keys.empty()) {
+        return;
+    }
+
+    if (delay == 0) {
+        delay = 1;
+    }
+
+    const auto times = duration / delay + 1;
+
+    for (std::size_t i = 0; i < times; ++i) {
+        for (const auto key : keys) {
+            KeyboardKeyDown(key);
+        }
+
+        Delay(delay);
+
+        for (auto j = keys.size() - 1; j-- > 0;) {
+            KeyboardKeyUp(keys[j]);
+        }
+    }
+}
+
+Input::Point Input::MousePosition() const
+{
+#ifdef _WIN32
+    ::POINT point = {};
+    ::GetCursorPos(&point);
+    return {point.x, point.y};
+#else
+    Display* dpy = ::XOpenDisplay(nullptr);
+    if (!dpy) return {0, 0};
+
+    ::Window root = DefaultRootWindow(dpy);
+    ::Window child;
+    int rx, ry, wx, wy;
+    unsigned int mask;
+    ::XQueryPointer(dpy, root, &root, &child, &rx, &ry, &wx, &wy, &mask);
+    ::XCloseDisplay(dpy);
+    return {rx, ry};
+#endif
+}
+
+bool Input::MouseMoved(int delta)
+{
+    const auto mouse_delta = m_intercept.MouseDelta();
+    return std::abs(mouse_delta.x) > delta || std::abs(mouse_delta.y) > delta;
+}
+
+bool Input::KeyboardKeyPressed(KeyboardKey key)
+{
+    const auto code = KeyScanCode(key);
+
+    if (static_cast<int>(key) & SHIFT) {
+        const auto lshift = static_cast<int>(KeyboardKey::LeftShift);
+        const auto rshift = static_cast<int>(KeyboardKey::RightShift);
+
+        return m_intercept.KeyboardKeyPressed(code) && (
+            m_intercept.KeyboardKeyPressed(lshift) ||
+            m_intercept.KeyboardKeyPressed(rshift)
+        );
+    } else {
+        return m_intercept.KeyboardKeyPressed(code);
+    }
+}
+
+void Input::AddKeyboardKeyEvent(KeyboardKey key, ::Intercept::KeyboardKeyEvent event)
+{
+    const auto int_key = static_cast<int>(key);
+
+    if (int_key & SHIFT) {
+        KeyboardKeyEvent shift_event = {};
+        shift_event.code = KeyScanCode(KeyboardKey::LeftShift);
+        shift_event.event = event;
+        AddEvent(shift_event);
+    }
+
+    KeyboardKeyEvent key_event = {};
+    key_event.code = KeyScanCode(key);
+    key_event.event = event;
+    key_event.e0 = int_key & E0;
+    key_event.e1 = int_key & E1;
+    AddEvent(key_event);
+}
+
+void Input::Send(int sleep)
+{
+    if (m_events.empty()) {
+        return;
+    }
+
+    ++m_threads;
+
+    std::thread([this](const decltype(m_events) events, int sleep) { // events copied
+        // Opt: скидаємо кеш фокусу — EnsureGameFocused() спрацює лише один раз за серію
+        m_intercept.ResetFocusCache();
+        for (const auto &event : events) {
+            std::visit([this](const auto &event) {
+                using T = std::decay_t<decltype(event)>;
+
+                if constexpr (std::is_same_v<T, MouseMoveEvent>) {
+                    m_intercept.SendMouseMoveEvent(event);
+                } else if constexpr (std::is_same_v<T, MouseButtonEvent>) {
+                    m_intercept.SendMouseButtonEvent(event);
+                } else if constexpr (std::is_same_v<T, KeyboardKeyEvent>) {
+                    m_intercept.SendKeyboardKeyEvent(event.code, event.event, event.e0, event.e1);
+                } else if constexpr (std::is_same_v<T, DelayEvent>) {
+                    platform_sleep(event);
+                }
+            }, event);
+        }
+        // Opt: один XFlush після всієї серії замість N (по одному на подію)
+        m_intercept.FlushEvents();
+
+        if (sleep > 0) {
+            platform_sleep(sleep);
+        }
+
+        --m_threads;
+    }, m_events, sleep).detach();
+
+    Reset();
+}

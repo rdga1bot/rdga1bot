@@ -1,0 +1,39 @@
+# Build artifacts
+rdga1bot
+l2cvbot_linux
+*.o
+build/
+build_cc/
+
+# Config (може містити Telegram токен)
+rdga1bot.ini
+
+# Debug/calibration images (крім шаблонів ALT+B)
+*.png
+*.bmp
+!template/*.png
+
+# Logs
+logs/
+debug/
+diag/
+
+# Python legacy
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+.cache/
+
+# clangd index
+.clangd/
+
+# Misc
+compile_commands.json
+tmp/
