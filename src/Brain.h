@@ -61,8 +61,10 @@ private:
     int m_step_count = 0;
     int m_minimap_rotate_count = 0; // скільки разів поспіль повернули за мінімапою без результату
     int m_far_target_rejects = 0;   // скільки разів відхилили далекий таргет (макс 5 на сесію)
-    bool m_pokemon_targeted = false; // поточний таргет — Pokemon (потрібен sweep після смерті)
-    int m_dead_target_esc_count = 0; // скільки разів поспіль ESC для hp=0 таргету (debounce)
+    bool m_pokemon_targeted = false;    // поточний таргет — Pokemon (потрібен sweep після смерті)
+    bool m_pokemon_macro_fired = false; // Pokemon macro вже викликано в цьому TARGETING циклі
+    int m_dead_target_esc_count = 0;    // скільки разів поспіль ESC для hp=0 таргету (debounce)
+    int m_dead_cycles_total = 0;        // скільки ESC-fallthrough циклів поспіль → switch to macro
 
     // Атака: HP моба на попередньому тіку (для миттєвої детекції смерті)
     int m_prev_target_hp = -1;

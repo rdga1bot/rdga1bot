@@ -47,6 +47,8 @@ public:
     // [Targeting]
     Input::KeyboardKey next_target_key = Input::KeyboardKey::F2; // /nexttarget macro
     std::vector<Input::KeyboardKey> target_macro_keys;
+    int nearby_y_threshold = 200; // Screen-Y фільтр: cy < цього → "далеко" (0 = вимкнено)
+    int max_far_rejects    = 5;   // Скільки разів відхилити "далекий" таргет → потім приймаємо
 
     // [Attack]
     std::vector<Input::KeyboardKey> attack_keys;

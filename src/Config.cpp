@@ -131,6 +131,8 @@ bool Config::Load(const std::string& path) {
     next_target_key = StringToKeyboardKey(Get("Targeting", "NextTargetKey", "F2"), Input::KeyboardKey::F2);
     auto mk = GetKeys("Targeting", "MacroKeys");
     if (!mk.empty()) target_macro_keys = mk;
+    nearby_y_threshold = GetInt("Targeting", "NearbyYThreshold", nearby_y_threshold);
+    max_far_rejects    = GetInt("Targeting", "MaxFarRejects",    max_far_rejects);
 
     // [Attack]
     auto ak = GetKeys("Attack", "AttackKeys");

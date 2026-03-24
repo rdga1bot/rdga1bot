@@ -11,8 +11,9 @@ echo "Старт: $(date)" | tee -a "$LOG_FILE"
 echo "Лог: $LOG_FILE" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
-# Запускаємо бот у --no-tui режимі з tee для збереження всього лога
-./rdga1bot --no-tui 2>&1 | tee -a "$LOG_FILE"
+# --quick: пропускає interactive setup wizard (читає rdga1bot.ini напряму)
+# --no-tui: вимикає ncurses dashboard → чистий лог
+./rdga1bot --no-tui --quick 2>&1 | tee -a "$LOG_FILE"
 
 EXIT_CODE=$?
 echo "" | tee -a "$LOG_FILE"

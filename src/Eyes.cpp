@@ -678,8 +678,9 @@ std::vector<Eyes::MinimapDot> Eyes::DetectMinimap() const
     cv::cvtColor(roi_bgr, hsv, cv::COLOR_BGR2HSV);
 
     cv::Mat mask1, mask2, mask;
-    cv::inRange(hsv, cv::Scalar(  0, 180, 80), cv::Scalar( 10, 255, 255), mask1);
-    cv::inRange(hsv, cv::Scalar(165, 180, 80), cv::Scalar(180, 255, 255), mask2);
+    // S≥100: знижено з 180 — в підземеллях точки мобів мають нижчу насиченість
+    cv::inRange(hsv, cv::Scalar(  0, 100, 80), cv::Scalar( 10, 255, 255), mask1);
+    cv::inRange(hsv, cv::Scalar(165, 100, 80), cv::Scalar(180, 255, 255), mask2);
     cv::bitwise_or(mask1, mask2, mask);
 
     // Знаходимо контури (точки мобів)
@@ -708,7 +709,45 @@ std::vector<Eyes::MinimapDot> Eyes::DetectMinimap() const
         if (d2 > max_r2)  continue; // поза колом мінімапи
 
         dots.push_back({ (int)std::round(dx), (int)std::round(dy),
-                         std::sqrt(d2) });
+                         std::sqrt(d2), false });
+    }
+
+    // ── Вибраний моб: фіолетовий/маджента ореол (H=130-160, S>80, V>80) ──────
+    // Після /target МобНейм гра показує фіолетове сяйво навколо точки на мінімапі.
+    // Rotating Radar в ElmoreLab: пульсуючий ореол з'являється ~щоразу через 1-2 кадри.
+    cv::Mat purple_mask;
+    cv::inRange(hsv, cv::Scalar(130, 80, 80), cv::Scalar(165, 255, 255), purple_mask);
+
+    std::vector<std::vector<cv::Point>> purple_contours;
+    cv::findContours(purple_mask, purple_contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    // Центри фіолетових областей (dx/dy відносно центру мінімапи)
+    struct PurpleDot { float dx, dy; };
+    std::vector<PurpleDot> purple_dots;
+    for (const auto& c : purple_contours) {
+        if (cv::contourArea(c) < m_minimap_dot_area_min) continue;
+        cv::Moments m = cv::moments(c);
+        if (m.m00 == 0.0) continue;
+        const float pdx = (float)(m.m10 / m.m00) - (float)m_minimap_cx_in_roi;
+        const float pdy = (float)(m.m01 / m.m00) - (float)m_minimap_cy_in_roi;
+        const float pd2 = pdx * pdx + pdy * pdy;
+        if (pd2 < excl_r2 || pd2 > max_r2) continue;
+        purple_dots.push_back({ pdx, pdy });
+    }
+
+    // Позначаємо ту червону точку, яка найближча до фіолетового ореолу (≤15px)
+    static constexpr float kPurpleMatchRadius2 = 15.0f * 15.0f;
+    if (!purple_dots.empty()) {
+        for (auto& dot : dots) {
+            for (const auto& pd : purple_dots) {
+                const float ddx = (float)dot.dx - pd.dx;
+                const float ddy = (float)dot.dy - pd.dy;
+                if (ddx * ddx + ddy * ddy <= kPurpleMatchRadius2) {
+                    dot.selected = true;
+                    break;
+                }
+            }
+        }
     }
 
     // Сортуємо від найближчого до найдальшого

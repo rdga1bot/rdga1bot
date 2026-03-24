@@ -13,8 +13,12 @@ void Brain::Log(const std::string& msg, LogLevel level) {
     char ts[10];
     std::strftime(ts, sizeof(ts), "%H:%M:%S", std::localtime(&t));
     std::string line = std::string("[") + ts + "] " + msg;
-    std::cout << line << "\n";
-    if (m_log_callback) m_log_callback(line);
+    if (m_log_callback) {
+        std::cout << line << "\n";
+        m_log_callback(std::move(line)); // уникаємо зайвого copy до Dashboard
+    } else {
+        std::cout << line << "\n";
+    }
 }
 
 Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
@@ -83,7 +87,9 @@ void Brain::EnterState(State s) {
             m_minimap_rotate_count = 0;
             m_far_target_rejects = 0;
             m_pokemon_targeted = false;
+            m_pokemon_macro_fired = false;
             m_dead_target_esc_count = 0;
+            m_dead_cycles_total = 0;
             break;
 
         case State::Attacking:
@@ -243,12 +249,15 @@ void Brain::HandleTargeting() {
     if (HasTarget()) {
         // Якщо є /target макроси — відфільтровуємо далеких мобів за Y позицією на екрані.
         // Висока Y (низ екрану) = близько, низька Y (верх) = далеко.
-        // Поріг 450px для вікна ~768px (верхні ~59% = "далеко").
-        // Після 10 відхилень приймаємо будь-який таргет щоб не зависнути.
-        static constexpr int kNearbyYThreshold = 450;
-        static constexpr int kMaxFarRejects    = 10;
+        // Поріг 300px для вікна ~768px (верхні ~39% = "дійсно далеко").
+        // Screen-Y фільтр: cy < порогу → таргет "далеко" → ESC, шукаємо ближчого.
+        // Конфігурується в .ini: NearbyYThreshold (0 = вимкнено), MaxFarRejects.
+        // Дефолт 200px / 5 відхилень — обережно для підземель/коридорів.
+        const int kNearbyYThreshold = m_cfg.nearby_y_threshold;
+        const int kMaxFarRejects    = m_cfg.max_far_rejects;
 
-        if (!m_cfg.target_macro_keys.empty() && m_far_target_rejects < kMaxFarRejects) {
+        if (kNearbyYThreshold > 0 && !m_cfg.target_macro_keys.empty()
+            && m_far_target_rejects < kMaxFarRejects) {
             auto npcs = m_eyes.DetectNPCs();
             for (const auto& npc : npcs) {
                 if (npc.Selected() && npc.center.y < kNearbyYThreshold) {
@@ -288,12 +297,26 @@ void Brain::HandleTargeting() {
             m_hands.Send(100);
             return;
         }
-        // Після 5 спроб ESC не допомагає — пробуємо F2 (не return).
+        // Після 5 спроб ESC не допомагає — fallthrough до F2/macro (не return).
         // Скидаємо лічильник щоб наступний цикл почався заново (не спамимо F2 кожен тік).
-        Log("[TARGETING] Мертвий таргет не зникає після 5 ESC → пробуємо F2", LogLevel::Warning);
         m_dead_target_esc_count = 0;
+        m_dead_cycles_total++;
+        // Після 3 fallthrough циклів поспіль: F2 постійно повертає мертвих мобів →
+        // одразу переходимо на /target макроси (вони не вибирають мертвих).
+        static constexpr int kDeadCyclesMacroSwitch = 3;
+        if (m_dead_cycles_total >= kDeadCyclesMacroSwitch && !m_cfg.target_macro_keys.empty()) {
+            Log("[TARGETING] Dead-target loop ×" + std::to_string(m_dead_cycles_total) +
+                " → /target макрос", LogLevel::Warning);
+            m_macro_attempts++;
+            m_hands.TargetMacro(m_macro_idx);
+            m_macro_idx = (m_macro_idx + 1) % (int)m_cfg.target_macro_keys.size();
+            m_hands.Send(150);
+            return;
+        }
+        Log("[TARGETING] Мертвий таргет не зникає після 5 ESC → пробуємо F2", LogLevel::Warning);
     } else {
         m_dead_target_esc_count = 0; // живий або відсутній таргет — скидаємо лічильник
+        m_dead_cycles_total = 0;     // живий таргет → скидаємо лічильник dead-циклів
     }
 
     m_macro_attempts++;
@@ -305,19 +328,30 @@ void Brain::HandleTargeting() {
     static constexpr int kMinimapRotateLimit = 4;
 
     auto minimap_dots = m_eyes.DetectMinimap();
-    if (!minimap_dots.empty() && m_minimap_rotate_count < kMinimapRotateLimit) {
-        const auto& nearest = minimap_dots[0];
-        const int dx = nearest.dx;
+
+    // Якщо є вибраний моб (фіолетовий ореол) — ротуємось до нього; інакше до найближчого.
+    const Eyes::MinimapDot* map_ref = nullptr;
+    bool map_ref_selected = false;
+    for (const auto& d : minimap_dots) {
+        if (d.selected) { map_ref = &d; map_ref_selected = true; break; }
+    }
+    if (!map_ref && !minimap_dots.empty()) map_ref = &minimap_dots[0];
+
+    if (map_ref && m_minimap_rotate_count < kMinimapRotateLimit) {
+        const int dx = map_ref->dx;
+        const char* who = map_ref_selected ? "Вибраний" : "Найближчий";
         if (dx < -kMinimapDxThreshold) {
             m_hands.RotateLeft(120);
             m_minimap_rotate_count++;
-            Log("[MAP] Моб ліворуч (dx=" + std::to_string(dx) + ", rot=" +
-                std::to_string(m_minimap_rotate_count) + ") → RotateLeft", LogLevel::Debug);
+            Log(std::string("[MAP] ") + who + " моб ліворуч (dx=" + std::to_string(dx) +
+                ", rot=" + std::to_string(m_minimap_rotate_count) + ") → RotateLeft",
+                LogLevel::Debug);
         } else if (dx > kMinimapDxThreshold) {
             m_hands.RotateRight(120);
             m_minimap_rotate_count++;
-            Log("[MAP] Моб праворуч (dx=" + std::to_string(dx) + ", rot=" +
-                std::to_string(m_minimap_rotate_count) + ") → RotateRight", LogLevel::Debug);
+            Log(std::string("[MAP] ") + who + " моб праворуч (dx=" + std::to_string(dx) +
+                ", rot=" + std::to_string(m_minimap_rotate_count) + ") → RotateRight",
+                LogLevel::Debug);
         } else {
             // Моб попереду або близько до центру → скидаємо лічильник
             m_minimap_rotate_count = 0;
@@ -339,11 +373,14 @@ void Brain::HandleTargeting() {
         m_macro_idx = (m_macro_idx + 1) % (int)m_cfg.target_macro_keys.size();
     }
 
-    // Pokemon макрос: кожні 10 спроб (якщо налаштовано)
-    if (m_cfg.has_pokemon_key && m_macro_attempts % 10 == 5) {
+    // Pokemon макрос: ОДИН РАЗ на початку TARGETING циклу (attempt=1).
+    // Раніше: кожні 10 спроб (5,15,25...) → 2+ sweeps по 1500мс = +3с/цикл.
+    // Тепер: тільки attempt==1, flag скидається в EnterState(Targeting).
+    if (m_cfg.has_pokemon_key && !m_pokemon_macro_fired && m_macro_attempts == 1) {
+        m_pokemon_macro_fired = true;
         m_hands.Delay(50);
         m_hands.PressKeyboardKey(m_cfg.pokemon_key);
-        m_pokemon_targeted = true; // після смерті цього моба — виконати sweep
+        m_pokemon_targeted = true;
         Log("[Pokemon] макрос", LogLevel::Debug);
     }
 
@@ -385,8 +422,11 @@ void Brain::HandleAttacking() {
         m_last_target_redetect = Now();
     }
 
-    // Детекція смерті моба: HP ≤5% — потрібно 3 тіки поспіль (debounce false positives)
-    if (m_target.has_value() && m_target->hp <= 5) {
+    // Детекція смерті моба: HP ≤2% — потрібно 3 тіки поспіль (debounce false positives)
+    // ⚠ Порогу 5% → 2%: бар ElmoreLab = 152px, мінімум 1px = 0.66% → округл. до 1%.
+    // Мертвий моб (0px) = hp=0. Моб з 0.5 HP залишку = 1-2px = hp=1-2%.
+    // Поріг 5% викликав "смикання": моб при 3-5% ще живий, бот знімав таргет → ESC → ре-таргет.
+    if (m_target.has_value() && m_target->hp <= 2) {
         m_target_hp_zero_count++;
         if (m_target_hp_zero_count >= 3) {
             if (m_first_attack) {
