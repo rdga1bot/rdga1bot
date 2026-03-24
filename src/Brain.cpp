@@ -571,9 +571,10 @@ void Brain::HandleBuffing() {
         return;
     }
     if (HasTarget()) {
-        // Відкладаємо на 30с щоб не крутитись у BUFFING-loop між kills
-        m_last_buff = Now() - std::chrono::seconds(m_cfg.buff_interval - 30);
-        Log("[Buffs] Є таргет → перериваємо бафи, retry через 30с\n");
+        // Відкладаємо на 10с (було 30с) — на активних спотах моби з'являються кожні 5-10с,
+        // 30с означає що бот ніколи не встигає зробити реальний баф.
+        m_last_buff = Now() - std::chrono::seconds(m_cfg.buff_interval - 10);
+        Log("[Buffs] Є таргет → перериваємо бафи, retry через 10с\n");
         EnterState(State::Attacking);
         return;
     }
