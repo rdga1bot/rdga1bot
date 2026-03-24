@@ -129,7 +129,8 @@ public:
 
     // Встановити позицію TargetStatusWnd (з WindowsInfo.ini)
     void SetTargetWnd(int x, int y, int w, int h) {
-        m_target_wnd_x = x; m_target_wnd_y = y;
+        m_target_wnd_x = x; m_target_wnd_x_base = x;
+        m_target_wnd_y = y;
         m_target_wnd_w = w; m_target_wnd_h = h;
     }
 
@@ -189,11 +190,12 @@ private:
     // Позиція TargetStatusWnd (динамічна, читається з WindowsInfo.ini)
     // mutable: auto-калібрується в DetectTargetHPDirect() коли бар знайдено в іншому місці
     mutable int m_target_wnd_x = 598;
+    int m_target_wnd_x_base = 598; // незмінна базова позиція (з WindowsInfo.ini)
     int m_target_wnd_y = 0;
     int m_target_wnd_w = 179;
     int m_target_wnd_h = 46;
     // Прапор авто-калібрування: встановлюється коли m_target_wnd_x змінився
-    mutable int m_target_wnd_autocal_x = -1; // -1 = нема; >=0 = нове значення (для логування)
+    mutable int m_target_wnd_autocal_x = -1; // -1 = нема; >=0 = старе значення (для логу old→new)
 
     // Opt: Lazy HSV — конвертуємо повний кадр тільки при першому виклику за тік
     bool m_hsv_full_ready = false;

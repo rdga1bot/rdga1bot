@@ -288,21 +288,27 @@ int Eyes::DetectTargetHPDirect() const {
         if (cnt > scan_best) { scan_best = cnt; scan_best_row = r; }
     }
 
-    if (scan_best >= 2) {
+    // scan_best >= 8 → ≥5% HP (справжній бар, не шум/іконки)
+    // Обмеження: new_x має бути в межах ±150px від базової позиції WindowsInfo.ini
+    // — запобігає хибним спрацюванням від UI елементів (buff icons, інші панелі)
+    if (scan_best >= 8) {
         // Бар знайдено — знаходимо лівий край щоб оновити m_target_wnd_x
         const uchar* ptr = wide_mask.ptr(scan_best_row);
         int new_x = x1; // fallback
         for (int c = 0; c < wide_mask.cols; c++) {
             if (ptr[c]) { new_x = c; break; }
         }
-        if (std::abs(new_x - m_target_wnd_x) > 5) {
-            m_target_wnd_autocal_x = m_target_wnd_x; // старе x — для логу "old → new"
-            m_target_wnd_x = new_x;
+        // Санітарна перевірка: new_x в межах ±150px від WindowsInfo.ini значення
+        if (std::abs(new_x - m_target_wnd_x_base) <= 150) {
+            if (std::abs(new_x - m_target_wnd_x) > 5) {
+                m_target_wnd_autocal_x = m_target_wnd_x; // старе x — для логу "old → new"
+                m_target_wnd_x = new_x;
+            }
+            int hp = scan_best * 100 / BAR_WIDTH_100;
+            if (hp > 100) hp = 100;
+            if (hp < 1)   hp = 1;
+            return hp;
         }
-        int hp = scan_best * 100 / BAR_WIDTH_100;
-        if (hp > 100) hp = 100;
-        if (hp < 1)   hp = 1;
-        return hp;
     }
 
     return 0; // бар не знайдено ніде → моб дійсно мертвий
