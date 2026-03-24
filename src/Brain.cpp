@@ -122,6 +122,7 @@ void Brain::EnterState(State s) {
             m_buff_idx = 0;
             m_buff_stage = 0;
             m_buff_open_retries = 0;
+            m_buff_tab_fallback = false;
             break;
     }
 }
@@ -673,6 +674,7 @@ void Brain::HandleBuffing() {
                 + "%) → fallback (" + std::to_string(m_cfg.buff_tab_x) + ","
                 + std::to_string(m_cfg.buff_tab_y) + ")", LogLevel::Warning);
             cx = m_cfg.buff_tab_x; cy = m_cfg.buff_tab_y;
+            m_buff_tab_fallback = true; // позначаємо: шаблон не знайдено, retry скоро
         }
 
         m_buff_tab_click_pos = {cx, cy}; // зберігаємо позицію для відносних координат
@@ -723,8 +725,15 @@ void Brain::HandleBuffing() {
     case 4: // Готово
     default:
         m_buff_stage = 0;
-        m_last_buff = Now();
-        Log("[Buffs] Завершено, наступний баф через " + std::to_string(m_cfg.buff_interval) + "с\n");
+        if (m_buff_tab_fallback) {
+            // Шаблон "Баффер" не знайдено → можливо вікно не відкрилось.
+            // Retry через 120с замість buff_interval.
+            m_last_buff = Now() - std::chrono::seconds(m_cfg.buff_interval - 120);
+            Log("[Buffs] Завершено (fallback), retry через 120с\n", LogLevel::Warning);
+        } else {
+            m_last_buff = Now();
+            Log("[Buffs] Завершено, наступний баф через " + std::to_string(m_cfg.buff_interval) + "с\n");
+        }
         EnterState(State::Idle);
         break;
     }

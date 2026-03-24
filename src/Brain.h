@@ -93,6 +93,7 @@ private:
     int m_buff_stage = 0;   // 0=not started, 1=wait tab, 2=wait profile, 3=wait close, 4=done
     int m_buff_open_retries = 0; // скільки разів повторно відкривали ALT+B (макс 3)
     cv::Point m_buff_tab_click_pos{0, 0}; // куди кликнули "Баффер" (для відносних координат profile)
+    bool m_buff_tab_fallback = false; // true = таб знайдено тільки через fallback (без шаблону)
 
     // Шаблони для визначення кнопок ALT+B вікна (завантажуються один раз)
     cv::Mat m_buff_tab_templ;     // buff_tab.png — вкладка "Баффер"
