@@ -139,7 +139,8 @@ void Brain::Process(bool debug) {
     if (m_eyes.GetAutoCalX() >= 0) {
         Log("[Eyes] TargetWnd авто-калібрування: x=" +
             std::to_string(m_eyes.GetAutoCalX()) + " → " +
-            std::to_string(m_eyes.GetTargetWndX()), LogLevel::Warning);
+            std::to_string(m_eyes.GetTargetWndX()),  // old → new
+            LogLevel::Warning);
         m_eyes.ClearAutoCalX();
     }
 
@@ -404,8 +405,8 @@ void Brain::HandleAttacking() {
     if (!HasTarget()) {
         m_no_target_count++;
         if (m_no_target_count == 1) {
-            int hp_val = m_target.has_value() ? m_target->hp : -1;
-            Log("[ATTACKING] Таргет зник (hp=" + std::to_string(hp_val) + "%, no_target ×1..8)");
+            std::string hp_str = m_target.has_value() ? std::to_string(m_target->hp) + "%" : "?";
+            Log("[ATTACKING] Таргет зник (hp=" + hp_str + ", no_target ×1..8)");
         }
         if (m_no_target_count >= 8) {
             if (m_first_attack) {
@@ -434,15 +435,16 @@ void Brain::HandleAttacking() {
     // Re-target тільки для свіжих мобів (entry_hp >= 90%) і тільки якщо ще не дістали
     // (поточний hp близько до початкового). Якщо моб вже отримав удари — добиваємо.
     // Перевірка результату попереднього approach re-target:
-    // якщо новий моб вже майже мертвий (HP < 30%) — скасовуємо переключення,
+    // якщо новий моб майже мертвий (HP < 15%) — скасовуємо переключення,
     // ESC і шукаємо кращий таргет. Не рахуємо цей re-target.
-    static constexpr int kMinApproachTargetHP = 30;
+    // 15% (не 30%): на активних спотах моби на 15-29% ще варто атакувати.
+    static constexpr int kMinApproachTargetHP = 15;
     if (m_approach_retarget_count > 0 &&
         m_target.has_value() && m_target->hp > 0 && m_target->hp < kMinApproachTargetHP &&
         SecsSince(m_approach_last_retarget) < 0.5)
     {
         Log("[ATTACKING] Підхід: новий таргет hp=" + std::to_string(m_target->hp)
-            + "% < 30% (майже мертвий) → скасовуємо, шукаємо кращий");
+            + "% < 15% (майже мертвий) → скасовуємо, шукаємо кращий");
         m_approach_retarget_count--;
         m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
         m_hands.Send(100);

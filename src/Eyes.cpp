@@ -296,7 +296,7 @@ int Eyes::DetectTargetHPDirect() const {
             if (ptr[c]) { new_x = c; break; }
         }
         if (std::abs(new_x - m_target_wnd_x) > 5) {
-            m_target_wnd_autocal_x = new_x; // Brain.cpp перевірить і залогує
+            m_target_wnd_autocal_x = m_target_wnd_x; // старе x — для логу "old → new"
             m_target_wnd_x = new_x;
         }
         int hp = scan_best * 100 / BAR_WIDTH_100;
