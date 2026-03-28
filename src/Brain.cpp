@@ -92,6 +92,12 @@ void Brain::EnterState(State s) {
             m_dead_cycles_total = 0;
             m_walk_stuck_count = 0;
             m_nav_prev_was_walk = false;
+            m_nav_stuck_recoveries = 0;
+            m_patrol_step_idx = 0;
+            m_minimap_low_flow_since = TP{};
+            m_minimap_flow_stuck = false;
+            // m_attack_was_unreachable НЕ скидаємо тут — скидається в HandleTargeting()
+            // тільки коли мінімапа реально показала мобів (знайшли вихід з кімнати)
             break;
 
         case State::Attacking:
@@ -144,6 +150,20 @@ void Brain::Process(bool debug) {
     m_me = m_eyes.DetectMe();
     m_target = m_eyes.DetectTarget();
 
+    // Memory Reading: якщо дані валідні — замінюємо/доповнюємо OpenCV детекцію
+    if (m_mem_player.valid) {
+        Eyes::Me mem_me;
+        // HP/MP/CP як % (0-100)
+        mem_me.hp = (m_mem_player.max_hp > 0)
+            ? (m_mem_player.hp * 100 / m_mem_player.max_hp) : (m_me ? m_me->hp : 0);
+        mem_me.mp = (m_mem_player.max_mp > 0)
+            ? (m_mem_player.mp * 100 / m_mem_player.max_mp) : (m_me ? m_me->mp : 0);
+        mem_me.cp = (m_mem_player.max_cp > 0)
+            ? (m_mem_player.cp * 100 / m_mem_player.max_cp) : (m_me ? m_me->cp : 0);
+        m_me = mem_me;
+        m_detect_me_fail_count = 0;
+    }
+
     // Авто-калібрування TargetStatusWnd: логуємо якщо x змінився
     if (m_eyes.GetAutoCalX() >= 0) {
         Log("[Eyes] TargetWnd авто-калібрування: x=" +
@@ -189,12 +209,14 @@ void Brain::Process(bool debug) {
         CheckPotions(me);
     }
 
-    // Перевірка часу бафів: тільки в IDLE/TARGETING + інтервал минув + BuffEnabled=true
-    // Post-combat cooldown перевіряється всередині HandleBuffing() (чекає там)
+    // Перевірка часу бафів: тільки в IDLE/TARGETING + інтервал минув + cooldown пройшов
+    // Post-combat cooldown перевіряємо ТУТ — не входимо в BUFFING поки є активний бій.
+    // Якщо cooldown не пройшов (є моби поряд) — продовжуємо атакувати/таргетити нормально.
     if (m_cfg.buff_enabled &&
         (m_state == State::Idle || m_state == State::Targeting) &&
         (m_cfg.buff_use_altb || !m_cfg.buff_keys.empty()) &&
-        SecsSince(m_last_buff) >= (double)m_cfg.buff_interval) {
+        SecsSince(m_last_buff) >= (double)m_cfg.buff_interval &&
+        SecsSince(m_last_kill_time) >= (double)m_cfg.buff_post_combat_cooldown) {
         EnterState(State::Buffing);
         return;
     }
@@ -210,8 +232,21 @@ void Brain::Process(bool debug) {
             : "buff_in=" + std::to_string((int)(m_cfg.buff_interval - SecsSince(m_last_buff))) + "с";
         Log("[HB] State=" + std::string(StateName(m_state)) +
             " HP=" + std::to_string(me.hp) +
+            " MP=" + std::to_string(me.mp) +
+            " CP=" + std::to_string(me.cp) +
             " ready=" + std::string(m_hands.IsReady() ? "Y" : "N") +
             " " + buff_info);
+        // Один раз: логуємо bar rects для діагностики
+        if (m_heartbeat_tick == 1 && m_eyes.MyBars().has_value()) {
+            const auto& bars = m_eyes.MyBars().value();
+            auto r2s = [](const cv::Rect& r) {
+                return "(" + std::to_string(r.x) + "," + std::to_string(r.y) +
+                       " " + std::to_string(r.width) + "x" + std::to_string(r.height) + ")";
+            };
+            Log("[HB] BarRects HP=" + r2s(bars.hp_bar) +
+                " MP=" + r2s(bars.mp_bar) +
+                " CP=" + r2s(bars.cp_bar), LogLevel::Debug);
+        }
     }
 
     // Диспетч до обробника стану
@@ -300,8 +335,9 @@ void Brain::HandleTargeting() {
             // Перший тік hp=0: чекаємо підтвердження (гра рендерить UI ~100-200мс після F2/macro).
             // Якщо наступний тік теж hp=0 → справжній мертвий моб → ESC.
             // Якщо наступний тік hp>0 → фалш-негатив детекції → продовжуємо до ATTACKING.
+            // 250мс (замість 100): /target Name макроси обробляються ~200мс → дає достатньо часу.
             Log("[TARGETING] Мертвий таргет hp=0 ×1 → чекаємо підтвердження...", LogLevel::Debug);
-            m_hands.Send(100);
+            m_hands.Send(250);
             return;
         }
         Log("[TARGETING] Мертвий таргет hp=0 → ESC ×" + std::to_string(m_dead_target_esc_count - 1));
@@ -324,7 +360,7 @@ void Brain::HandleTargeting() {
             m_macro_attempts++;
             m_hands.TargetMacro(m_macro_idx);
             m_macro_idx = (m_macro_idx + 1) % (int)m_cfg.target_macro_keys.size();
-            m_hands.Send(150);
+            m_hands.Send(300); // 300мс: /target Name потребує ~200мс обробки в грі
             return;
         }
         Log("[TARGETING] Мертвий таргет не зникає після 5 ESC → пробуємо F2", LogLevel::Warning);
@@ -353,6 +389,7 @@ void Brain::HandleTargeting() {
 
     if (map_ref && m_minimap_rotate_count < kMinimapRotateLimit) {
         const int dx = map_ref->dx;
+        const int dy = map_ref->dy;
         const char* who = map_ref_selected ? "Вибраний" : "Найближчий";
         if (dx < -kMinimapDxThreshold) {
             m_hands.RotateLeft(120);
@@ -367,8 +404,14 @@ void Brain::HandleTargeting() {
                 ", rot=" + std::to_string(m_minimap_rotate_count) + ") → RotateRight",
                 LogLevel::Debug);
         } else {
-            // Моб попереду або близько до центру → скидаємо лічильник
+            // Моб по центру горизонтально — скидаємо лічильник
             m_minimap_rotate_count = 0;
+            // Якщо моб позаду (dy > 30) — розворот на 180°
+            if (dy > 30) {
+                m_hands.RotateRight(700);
+                Log(std::string("[MAP] ") + who + " моб позаду (dy=" + std::to_string(dy) +
+                    ") → розворот 180°", LogLevel::Debug);
+            }
         }
     } else if (minimap_dots.empty()) {
         m_minimap_rotate_count = 0; // мінімапа порожня — скидаємо
@@ -377,11 +420,23 @@ void Brain::HandleTargeting() {
     // Основний метод: F2 /nexttarget
     m_hands.NextTarget();
 
-    // Резервний: /target макроси — тільки якщо F2 вже 10+ разів не знайшов мобів поряд.
-    // Перші 10 спроб — тільки F2 (моби є в радіусі дії). Після 10 невдач — /target по імені.
-    static constexpr int kMacroFallbackAfter = 10;
-    if (!m_cfg.target_macro_keys.empty() && m_macro_attempts > kMacroFallbackAfter
-        && m_macro_attempts % 3 == 0) {
+    // Якщо мінімапа має моби — значить знайшли вихід з кімнати, скидаємо флаг
+    if (!minimap_dots.empty() && m_attack_was_unreachable) {
+        m_attack_was_unreachable = false;
+        Log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable flag", LogLevel::Debug);
+    }
+
+    // Резервний: /target макроси — перебираємо F7-F11.
+    // Якщо попередній ATTACKING закінчився HP-stable (моб недосяжний) →
+    // затримуємо макроси до attempt 15, щоб навігація мала час вийти з кімнати.
+    // Нормальний режим: макроси після 2 F2 спроб (кожна парна).
+    static constexpr int kMacroFallbackAfter        = 2;
+    static constexpr int kMacroFallbackAfterUnreach = 15; // більше спроб навігації після stuck
+    const int macro_threshold = m_attack_was_unreachable
+                                    ? kMacroFallbackAfterUnreach
+                                    : kMacroFallbackAfter;
+    if (!m_cfg.target_macro_keys.empty() && m_macro_attempts > macro_threshold
+        && m_macro_attempts % 2 == 0) {
         m_hands.Delay(80);
         m_hands.TargetMacro(m_macro_idx);
         m_macro_idx = (m_macro_idx + 1) % (int)m_cfg.target_macro_keys.size();
@@ -416,47 +471,157 @@ void Brain::HandleTargeting() {
                     LogLevel::Debug);
                 if (m_walk_stuck_count >= m_cfg.nav_stuck_threshold) {
                     m_walk_stuck_count = 0;
-                    // Чергуємо напрямок обходу (лівий/правий залежно від парності спроб)
-                    if ((m_macro_attempts / 4) % 2 == 0) {
-                        m_hands.RotateRight(600);
-                        Log("[NAV] Застряг → RotateRight(600мс) для обходу перешкоди");
+                    // Прогресивний поворот: кожні 2 застрягання +450мс (900 → 1350 → 1800мс max)
+                    // Чергуємо R/L: ×1→Right, ×2→Left, ×3→Right...
+                    const int rotation_ms = std::min(900 + (m_nav_stuck_recoveries / 2) * 450, 1800);
+                    m_hands.WalkBack(300);
+                    if (m_nav_stuck_recoveries % 2 == 0) {
+                        m_hands.RotateRight(rotation_ms);
+                        Log("[NAV] Застряг ×" + std::to_string(m_nav_stuck_recoveries + 1) +
+                            " → WalkBack + RotateRight(" + std::to_string(rotation_ms) + "мс)");
                     } else {
-                        m_hands.RotateLeft(600);
-                        Log("[NAV] Застряг → RotateLeft(600мс) для обходу перешкоди");
+                        m_hands.RotateLeft(rotation_ms);
+                        Log("[NAV] Застряг ×" + std::to_string(m_nav_stuck_recoveries + 1) +
+                            " → WalkBack + RotateLeft(" + std::to_string(rotation_ms) + "мс)");
                     }
+                    // WalkForward одразу після повороту → тест нового напрямку
+                    m_hands.WalkForward(500);
+                    m_nav_prev_was_walk = true;
+                    m_nav_stuck_recoveries++;
                 }
             } else {
                 m_walk_stuck_count = 0;
+                m_nav_stuck_recoveries = 0; // успішний рух → скидаємо лічильник застрягань
                 if (flow > 0) Log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4),
                                   LogLevel::Debug);
             }
         }
     }
 
-    // Якщо мінімапа бачить моба але F2 не знаходить — підходимо вперед кожні 4 спроби
-    // IsGroundAhead() перевіряє щоб не впасти в обрив
-    // IsWallAhead() (якщо WallDetection=true) перевіряє стіни через Sobel edges
-    if (!minimap_dots.empty() && m_macro_attempts % 4 == 0) {
-        if (m_cfg.nav_wall_detection && m_eyes.IsWallAhead()) {
-            Log("[NAV] Стіна/перешкода попереду → пропускаємо WalkForward", LogLevel::Debug);
-        } else if (m_eyes.IsGroundAhead()) {
-            m_hands.WalkForward(400); // 400мс вперед до моба
-            m_nav_prev_was_walk = true; // наступний тік перевіримо чи рухались
-            Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) + " — підходимо до моба (мінімапа)");
+    // ── Minimap optical flow: детекція справжнього застрягання ──────────────
+    // Якщо на мінімапі є моби але flow≈0 протягом 2с → персонаж стоїть на місці
+    // (не рухається навіть після WalkForward команд) → тригеримо escape-поворот.
+    // Надійніше ніж frame diff центрального вигляду (одноманітні текстури підземель).
+    if (m_cfg.nav_flow_detection) {
+        const float mm_flow = m_eyes.GetMinimapFlow();
+        const bool has_mobs = !minimap_dots.empty();
+
+        if (has_mobs && mm_flow < 0.3f) {
+            if (m_minimap_low_flow_since == TP{}) {
+                m_minimap_low_flow_since = Now(); // почали рахувати
+                m_minimap_flow_stuck = false;
+            } else if (!m_minimap_flow_stuck && SecsSince(m_minimap_low_flow_since) >= 2.0) {
+                // 2с нульового flow з мобами на мінімапі → справжнє застрягання
+                m_minimap_flow_stuck = true;
+                m_minimap_low_flow_since = TP{}; // скидаємо таймер
+                // Прогресивний escape (той самий механізм що й frame-diff stuck)
+                const int rotation_ms = std::min(900 + (m_nav_stuck_recoveries / 2) * 450, 1800);
+                m_hands.WalkBack(300);
+                if (m_nav_stuck_recoveries % 2 == 0)
+                    m_hands.RotateRight(rotation_ms);
+                else
+                    m_hands.RotateLeft(rotation_ms);
+                m_hands.WalkForward(500);
+                m_nav_prev_was_walk = true;
+                m_nav_stuck_recoveries++;
+                Log("[NAV] Flow-stuck: flow=" + std::to_string(mm_flow).substr(0, 4) +
+                    " 2с → WalkBack + Rotate(" + std::to_string(rotation_ms) + "мс)");
+            }
+        } else {
+            // flow є або немає мобів → скидаємо таймер
+            if (m_minimap_low_flow_since != TP{})
+                m_minimap_low_flow_since = TP{};
+            m_minimap_flow_stuck = false;
         }
     }
 
-    // Fallback ротація кожні 5 спроб — тільки якщо мінімапа порожня
+    // ── Рух до моба (мінімапа показує напрямок) ─────────────────────────────
+    // 1. Якщо моб по центру І попереду (dy < -15) → WalkForward одразу (довший крок)
+    // 2. Fallback: кожні 4 спроби якщо ліміт ротацій не досягнуто
+    if (!minimap_dots.empty() && !m_nav_prev_was_walk
+        && m_minimap_rotate_count < kMinimapRotateLimit) {
+        const bool mob_ahead = (map_ref != nullptr
+            && std::abs(map_ref->dx) <= kMinimapDxThreshold
+            && map_ref->dy < -15);
+        const bool fallback_walk = (m_macro_attempts % 4 == 0);
+        if (mob_ahead || fallback_walk) {
+            if (m_cfg.nav_wall_detection && m_eyes.IsWallAhead()) {
+                Log("[NAV] Стіна/перешкода попереду → пропускаємо WalkForward", LogLevel::Debug);
+            } else if (m_eyes.IsGroundAhead()) {
+                // Моб прямо попереду → йдемо довше (700мс); fallback → 400мс
+                const int walk_ms = mob_ahead ? 700 : 400;
+                m_hands.WalkForward(walk_ms);
+                m_nav_prev_was_walk = true;
+                if (mob_ahead)
+                    Log("[MAP] Моб попереду (dy=" + std::to_string(map_ref->dy) +
+                        ") → WalkForward(" + std::to_string(walk_ms) + "мс)", LogLevel::Debug);
+                else
+                    Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) +
+                        " — підходимо до моба (мінімапа)");
+            }
+        }
+    }
+
+    // ── Fallback ротація / Patrol / Розвідка ─────────────────────────────────
     if (m_macro_attempts % 5 == 0 && minimap_dots.empty()) {
         m_hands.Delay(50);
-        // Чергуємо ліво/право щоб покривати більше площі
-        if ((m_macro_attempts / 5) % 2 == 0)
-            m_hands.RotateRight(350);
-        else
-            m_hands.RotateLeft(350);
         m_step_count++;
         m_stats.RecordTargetingFailure();
-        Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) + " — ротація (мінімапа порожня)");
+
+        // Patrol: якщо увімкнено і шукаємо довго → виконуємо крок патрулю
+        const bool patrol_ready = m_cfg.patrol_enabled
+            && !m_cfg.patrol_path.empty()
+            && m_macro_attempts >= m_cfg.patrol_trigger_attempts
+            && m_macro_attempts % 5 == 0;
+
+        if (patrol_ready) {
+            const auto& step = m_cfg.patrol_path[m_patrol_step_idx % (int)m_cfg.patrol_path.size()];
+            switch (step.dir) {
+                case Config::PatrolStep::Dir::Forward:
+                    m_hands.WalkForward(step.ms);
+                    m_nav_prev_was_walk = true;
+                    Log("[PATROL] Крок " + std::to_string(m_patrol_step_idx % (int)m_cfg.patrol_path.size() + 1) +
+                        "/" + std::to_string(m_cfg.patrol_path.size()) +
+                        " → Forward(" + std::to_string(step.ms) + "мс)");
+                    break;
+                case Config::PatrolStep::Dir::Back:
+                    m_hands.WalkBack(step.ms);
+                    Log("[PATROL] Крок " + std::to_string(m_patrol_step_idx % (int)m_cfg.patrol_path.size() + 1) +
+                        "/" + std::to_string(m_cfg.patrol_path.size()) +
+                        " → Back(" + std::to_string(step.ms) + "мс)");
+                    break;
+                case Config::PatrolStep::Dir::RotateLeft:
+                    m_hands.RotateLeft(step.ms);
+                    Log("[PATROL] Крок " + std::to_string(m_patrol_step_idx % (int)m_cfg.patrol_path.size() + 1) +
+                        "/" + std::to_string(m_cfg.patrol_path.size()) +
+                        " → RotateLeft(" + std::to_string(step.ms) + "мс)");
+                    break;
+                case Config::PatrolStep::Dir::RotateRight:
+                    m_hands.RotateRight(step.ms);
+                    Log("[PATROL] Крок " + std::to_string(m_patrol_step_idx % (int)m_cfg.patrol_path.size() + 1) +
+                        "/" + std::to_string(m_cfg.patrol_path.size()) +
+                        " → RotateRight(" + std::to_string(step.ms) + "мс)");
+                    break;
+            }
+            m_patrol_step_idx++;
+        } else {
+            // Звичайна fallback ротація: чергуємо ліво/право
+            if ((m_macro_attempts / 5) % 2 == 0)
+                m_hands.RotateRight(350);
+            else
+                m_hands.RotateLeft(350);
+            // Розвідка вперед кожні 15 спроб коли немає мобів і не patrol
+            if (!patrol_ready && m_macro_attempts % 15 == 0
+                && !m_nav_prev_was_walk && m_eyes.IsGroundAhead()) {
+                m_hands.WalkForward(1200);
+                m_nav_prev_was_walk = true;
+                Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) +
+                    " — розвідка вперед (мінімапа порожня)");
+            } else {
+                Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) +
+                    " — ротація (мінімапа порожня)");
+            }
+        }
     } else if (m_macro_attempts % 5 == 0) {
         m_stats.RecordTargetingFailure();
         Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) + " — шукаємо...");
@@ -545,25 +710,50 @@ void Brain::HandleAttacking() {
         return;
     }
 
-    if (m_approach_retarget_count < 3 &&
-        !m_first_attack &&
-        m_approach_entry_hp >= 90 &&
-        m_target.has_value() && m_target->hp >= m_approach_entry_hp - 5 &&
-        SecsSince(m_combat_watchdog_start) < 2.0 &&
-        SecsSince(m_approach_last_retarget) >= 1.0)
+    // Approach re-target: тільки якщо мінімапа показує інших мобів.
+    // Без цієї перевірки ESC+F2 в порожній зоні = втрата таргету → фейкове вбивство.
     {
-        // ESC скидає живу ціль — інакше /nexttarget (F2) може ігноруватись грою
-        m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-        m_hands.Delay(100);
-        m_hands.PressKeyboardKey(m_cfg.next_target_key);
-        m_hands.Send(150);
-        m_eyes.ResetTarget(); // примусово перевіряємо нову ціль на наступному тіку
-        m_approach_retarget_count++;
-        m_approach_last_retarget = Now();
-        Log("[ATTACKING] Re-target підхід #" + std::to_string(m_approach_retarget_count)
-            + " (entry_hp=" + std::to_string(m_approach_entry_hp)
-            + "% cur=" + std::to_string(m_target->hp) + "%)");
-        // не return — продовжуємо тік (атака/детекція таргету нижче)
+        auto approach_dots = m_eyes.DetectMinimap();
+        if (m_approach_retarget_count < 3 &&
+            !m_first_attack &&
+            m_approach_entry_hp >= 90 &&
+            m_target.has_value() && m_target->hp >= m_approach_entry_hp - 5 &&
+            SecsSince(m_combat_watchdog_start) < 2.0 &&
+            SecsSince(m_approach_last_retarget) >= 1.0 &&
+            !approach_dots.empty()) // є куди переключатись
+        {
+            // ESC скидає живу ціль — інакше /nexttarget (F2) може ігноруватись грою
+            m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+            m_hands.Delay(100);
+            m_hands.PressKeyboardKey(m_cfg.next_target_key);
+            m_hands.Send(150);
+            m_eyes.ResetTarget(); // примусово перевіряємо нову ціль на наступному тіку
+            m_approach_retarget_count++;
+            m_approach_last_retarget = Now();
+            Log("[ATTACKING] Re-target підхід #" + std::to_string(m_approach_retarget_count)
+                + " (entry_hp=" + std::to_string(m_approach_entry_hp)
+                + "% cur=" + std::to_string(m_target->hp) + "%, map="
+                + std::to_string(approach_dots.size()) + ")");
+            // не return — продовжуємо тік (атака/детекція таргету нижче)
+        }
+    }
+
+    // HP-stable detection: якщо HP моба не змінився 5с після першої атаки —
+    // моб недосяжний (застряг у текстурі / за стіною / вийшов з радіусу).
+    // Залишаємо таргет + просуваємо macro_idx щоб наступний цикл спробував інший макрос.
+    if (!m_first_attack && m_target.has_value() && m_target->hp > 0) {
+        if (m_target->hp != m_attack_last_target_hp) {
+            m_attack_last_target_hp = m_target->hp;
+            m_attack_hp_stable_since = Now();
+        } else if (SecsSince(m_attack_hp_stable_since) > 5.0) {
+            Log("[ATTACKING] HP стабільний 5с (моб недосяжний) → TARGETING + інший макрос",
+                LogLevel::Warning);
+            if (!m_cfg.target_macro_keys.empty())
+                m_macro_idx = (m_macro_idx + 1) % (int)m_cfg.target_macro_keys.size();
+            m_attack_was_unreachable = true; // наступний TARGETING дасть більше часу навігації
+            EnterState(State::Targeting);
+            return;
+        }
     }
 
     // Watchdog: >attack_watchdog секунд в атаці → примусово переходимо до лутингу
@@ -648,12 +838,12 @@ void Brain::HandleDead() {
 void Brain::HandleBuffing() {
     if (!m_hands.IsReady()) return;
 
-    // Очікуємо post-combat cooldown: не бафаємось поки поруч активний бій
+    // Safety: якщо вбивство сталося вже після входу в BUFFING (edge case) — виходимо.
+    // Основна перевірка cooldown відбувається в Process() ще до EnterState(Buffing).
     if (SecsSince(m_last_kill_time) < (double)m_cfg.buff_post_combat_cooldown) {
-        double remaining = m_cfg.buff_post_combat_cooldown - SecsSince(m_last_kill_time);
-        Log("[Buffs] Чекаємо cooldown " + std::to_string((int)remaining) + "с...", LogLevel::Debug);
-        m_hands.Delay(1000); // Delay додає подію в чергу → Send() не no-op
-        m_hands.Send();
+        Log("[Buffs] Бій щойно завершився → скасовуємо баф, чекаємо cooldown", LogLevel::Debug);
+        m_last_buff = Now() - std::chrono::seconds(m_cfg.buff_interval - 30);
+        EnterState(State::Idle);
         return;
     }
 

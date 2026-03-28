@@ -159,6 +159,13 @@ public:
     //    Оновлює внутрішній prev_gray щоразу при виклику.
     float GetMovementFlow() const;
 
+    // 4. Optical flow на мінімапі (185×165px ROI верхній правий кут):
+    //    Надійніший детектор застрягання ніж frame diff центрального вигляду —
+    //    текстура мінімапи зсувається разом з рухом персонажа.
+    //    Повертає mean displacement (пікс/тік); ~0.0 = персонаж не рухається.
+    //    Оновлює m_minimap_flow_prev_gray щоразу при виклику.
+    float GetMinimapFlow() const;
+
     void Open(const cv::Mat &bgr);
     // Fix #3: clone усунено — DetectFarNPCs() не використовується
     void Close()    { m_frame++; }
@@ -205,8 +212,9 @@ private:
     NPC::State DetectNPCState(const cv::Rect &rect) const;
 
     // ── Navigation state (mutable: оновлюються const методами) ──────────────
-    mutable cv::Mat m_nav_prev_frame; // попередній BGR кадр (IsCharacterMoving)
-    mutable cv::Mat m_nav_prev_gray;  // попередній grayscale (GetMovementFlow)
+    mutable cv::Mat m_nav_prev_frame;         // попередній BGR кадр (IsCharacterMoving)
+    mutable cv::Mat m_nav_prev_gray;          // попередній grayscale (GetMovementFlow)
+    mutable cv::Mat m_minimap_flow_prev_gray; // попередній grayscale мінімапи (GetMinimapFlow)
 
     // Позиція TargetStatusWnd (динамічна, читається з WindowsInfo.ini)
     // mutable: auto-калібрується в DetectTargetHPDirect() коли бар знайдено в іншому місці

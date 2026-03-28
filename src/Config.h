@@ -111,6 +111,19 @@ public:
     bool nav_flow_detection  = false; // Lucas-Kanade optical flow (experimental, +10мс/тік)
     int  nav_stuck_threshold = 2;     // скільки тіків "не рухаємось" поспіль → евакуаційна ротація
 
+    // [Patrol] — патруль по маршруту коли немає мобів
+    // Формат PatrolPath: кроки через кому. Кожен крок — літера+мілісекунди:
+    //   F = forward, B = back, L = rotate-left, R = rotate-right
+    //   Приклад: F1500,R500,F800,L300,F1000
+    struct PatrolStep {
+        enum class Dir { Forward, Back, RotateLeft, RotateRight };
+        Dir dir = Dir::Forward;
+        int ms  = 500;
+    };
+    bool patrol_enabled = false;
+    int  patrol_trigger_attempts = 30; // скільки спроб без мобів → старт patrol
+    std::vector<PatrolStep> patrol_path;
+
     // [Vision]
     bool use_robust_bar = true; // медіана 3 рядків замість середнього
 
@@ -120,6 +133,22 @@ public:
     int target_wnd_y = 0;            // TargetStatusWnd posY
     int target_wnd_w = 179;          // TargetStatusWnd width
     int target_wnd_h = 46;           // TargetStatusWnd height
+
+    // [MemReader] — читання пам'яті L2 процесу (Wine, /proc/PID/mem)
+    // Всі значення = 0 → вимкнено (використовується OpenCV детекція)
+    bool     mem_enabled     = false;
+    std::string mem_proc_name = "l2.exe"; // ім'я процесу для пошуку
+    uintptr_t mem_player_ptr  = 0;   // static offset від base l2.exe до pointer на PlayerObject
+    std::vector<uintptr_t> mem_ptr_chain; // pointer chain offsets (порожньо = пряма адреса)
+    uintptr_t mem_hp_off      = 0;
+    uintptr_t mem_max_hp_off  = 0;
+    uintptr_t mem_mp_off      = 0;
+    uintptr_t mem_max_mp_off  = 0;
+    uintptr_t mem_cp_off      = 0;
+    uintptr_t mem_max_cp_off  = 0;
+    uintptr_t mem_pos_x_off   = 0;
+    uintptr_t mem_pos_y_off   = 0;
+    uintptr_t mem_pos_z_off   = 0;
 
     // [Colors_*]
     ColorConfig colors;

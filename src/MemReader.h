@@ -1,0 +1,94 @@
+#pragma once
+#include <cstdint>
+#include <string>
+#include <vector>
+#include <optional>
+#include <sys/types.h>
+
+// ── MemReader ────────────────────────────────────────────────────────────────
+// Читає пам'ять процесу L2 (Wine) через process_vm_readv (Linux).
+// Не потребує root — достатньо того самого UID що і L2 процес.
+//
+// Як знайти offsets для свого клієнта:
+//   1. Запустити Cheat Engine під Wine:
+//      WINEPREFIX=~/.wine wine cheatengine.exe
+//   2. Приєднатись до процесу l2.exe
+//   3. Шукати значення HP як 4-byte integer → "First Scan"
+//   4. Отримати пошкодження → "Next Scan" (нове значення)
+//   5. Знайти статичний pointer: Rights click → "Find out what writes to..."
+//   6. Записати static addr + pointer offsets в [MemReader] секцію .ini
+//
+// Формат pointer chain в .ini:
+//   PlayerPtr  = 0x019B4A28   ← статична адреса в l2.exe (base + offset)
+//   PtrChain   = 0x10,0x44    ← chain offsets (порожньо якщо пряма адреса)
+//   HP_Offset  = 0x5C         ← offset від кінця chain до HP int32
+//
+class MemReader {
+public:
+    struct PlayerState {
+        int hp = -1, max_hp = -1;
+        int mp = -1, max_mp = -1;
+        int cp = -1, max_cp = -1;
+        float x = 0, y = 0, z = 0; // world coordinates
+        bool valid = false;
+    };
+
+    MemReader() = default;
+    ~MemReader() { Close(); }
+
+    // Знайти процес L2 і відкрити /proc/PID/mem
+    bool Open(const std::string& proc_name = "l2.exe");
+    void Close();
+    bool IsOpen() const { return m_pid > 0; }
+    pid_t GetPid() const { return m_pid; }
+    uintptr_t GetBase() const { return m_base; }
+
+    // Конфігурація offsets (з .ini)
+    struct Offsets {
+        uintptr_t player_ptr   = 0;  // static addr (відносно base l2.exe)
+        std::vector<uintptr_t> ptr_chain; // pointer chain offsets
+        uintptr_t hp_off       = 0;
+        uintptr_t max_hp_off   = 0;
+        uintptr_t mp_off       = 0;
+        uintptr_t max_mp_off   = 0;
+        uintptr_t cp_off       = 0;
+        uintptr_t max_cp_off   = 0;
+        uintptr_t pos_x_off    = 0;  // float
+        uintptr_t pos_y_off    = 0;
+        uintptr_t pos_z_off    = 0;
+        bool enabled = false;
+    };
+    void SetOffsets(const Offsets& off) { m_off = off; }
+    const Offsets& GetOffsets() const { return m_off; }
+
+    // Читаємо стан гравця (всі поля за один прохід)
+    PlayerState ReadPlayer() const;
+
+    // Низькорівневе читання довільного типу за абсолютною адресою
+    template<typename T>
+    std::optional<T> ReadAt(uintptr_t abs_addr) const {
+        T val{};
+        if (!ReadBytes(abs_addr, &val, sizeof(T))) return std::nullopt;
+        return val;
+    }
+
+    // Читання за offset від base
+    template<typename T>
+    std::optional<T> ReadOffset(uintptr_t offset) const {
+        return ReadAt<T>(m_base + offset);
+    }
+
+    // Слідуємо pointer chain: deref ptr → + off[0] → deref → + off[1] → ...
+    // Повертає фінальну адресу або 0 при помилці
+    uintptr_t ResolveChain(uintptr_t base_addr,
+                           const std::vector<uintptr_t>& chain) const;
+
+private:
+    pid_t     m_pid  = 0;
+    uintptr_t m_base = 0;   // base address l2.exe в адресному просторі процесу
+    Offsets   m_off;
+
+    bool ReadBytes(uintptr_t abs_addr, void* buf, size_t len) const;
+    static pid_t FindPid(const std::string& proc_name);
+    static uintptr_t FindModuleBase(pid_t pid, const std::string& module);
+};

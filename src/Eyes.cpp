@@ -219,7 +219,9 @@ std::optional<Eyes::Me> Eyes::DetectMe()
         return {};
     }
 
-    // Opt: бари знайдені й закешовані — конвертуємо тільки маленький ROI кожного бару
+    // Opt: бари знайдені й закешовані — конвертуємо тільки маленький ROI кожного бару.
+    // Scan rightmost pixel: фон бару (S≈153, V≈60) відфільтровується V_min=70 в INI.
+    // Білий текст (S=0) теж не матчить → знаходимо реальний правий край fill.
     auto calcBar = [&](const cv::Rect& bar_rect, const cv::Scalar& from, const cv::Scalar& to) {
         cv::Mat hsv_bar = HSVForROI(bar_rect);
         return m_use_robust_bar
@@ -767,6 +769,60 @@ float Eyes::GetMovementFlow() const {
     return count > 0 ? (total / count) * 2.0f : 0.0f;
 }
 
+float Eyes::GetMinimapFlow() const {
+    if (m_bgr.empty()) return 0.0f;
+
+    const int W = m_bgr.cols;
+    // Мінімапа ROI: верхній правий кут вікна
+    const cv::Rect mm_roi(W - m_minimap_roi_from_right, 0,
+                          m_minimap_roi_from_right, m_minimap_roi_height);
+    if (!IsRectInImage(m_bgr, mm_roi)) return 0.0f;
+
+    cv::Mat minimap_bgr = m_bgr(mm_roi);
+    cv::Mat gray;
+    cv::cvtColor(minimap_bgr, gray, cv::COLOR_BGR2GRAY);
+
+    if (m_minimap_flow_prev_gray.empty() ||
+        m_minimap_flow_prev_gray.size() != gray.size()) {
+        gray.copyTo(m_minimap_flow_prev_gray);
+        return 0.0f; // перший виклик
+    }
+
+    // Знаходимо характерні точки у попередньому кадрі мінімапи
+    std::vector<cv::Point2f> pts;
+    cv::goodFeaturesToTrack(m_minimap_flow_prev_gray, pts,
+                            /*maxCorners=*/40,
+                            /*qualityLevel=*/0.01,
+                            /*minDistance=*/5.0);
+
+    if (pts.size() < 4) {
+        // Замало точок (порожня мінімапа або однотонний фон) — зберігаємо і виходимо
+        gray.copyTo(m_minimap_flow_prev_gray);
+        return 0.0f;
+    }
+
+    // Lucas-Kanade pyramidal optical flow між двома кадрами мінімапи
+    std::vector<cv::Point2f> next_pts;
+    std::vector<uchar> status;
+    std::vector<float> err;
+    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 15, 0.03);
+    cv::calcOpticalFlowPyrLK(m_minimap_flow_prev_gray, gray, pts, next_pts,
+                              status, err, cv::Size(11, 11), 2, criteria);
+
+    float total = 0.0f;
+    int count = 0;
+    for (size_t i = 0; i < pts.size(); i++) {
+        if (!status[i]) continue;
+        const float dx = next_pts[i].x - pts[i].x;
+        const float dy = next_pts[i].y - pts[i].y;
+        total += std::sqrt(dx * dx + dy * dy);
+        count++;
+    }
+
+    gray.copyTo(m_minimap_flow_prev_gray);
+    return count > 0 ? (total / count) : 0.0f;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 int Eyes::CalcBarPercentValueRobust(
@@ -810,13 +866,13 @@ std::vector<Eyes::MinimapDot> Eyes::DetectMinimap() const
     else
         roi_bgr = m_bgr(cv::Rect(roi_x, roi_y, roi_w, roi_h));
 
-    // Шукаємо червоні точки (HSV: H=0-10 або 165-180, S>=180, V>=80)
+    // Шукаємо червоні точки (HSV: H=0-20 або 165-180, S>=80, V>=60)
     cv::Mat hsv;
     cv::cvtColor(roi_bgr, hsv, cv::COLOR_BGR2HSV);
 
     cv::Mat mask1, mask2, mask;
-    // S≥100: знижено з 180 — в підземеллях точки мобів мають нижчу насиченість
-    cv::inRange(hsv, cv::Scalar(  0, 100, 80), cv::Scalar( 10, 255, 255), mask1);
+    // S≥100, H upper=20: виміряно H=10-19 (1417px) >> H=0-9 (35px) у підземелля
+    cv::inRange(hsv, cv::Scalar(  0, 100, 80), cv::Scalar( 20, 255, 255), mask1);
     cv::inRange(hsv, cv::Scalar(165, 100, 80), cv::Scalar(180, 255, 255), mask2);
     cv::bitwise_or(mask1, mask2, mask);
 

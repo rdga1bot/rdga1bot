@@ -220,10 +220,38 @@ bool Config::Load(const std::string& path) {
     rotate_right  = StringToKeyboardKey(Get("Movement", "RotateRight", "Right"), Input::KeyboardKey::Right);
 
     // [Navigation]
-    nav_stuck_detection = GetBool("Navigation", "StuckDetection", nav_stuck_detection);
-    nav_wall_detection  = GetBool("Navigation", "WallDetection",  nav_wall_detection);
-    nav_flow_detection  = GetBool("Navigation", "FlowDetection",  nav_flow_detection);
-    nav_stuck_threshold = GetInt ("Navigation", "StuckThreshold", nav_stuck_threshold);
+    nav_stuck_detection     = GetBool("Navigation", "StuckDetection",       nav_stuck_detection);
+    nav_wall_detection      = GetBool("Navigation", "WallDetection",        nav_wall_detection);
+    nav_flow_detection      = GetBool("Navigation", "FlowDetection",        nav_flow_detection);
+    nav_stuck_threshold     = GetInt ("Navigation", "StuckThreshold",       nav_stuck_threshold);
+
+    // [Patrol]
+    patrol_enabled          = GetBool("Patrol", "PatrolEnabled",            patrol_enabled);
+    patrol_trigger_attempts = GetInt ("Patrol", "PatrolTriggerAttempts",    patrol_trigger_attempts);
+    {
+        const std::string raw = Get("Patrol", "PatrolPath", "");
+        patrol_path.clear();
+        // Парсимо "F1500,R500,L300,B200,..."
+        std::istringstream ss(raw);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            if (token.empty()) continue;
+            PatrolStep step;
+            char dir = (char)std::toupper((unsigned char)token[0]);
+            int ms = 0;
+            try { ms = std::stoi(token.substr(1)); } catch (...) { continue; }
+            if (ms <= 0) continue;
+            switch (dir) {
+                case 'F': step.dir = PatrolStep::Dir::Forward;     break;
+                case 'B': step.dir = PatrolStep::Dir::Back;        break;
+                case 'L': step.dir = PatrolStep::Dir::RotateLeft;  break;
+                case 'R': step.dir = PatrolStep::Dir::RotateRight; break;
+                default: continue;
+            }
+            step.ms = ms;
+            patrol_path.push_back(step);
+        }
+    }
 
     // [Vision]
     use_robust_bar = GetBool("Vision", "UseRobustBarDetection", use_robust_bar);
@@ -269,6 +297,32 @@ bool Config::Load(const std::string& path) {
                       << " height=" << target_wnd_h << "\n";
         } else {
             std::cerr << "[Config] WindowsInfoPath не знайдено: " << windows_info_path << "\n";
+        }
+    }
+
+    // [MemReader]
+    mem_enabled   = GetBool  ("MemReader", "Enabled",    mem_enabled);
+    mem_proc_name = Get      ("MemReader", "ProcName",   mem_proc_name);
+    mem_player_ptr  = (uintptr_t)std::stoul(Get("MemReader", "PlayerPtr",  "0"), nullptr, 16);
+    mem_hp_off      = (uintptr_t)std::stoul(Get("MemReader", "HP_Offset",  "0"), nullptr, 16);
+    mem_max_hp_off  = (uintptr_t)std::stoul(Get("MemReader", "MaxHP_Offset","0"), nullptr, 16);
+    mem_mp_off      = (uintptr_t)std::stoul(Get("MemReader", "MP_Offset",  "0"), nullptr, 16);
+    mem_max_mp_off  = (uintptr_t)std::stoul(Get("MemReader", "MaxMP_Offset","0"), nullptr, 16);
+    mem_cp_off      = (uintptr_t)std::stoul(Get("MemReader", "CP_Offset",  "0"), nullptr, 16);
+    mem_max_cp_off  = (uintptr_t)std::stoul(Get("MemReader", "MaxCP_Offset","0"), nullptr, 16);
+    mem_pos_x_off   = (uintptr_t)std::stoul(Get("MemReader", "PosX_Offset","0"), nullptr, 16);
+    mem_pos_y_off   = (uintptr_t)std::stoul(Get("MemReader", "PosY_Offset","0"), nullptr, 16);
+    mem_pos_z_off   = (uintptr_t)std::stoul(Get("MemReader", "PosZ_Offset","0"), nullptr, 16);
+    {
+        // PtrChain = 0x10,0x44,0x0C  (pointer chain offsets hex)
+        const std::string raw = Get("MemReader", "PtrChain", "");
+        mem_ptr_chain.clear();
+        std::istringstream ss(raw);
+        std::string tok;
+        while (std::getline(ss, tok, ',')) {
+            tok.erase(0, tok.find_first_not_of(" \t"));
+            if (!tok.empty())
+                mem_ptr_chain.push_back((uintptr_t)std::stoul(tok, nullptr, 16));
         }
     }
 

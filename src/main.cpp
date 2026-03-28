@@ -18,6 +18,7 @@
 #include "FPS.h"
 #include "Utils.h"
 #include "Intercept.h"
+#include "MemReader.h"
 
 // ─── Signal handling (збереження stats при Ctrl+C / kill) ──────────────────
 static std::function<void()> g_cleanup;
@@ -52,7 +53,8 @@ static std::string HSVSuggest(const cv::Mat& bar_bgr, const std::string& name) {
 }
 
 // Застосувати всі клавіші та налаштування з Config до Hands, Eyes, Brain
-static void ApplyConfig(const Config& cfg, Hands& hands, Eyes& eyes, Brain& brain) {
+static void ApplyConfig(const Config& cfg, Hands& hands, Eyes& eyes, Brain& brain,
+                        MemReader* mem = nullptr) {
     hands.m_next_target_key   = cfg.next_target_key;
     hands.m_target_macro_keys = cfg.target_macro_keys;
     hands.m_attack_keys       = cfg.attack_keys;
@@ -73,6 +75,26 @@ static void ApplyConfig(const Config& cfg, Hands& hands, Eyes& eyes, Brain& brai
     eyes.SetTargetWnd(cfg.target_wnd_x, cfg.target_wnd_y, cfg.target_wnd_w, cfg.target_wnd_h);
 
     brain.SetLogLevel(static_cast<Brain::LogLevel>(cfg.log_level));
+
+    // MemReader: оновлюємо offsets якщо передано
+    if (mem && cfg.mem_enabled) {
+        MemReader::Offsets off;
+        off.enabled      = true;
+        off.player_ptr   = cfg.mem_player_ptr;
+        off.ptr_chain    = cfg.mem_ptr_chain;
+        off.hp_off       = cfg.mem_hp_off;
+        off.max_hp_off   = cfg.mem_max_hp_off;
+        off.mp_off       = cfg.mem_mp_off;
+        off.max_mp_off   = cfg.mem_max_mp_off;
+        off.cp_off       = cfg.mem_cp_off;
+        off.max_cp_off   = cfg.mem_max_cp_off;
+        off.pos_x_off    = cfg.mem_pos_x_off;
+        off.pos_y_off    = cfg.mem_pos_y_off;
+        off.pos_z_off    = cfg.mem_pos_z_off;
+        mem->SetOffsets(off);
+        if (!mem->IsOpen())
+            mem->Open(cfg.mem_proc_name);
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -114,8 +136,9 @@ int main(int argc, char* argv[]) {
         Capture  capture;
         FPS<100> fps;
         Dashboard dashboard;
+        MemReader mem_reader;
 
-        ApplyConfig(cfg, hands, eyes, brain);
+        ApplyConfig(cfg, hands, eyes, brain, &mem_reader);
 
         // Підключаємо лог-callback до Dashboard
         if (use_tui) {
@@ -276,6 +299,10 @@ int main(int argc, char* argv[]) {
             // ─── Обробка ───────────────────────────────────────────────
             hands.SetWindowRect({cached_rect.x, cached_rect.y, cached_rect.width, cached_rect.height});
             eyes.Open(image.value());
+            // Memory Reading: оновлюємо стан гравця з пам'яті (якщо увімкнено)
+            if (cfg.mem_enabled && mem_reader.IsOpen()) {
+                brain.SetMemPlayerState(mem_reader.ReadPlayer());
+            }
             brain.Process(cfg.debug && !use_tui);
             eyes.Close();
 

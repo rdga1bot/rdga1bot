@@ -8,6 +8,7 @@
 #include "Config.h"
 #include "Stats.h"
 #include "Notify.h"
+#include "MemReader.h"
 
 class Brain {
 public:
@@ -30,6 +31,10 @@ public:
 
     // Hot-reload конфігурації без перезапуску
     void ReloadConfig(const Config& new_cfg);
+
+    // Memory Reading: оновлення стану гравця з пам'яті (викликається з main loop)
+    void SetMemPlayerState(const MemReader::PlayerState& s) { m_mem_player = s; }
+    const MemReader::PlayerState& GetMemPlayerState() const { return m_mem_player; }
 
     // Рівень логування
     void SetLogLevel(LogLevel level) { m_min_log_level = level; }
@@ -117,6 +122,19 @@ private:
     // ── Navigation: obstacle detection ───────────────────────────────────────
     int  m_walk_stuck_count  = 0;    // скільки тіків поспіль не рухались після WalkForward
     bool m_nav_prev_was_walk = false; // попередній тік виконав WalkForward → перевіряємо рух
+    int  m_nav_stuck_recoveries = 0; // загальний лічильник відновлень → чергує L/R незалежно від macro_attempts
+
+    // Minimap optical flow stuck detection
+    TP   m_minimap_low_flow_since{};  // коли почався period низького flow (0 = не активний)
+    bool m_minimap_flow_stuck = false; // чи вже тригернули escape по flow цього разу
+
+    // Unreachable mob detection: якщо HP-stable спрацював (моб недосяжний) →
+    // у наступному TARGETING циклі навігація отримує більше часу до першого макросу
+    bool m_attack_was_unreachable = false;
+
+    // Patrol
+    int  m_patrol_step_idx  = 0;    // поточний крок патрулю
+    bool m_patrol_active    = false; // зараз виконується крок патрулю
 
     // DetectMe failure counter (для WARNING при зависанні)
     int m_detect_me_fail_count = 0;
@@ -124,6 +142,9 @@ private:
     int m_not_ready_count = 0;
     // Heartbeat tick counter
     int m_heartbeat_tick = 0;
+
+    // Memory Reading: стан гравця з пам'яті (оновлюється з main loop кожен тік)
+    MemReader::PlayerState m_mem_player;
 
     // Лог з рівнем (рівень за замовчуванням — Info)
     void Log(const std::string& msg, LogLevel level = LogLevel::Info);

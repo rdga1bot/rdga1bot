@@ -42,6 +42,7 @@ SRCS="
   $SRC/Capture_Linux.cpp
   $SRC/Intercept.cpp
   $SRC/Intercept_Linux.cpp
+  $SRC/MemReader.cpp
 "
 
 echo "[1/2] Компіляція..."
