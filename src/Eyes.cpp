@@ -632,6 +632,119 @@ bool Eyes::IsGroundAhead() const {
     return (mean[0] + mean[1] + mean[2]) / 3.0 > 30.0;
 }
 
+// ── Навігація: детекція перешкод ─────────────────────────────────────────────
+
+bool Eyes::IsCharacterMoving() const {
+    if (m_bgr.empty()) return true; // безпечний дефолт
+
+    // ROI: центральна ігрова зона, уникаємо UI
+    // Вікно ~1366×768: відрізаємо верхні 150px (бари/мінімапа) + нижні 200px (хотбар/чат)
+    // та ліві 200px і праві 200px (UI панелі)
+    const int W = m_bgr.cols, H = m_bgr.rows;
+    const int rx = std::min(200, W / 6);
+    const int ry = std::min(150, H / 5);
+    const int rw = std::max(100, W - rx * 2);
+    const int rh = std::max(100, H - ry - std::min(200, H / 4));
+    if (rx + rw > W || ry + rh > H || rw < 50 || rh < 50) return true;
+
+    cv::Mat curr = m_bgr(cv::Rect(rx, ry, rw, rh));
+
+    if (m_nav_prev_frame.empty() || m_nav_prev_frame.size() != curr.size()) {
+        curr.copyTo(m_nav_prev_frame);
+        return true; // перший виклик — вважаємо що рухаємось
+    }
+
+    cv::Mat diff;
+    cv::absdiff(curr, m_nav_prev_frame, diff);
+    const double mean_diff = cv::mean(diff)[0]; // середня різниця пікселів (0-255)
+    curr.copyTo(m_nav_prev_frame);
+
+    // > 3.0 = помітний рух на сцені
+    return mean_diff > 3.0;
+}
+
+bool Eyes::IsWallAhead() const {
+    if (m_bgr.empty()) return false;
+
+    // ROI: центр екрану — куди дивиться персонаж при ходьбі
+    // Уникаємо верхній UI (y<150) і нижній UI (hotbar/chat)
+    const int W = m_bgr.cols, H = m_bgr.rows;
+    const int cx = W / 2;
+    const int cy = H / 2;
+    const int rw = std::min(300, W / 5);
+    const int rh = std::min(200, H / 4);
+    const int rx = cx - rw / 2;
+    const int ry = cy - rh / 4; // трохи вище центру — де з'являється стіна попереду
+    if (rx < 0 || ry < 0 || rx + rw > W || ry + rh > H) return false;
+
+    cv::Mat gray;
+    cv::cvtColor(m_bgr(cv::Rect(rx, ry, rw, rh)), gray, cv::COLOR_BGR2GRAY);
+
+    // Sobel X (вертикальні краї) + Sobel Y (горизонтальні краї)
+    cv::Mat sobel_x, sobel_y, abs_x, abs_y;
+    cv::Sobel(gray, sobel_x, CV_16S, 1, 0, 3);
+    cv::Sobel(gray, sobel_y, CV_16S, 0, 1, 3);
+    cv::convertScaleAbs(sobel_x, abs_x);
+    cv::convertScaleAbs(sobel_y, abs_y);
+
+    const double mean_v = cv::mean(abs_x)[0]; // вертикальні краї
+    const double mean_h = cv::mean(abs_y)[0]; // горизонтальні краї
+
+    // Стіна попереду: вертикальних ребер значно більше ніж горизонтальних
+    // і загальна кількість ребер висока (не просто порожній коридор)
+    return (mean_v > mean_h * 1.5) && (mean_v > 12.0);
+}
+
+float Eyes::GetMovementFlow() const {
+    if (m_bgr.empty()) return 0.0f;
+
+    // Зменшуємо розмір для швидкості (~4x швидше LK на half-res)
+    cv::Mat small;
+    cv::resize(m_bgr, small, {}, 0.5, 0.5, cv::INTER_LINEAR);
+
+    cv::Mat gray;
+    cv::cvtColor(small, gray, cv::COLOR_BGR2GRAY);
+
+    if (m_nav_prev_gray.empty() || m_nav_prev_gray.size() != gray.size()) {
+        gray.copyTo(m_nav_prev_gray);
+        return 0.0f; // перший виклик
+    }
+
+    // Сітка точок у центральній ігровій зоні (half-res координати)
+    // Вікно 683×384 (half 1366×768): уникаємо верхні 75px + нижні 100px + бокові 100px
+    std::vector<cv::Point2f> pts;
+    const int step = 40; // крок сітки (в half-res пікселях)
+    for (int y = 75; y < 285; y += step)
+        for (int x = 100; x < 580; x += step)
+            pts.push_back({(float)x, (float)y});
+
+    if (pts.empty()) { gray.copyTo(m_nav_prev_gray); return 0.0f; }
+
+    // Lucas-Kanade pyramidal optical flow
+    std::vector<cv::Point2f> next_pts;
+    std::vector<uchar> status;
+    std::vector<float> err;
+    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 20, 0.03);
+    cv::calcOpticalFlowPyrLK(m_nav_prev_gray, gray, pts, next_pts,
+                              status, err, cv::Size(15, 15), 2, criteria);
+
+    float total = 0.0f;
+    int count = 0;
+    for (size_t i = 0; i < pts.size(); i++) {
+        if (!status[i]) continue;
+        const float dx = next_pts[i].x - pts[i].x;
+        const float dy = next_pts[i].y - pts[i].y;
+        total += std::sqrt(dx * dx + dy * dy);
+        count++;
+    }
+
+    gray.copyTo(m_nav_prev_gray);
+    // Масштабуємо back до full-res еквіваленту (*2) для інтуїтивного порогу
+    return count > 0 ? (total / count) * 2.0f : 0.0f;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 int Eyes::CalcBarPercentValueRobust(
     const cv::Mat &bar,
     const cv::Scalar &from_color,

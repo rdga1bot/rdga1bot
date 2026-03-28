@@ -114,6 +114,10 @@ private:
     bool m_in_death = false;
     int m_dead_phase = 0;
 
+    // ── Navigation: obstacle detection ───────────────────────────────────────
+    int  m_walk_stuck_count  = 0;    // скільки тіків поспіль не рухались після WalkForward
+    bool m_nav_prev_was_walk = false; // попередній тік виконав WalkForward → перевіряємо рух
+
     // DetectMe failure counter (для WARNING при зависанні)
     int m_detect_me_fail_count = 0;
     // IsReady=false counter в TARGETING (для WARNING при зависанні Input thread)

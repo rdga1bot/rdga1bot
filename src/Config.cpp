@@ -219,6 +219,12 @@ bool Config::Load(const std::string& path) {
     rotate_left   = StringToKeyboardKey(Get("Movement", "RotateLeft",  "Left"),  Input::KeyboardKey::Left);
     rotate_right  = StringToKeyboardKey(Get("Movement", "RotateRight", "Right"), Input::KeyboardKey::Right);
 
+    // [Navigation]
+    nav_stuck_detection = GetBool("Navigation", "StuckDetection", nav_stuck_detection);
+    nav_wall_detection  = GetBool("Navigation", "WallDetection",  nav_wall_detection);
+    nav_flow_detection  = GetBool("Navigation", "FlowDetection",  nav_flow_detection);
+    nav_stuck_threshold = GetInt ("Navigation", "StuckThreshold", nav_stuck_threshold);
+
     // [Vision]
     use_robust_bar = GetBool("Vision", "UseRobustBarDetection", use_robust_bar);
     windows_info_path = Get("Vision", "WindowsInfoPath", windows_info_path);

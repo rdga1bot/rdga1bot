@@ -105,6 +105,12 @@ public:
     // [Stats]
     int auto_save_kills = 50; // авто-збереження stats кожні N kills (0 = вимкнено)
 
+    // [Navigation] — детекція перешкод та застрягання
+    bool nav_stuck_detection = true;  // frame diff: детекція "не рухаємось" після WalkForward
+    bool nav_wall_detection  = false; // Sobel: детекція стін попереду (experimental)
+    bool nav_flow_detection  = false; // Lucas-Kanade optical flow (experimental, +10мс/тік)
+    int  nav_stuck_threshold = 2;     // скільки тіків "не рухаємось" поспіль → евакуаційна ротація
+
     // [Vision]
     bool use_robust_bar = true; // медіана 3 рядків замість середнього
 

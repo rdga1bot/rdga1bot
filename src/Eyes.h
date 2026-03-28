@@ -143,6 +143,22 @@ public:
     // Перевірка: чи не обрив/стіна попереду (за яскравістю нижньої зони)
     bool IsGroundAhead() const;
 
+    // ── Навігація: детекція перешкод ─────────────────────────────────────────
+    // 1. Frame diff: true = рухаємось (різниця кадрів > порогу).
+    //    Оновлює внутрішній prev_frame щоразу при виклику.
+    //    Викликати ПЕРЕД WalkForward (зберегти pre-walk кадр), потім ПІСЛЯ (порівняти).
+    bool  IsCharacterMoving() const;
+
+    // 2. Sobel vertical edges в центрі екрану:
+    //    true = велика кількість вертикальних ребер → можлива стіна попереду.
+    //    Experimental: false positives на NPC, ефектах, колонах.
+    bool  IsWallAhead() const;
+
+    // 3. Lucas-Kanade optical flow (mean magnitude, пікселів/тік):
+    //    > 2.0 = рухаємось; ~0.0 = стоїмо або застрягли.
+    //    Оновлює внутрішній prev_gray щоразу при виклику.
+    float GetMovementFlow() const;
+
     void Open(const cv::Mat &bgr);
     // Fix #3: clone усунено — DetectFarNPCs() не використовується
     void Close()    { m_frame++; }
@@ -187,6 +203,10 @@ private:
     int  DetectTargetHPDirect() const; // reads HP% from fixed position, -1 = no bar
     std::vector<std::vector<cv::Point>> FindMyBarContours(const cv::Mat &mask) const;
     NPC::State DetectNPCState(const cv::Rect &rect) const;
+
+    // ── Navigation state (mutable: оновлюються const методами) ──────────────
+    mutable cv::Mat m_nav_prev_frame; // попередній BGR кадр (IsCharacterMoving)
+    mutable cv::Mat m_nav_prev_gray;  // попередній grayscale (GetMovementFlow)
 
     // Позиція TargetStatusWnd (динамічна, читається з WindowsInfo.ini)
     // mutable: auto-калібрується в DetectTargetHPDirect() коли бар знайдено в іншому місці

@@ -90,6 +90,8 @@ void Brain::EnterState(State s) {
             m_pokemon_macro_fired = false;
             m_dead_target_esc_count = 0;
             m_dead_cycles_total = 0;
+            m_walk_stuck_count = 0;
+            m_nav_prev_was_walk = false;
             break;
 
         case State::Attacking:
@@ -388,11 +390,50 @@ void Brain::HandleTargeting() {
         Log("[Pokemon] макрос", LogLevel::Debug);
     }
 
+    // ── Navigation: stuck detection ──────────────────────────────────────────
+    // Перевіряємо рух ПІСЛЯ попереднього WalkForward.
+    // IsCharacterMoving() завжди викликаємо для оновлення prev_frame.
+    // Optical flow — тільки якщо FlowDetection=true (додатково +10мс/тік).
+    if (m_cfg.nav_stuck_detection) {
+        const bool is_moving = m_eyes.IsCharacterMoving();
+        const float flow = m_cfg.nav_flow_detection ? m_eyes.GetMovementFlow() : -1.0f;
+
+        if (m_nav_prev_was_walk) {
+            m_nav_prev_was_walk = false;
+            const bool actually_moved = is_moving || (flow > 1.5f);
+            if (!actually_moved) {
+                m_walk_stuck_count++;
+                Log("[NAV] Не рухаємось після WalkForward ×" + std::to_string(m_walk_stuck_count)
+                    + (flow >= 0 ? " flow=" + std::to_string(flow).substr(0,4) : ""),
+                    LogLevel::Debug);
+                if (m_walk_stuck_count >= m_cfg.nav_stuck_threshold) {
+                    m_walk_stuck_count = 0;
+                    // Чергуємо напрямок обходу (лівий/правий залежно від парності спроб)
+                    if ((m_macro_attempts / 4) % 2 == 0) {
+                        m_hands.RotateRight(600);
+                        Log("[NAV] Застряг → RotateRight(600мс) для обходу перешкоди");
+                    } else {
+                        m_hands.RotateLeft(600);
+                        Log("[NAV] Застряг → RotateLeft(600мс) для обходу перешкоди");
+                    }
+                }
+            } else {
+                m_walk_stuck_count = 0;
+                if (flow > 0) Log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4),
+                                  LogLevel::Debug);
+            }
+        }
+    }
+
     // Якщо мінімапа бачить моба але F2 не знаходить — підходимо вперед кожні 4 спроби
     // IsGroundAhead() перевіряє щоб не впасти в обрив
+    // IsWallAhead() (якщо WallDetection=true) перевіряє стіни через Sobel edges
     if (!minimap_dots.empty() && m_macro_attempts % 4 == 0) {
-        if (m_eyes.IsGroundAhead()) {
+        if (m_cfg.nav_wall_detection && m_eyes.IsWallAhead()) {
+            Log("[NAV] Стіна/перешкода попереду → пропускаємо WalkForward", LogLevel::Debug);
+        } else if (m_eyes.IsGroundAhead()) {
             m_hands.WalkForward(400); // 400мс вперед до моба
+            m_nav_prev_was_walk = true; // наступний тік перевіримо чи рухались
             Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) + " — підходимо до моба (мінімапа)");
         }
     }
