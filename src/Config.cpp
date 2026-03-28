@@ -158,8 +158,9 @@ bool Config::Load(const std::string& path) {
     sweep_key = StringToKeyboardKey(Get("Attack", "SweepKey", "F4"), Input::KeyboardKey::F4);
 
     // [Loot]
-    loot_key = StringToKeyboardKey(Get("Loot", "LootKey", "F5"), Input::KeyboardKey::F5);
-    loot_count = GetInt("Loot", "LootCount", loot_count);
+    loot_key     = StringToKeyboardKey(Get("Loot", "LootKey", "F5"), Input::KeyboardKey::F5);
+    loot_count   = GetInt ("Loot", "LootCount",   loot_count);
+    loot_enabled = GetBool("Loot", "LootEnabled", loot_enabled);
 
     // [Potions]
     hp_key = StringToKeyboardKey(Get("Potions", "HP_Key", "F6"), Input::KeyboardKey::F6);
@@ -170,6 +171,7 @@ bool Config::Load(const std::string& path) {
     cp_threshold = GetInt("Potions", "CP_Threshold", cp_threshold);
 
     // [Buffs]
+    buff_enabled = GetBool("Buffs", "BuffEnabled", buff_enabled);
     auto bk = GetKeys("Buffs", "BuffKeys");
     if (!bk.empty()) buff_keys = bk;
     buff_interval             = GetInt ("Buffs", "BuffInterval",            buff_interval);

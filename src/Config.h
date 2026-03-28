@@ -67,6 +67,7 @@ public:
     // [Loot]
     Input::KeyboardKey loot_key = Input::KeyboardKey::F5;
     int loot_count = 10;
+    bool loot_enabled = true; // false = пропустити очікування авто-лута, йти одразу до TARGETING
 
     // [Potions]
     Input::KeyboardKey hp_key = Input::KeyboardKey::F6;
@@ -77,6 +78,7 @@ public:
     int cp_threshold = 90;
 
     // [Buffs]
+    bool buff_enabled              = true;  // false = не бафатись взагалі
     std::vector<Input::KeyboardKey> buff_keys;
     int  buff_interval             = 900;  // секунди між перебафами (15 хв)
     bool buff_use_altb             = false; // ALT+B + mouse clicks замість buff_keys

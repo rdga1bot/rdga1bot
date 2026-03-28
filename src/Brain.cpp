@@ -187,9 +187,10 @@ void Brain::Process(bool debug) {
         CheckPotions(me);
     }
 
-    // Перевірка часу бафів: тільки в IDLE/TARGETING + інтервал минув
+    // Перевірка часу бафів: тільки в IDLE/TARGETING + інтервал минув + BuffEnabled=true
     // Post-combat cooldown перевіряється всередині HandleBuffing() (чекає там)
-    if ((m_state == State::Idle || m_state == State::Targeting) &&
+    if (m_cfg.buff_enabled &&
+        (m_state == State::Idle || m_state == State::Targeting) &&
         (m_cfg.buff_use_altb || !m_cfg.buff_keys.empty()) &&
         SecsSince(m_last_buff) >= (double)m_cfg.buff_interval) {
         EnterState(State::Buffing);
@@ -202,10 +203,13 @@ void Brain::Process(bool debug) {
     // Heartbeat: кожні 5с виводимо стан для діагностики зависань
     m_heartbeat_tick++;
     if (m_heartbeat_tick % 50 == 1) {
+        std::string buff_info = !m_cfg.buff_enabled
+            ? "buff=ВИМК"
+            : "buff_in=" + std::to_string((int)(m_cfg.buff_interval - SecsSince(m_last_buff))) + "с";
         Log("[HB] State=" + std::string(StateName(m_state)) +
             " HP=" + std::to_string(me.hp) +
             " ready=" + std::string(m_hands.IsReady() ? "Y" : "N") +
-            " buff_in=" + std::to_string((int)(m_cfg.buff_interval - SecsSince(m_last_buff))) + "с");
+            " " + buff_info);
     }
 
     // Диспетч до обробника стану
@@ -548,15 +552,17 @@ void Brain::HandleLooting() {
             Log("[STATS] Авто-збереження (" + std::to_string(m_stats.kills) + " kills)");
         }
 
-        // ESC — знімаємо мертвий таргет; гра auto-loot за 300ms
-        m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-        m_hands.Delay(300);
-        m_hands.Send();
-        m_looting_issued = true;
-        return;
+        if (m_cfg.loot_enabled) {
+            // ESC — знімаємо мертвий таргет; гра auto-loot за 300ms
+            m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+            m_hands.Delay(300);
+            m_hands.Send();
+            m_looting_issued = true;
+            return;
+        }
+        // loot_enabled=false: одразу до таргетингу без очікування авто-лута
     }
 
-    // Одразу до таргетингу наступного моба
     EnterState(State::Targeting);
 }
 
