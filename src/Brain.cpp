@@ -209,14 +209,18 @@ void Brain::Process(bool debug) {
         CheckPotions(me);
     }
 
-    // Перевірка часу бафів: тільки в IDLE/TARGETING + інтервал минув + cooldown пройшов
-    // Post-combat cooldown перевіряємо ТУТ — не входимо в BUFFING поки є активний бій.
-    // Якщо cooldown не пройшов (є моби поряд) — продовжуємо атакувати/таргетити нормально.
+    // Перевірка часу бафів: тільки в TARGETING + інтервал минув + N спроб без мобів
+    // Post-combat cooldown: замість SecsSince(last_kill) використовуємо m_macro_attempts
+    // (кількість consecutive targeting спроб без знахідки) — proxy для "мобів немає N сек".
+    // На активних спотах SecsSince(last_kill) ніколи не досягає cooldown → баф не відбувається.
+    // m_macro_attempts скидається в EnterState(Targeting), тому N спроб = час без мобів.
+    const int buff_empty_attempts =
+        (int)(m_cfg.buff_post_combat_cooldown * 1000.0 / 150.0); // 150мс/спроба
     if (m_cfg.buff_enabled &&
-        (m_state == State::Idle || m_state == State::Targeting) &&
+        m_state == State::Targeting &&
         (m_cfg.buff_use_altb || !m_cfg.buff_keys.empty()) &&
         SecsSince(m_last_buff) >= (double)m_cfg.buff_interval &&
-        SecsSince(m_last_kill_time) >= (double)m_cfg.buff_post_combat_cooldown) {
+        m_macro_attempts >= buff_empty_attempts) {
         EnterState(State::Buffing);
         return;
     }
@@ -456,14 +460,17 @@ void Brain::HandleTargeting() {
     // ── Navigation: stuck detection ──────────────────────────────────────────
     // Перевіряємо рух ПІСЛЯ попереднього WalkForward.
     // IsCharacterMoving() завжди викликаємо для оновлення prev_frame.
-    // Optical flow — тільки якщо FlowDetection=true (додатково +10мс/тік).
+    // GetMinimapFlow() — тільки якщо FlowDetection=true, і тільки після WalkForward
+    // (flow=0 при стоячому таргетингу = норма, не ознака застрягання!).
     if (m_cfg.nav_stuck_detection) {
         const bool is_moving = m_eyes.IsCharacterMoving();
-        const float flow = m_cfg.nav_flow_detection ? m_eyes.GetMovementFlow() : -1.0f;
 
         if (m_nav_prev_was_walk) {
             m_nav_prev_was_walk = false;
-            const bool actually_moved = is_moving || (flow > 1.5f);
+            // Три незалежні сигнали руху: frame diff, full-frame LK, minimap LK
+            const float flow    = m_cfg.nav_flow_detection ? m_eyes.GetMovementFlow()   : -1.0f;
+            const float mm_flow = m_cfg.nav_flow_detection ? m_eyes.GetMinimapFlow()    : -1.0f;
+            const bool actually_moved = is_moving || (flow > 1.5f) || (mm_flow > 0.3f);
             if (!actually_moved) {
                 m_walk_stuck_count++;
                 Log("[NAV] Не рухаємось після WalkForward ×" + std::to_string(m_walk_stuck_count)
@@ -495,43 +502,6 @@ void Brain::HandleTargeting() {
                 if (flow > 0) Log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4),
                                   LogLevel::Debug);
             }
-        }
-    }
-
-    // ── Minimap optical flow: детекція справжнього застрягання ──────────────
-    // Якщо на мінімапі є моби але flow≈0 протягом 2с → персонаж стоїть на місці
-    // (не рухається навіть після WalkForward команд) → тригеримо escape-поворот.
-    // Надійніше ніж frame diff центрального вигляду (одноманітні текстури підземель).
-    if (m_cfg.nav_flow_detection) {
-        const float mm_flow = m_eyes.GetMinimapFlow();
-        const bool has_mobs = !minimap_dots.empty();
-
-        if (has_mobs && mm_flow < 0.3f) {
-            if (m_minimap_low_flow_since == TP{}) {
-                m_minimap_low_flow_since = Now(); // почали рахувати
-                m_minimap_flow_stuck = false;
-            } else if (!m_minimap_flow_stuck && SecsSince(m_minimap_low_flow_since) >= 2.0) {
-                // 2с нульового flow з мобами на мінімапі → справжнє застрягання
-                m_minimap_flow_stuck = true;
-                m_minimap_low_flow_since = TP{}; // скидаємо таймер
-                // Прогресивний escape (той самий механізм що й frame-diff stuck)
-                const int rotation_ms = std::min(900 + (m_nav_stuck_recoveries / 2) * 450, 1800);
-                m_hands.WalkBack(300);
-                if (m_nav_stuck_recoveries % 2 == 0)
-                    m_hands.RotateRight(rotation_ms);
-                else
-                    m_hands.RotateLeft(rotation_ms);
-                m_hands.WalkForward(500);
-                m_nav_prev_was_walk = true;
-                m_nav_stuck_recoveries++;
-                Log("[NAV] Flow-stuck: flow=" + std::to_string(mm_flow).substr(0, 4) +
-                    " 2с → WalkBack + Rotate(" + std::to_string(rotation_ms) + "мс)");
-            }
-        } else {
-            // flow є або немає мобів → скидаємо таймер
-            if (m_minimap_low_flow_since != TP{})
-                m_minimap_low_flow_since = TP{};
-            m_minimap_flow_stuck = false;
         }
     }
 

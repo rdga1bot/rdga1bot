@@ -120,7 +120,7 @@ TARGETING → ATTACKING → LOOTING → TARGETING (цикл)
 **DEAD:** Grace 10с при старті, 30с після respawn; HP=0 → 3 тіки debounce
 
 **BUFFING:**
-- Тригер: тільки в IDLE/TARGETING + `SecsSince(last_buff) >= buff_interval` **+ `SecsSince(last_kill_time) >= post_combat_cooldown`** — обидві умови перевіряються в `Process()` до входу в BUFFING. Якщо cooldown не пройшов (є моби поряд/нещодавній kill) → бот продовжує атакувати, в BUFFING не входить.
+- Тригер: тільки в TARGETING + `SecsSince(last_buff) >= buff_interval` **+ `m_macro_attempts >= N`** де `N = post_combat_cooldown * 1000 / 150` (кількість consecutive targeting спроб ≈ секунди без мобів). Умови перевіряються в `Process()` до входу в BUFFING. На активних спотах kills кожні 2-5с → `SecsSince(last_kill)` ніколи не сягало cooldown → баф не відбувався. m_macro_attempts вимірює реальний "порожній" час.
 - `buff_use_altb=true`: ALT+B → 1500мс → знайти "Баффер" (template або координати) → 800мс → знайти "tty" → 1с → ALT+B (закриває вікно)
   - **Template matching**: `buff_tab.png` + `buff_profile.png` в папці бота — якщо є, використовуються автоматично
   - **Fallback**: `BuffTabX/Y` + `BuffProfileX/Y` якщо шаблони не знайдено або не збіглися (threshold 0.75)
@@ -354,7 +354,7 @@ PosZ_Offset  = 0x0
 | `Debug`             | `[General]`   | `false` | `false` → не зберігає debug PNG кадри. |
 | `LogLevel`          | `[General]`   | `NONE` | `NONE` → мовчазний режим. |
 | `StuckDetection`    | `[Navigation]`| `true`/`false` | `false` → вимкнути frame-diff stuck detection. |
-| `FlowDetection`     | `[Navigation]`| `true`/`false` | `true` → GetMinimapFlow() LK flow на мінімапі: flow<0.3 2с → escape. Надійніше у підземеллях. |
+| `FlowDetection`     | `[Navigation]`| `true`/`false` | `true` → GetMinimapFlow() як третій сигнал руху після WalkForward (разом з IsCharacterMoving + GetMovementFlow). Надійніше у підземеллях з одноманітними текстурами. |
 | `WallDetection`     | `[Navigation]`| `false` | `true` → Sobel wall detection (experimental). |
 | `PatrolEnabled`     | `[Patrol]`    | `false` | `true` → патруль по PatrolPath коли мінімапа порожня N спроб. |
 | `MemReader.Enabled` | `[MemReader]` | `false` | `true` → читати HP/MP/CP/XYZ з пам'яті Wine процесу замість OpenCV. Потребує правильних offsets. |
@@ -717,6 +717,8 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **MemReader (2026-03-29)**: `src/MemReader.cpp` — читання HP/MP/CP/XYZ з Wine L2 процесу через `process_vm_readv` (без root). `[MemReader]` секція в .ini з hex offsets. При `Enabled=true` значення з пам'яті перекривають OpenCV детекцію. ✓
 - **GetMinimapFlow() optical flow (2026-03-29)**: Lucas-Kanade на мінімапі ROI (185×165px) замість повного кадру. `goodFeaturesToTrack` + `calcOpticalFlowPyrLK` між кадрами мінімапи. flow<0.3 протягом 2с при наявних мобах на мінімапі → escape rotation. Надійніше ніж frame diff центру (підземелля мають одноманітні текстури). `FlowDetection=true` в .ini. ✓
 - **Buff cooldown у Process() (2026-03-29)**: cooldown перевіряється в `Process()` до `EnterState(Buffing)` — бот не входить в BUFFING якщо є активний бій (nещодавній kill). Прибрано blocking 1с×20с wait з `HandleBuffing()`. Більше ніяких `[Buffs] Чекаємо cooldown 19с...` з мобами поряд. ✓
+- **Buff trigger: SecsSince→m_macro_attempts (2026-03-29)**: `SecsSince(last_kill_time) >= cooldown` ніколи не виконувалась на активних спотах (kills кожні 2-5с, cooldown 10с → постійний reset). Замінено на `m_macro_attempts >= (int)(cooldown * 1000/150)` — proxy "N consecutive targeting attempts without mob". m_macro_attempts=0 при EnterState(Targeting), тому вимірює реальний час без мобів. ✓
+- **Flow-stuck false positives FIX (2026-03-29)**: GetMinimapFlow() повертає ~0 коли персонаж стоїть (звичайний таргетинг F2) → окремий 2с таймер тригерив `[NAV] Flow-stuck: flow=0.00 2с` 24+ рази за сесію. Прибрано окремий блок (lines 504-539); GetMinimapFlow() тепер тільки всередині `m_nav_prev_was_walk` блоку як третій сигнал руху. ✓
 - **m_attack_was_unreachable (2026-03-29)**: якщо HP-stable (5с без пошкоджень) → `m_attack_was_unreachable=true` → наступний TARGETING відкладає макроси до attempt 15 (замість 2) → навігація має час вийти з кімнати. Скидається коли мінімапа показує мобів. ✓
 
 ### Потребує уваги:
