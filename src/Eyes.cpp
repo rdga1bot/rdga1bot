@@ -436,10 +436,34 @@ std::optional<struct Eyes::MyBars> Eyes::DetectMyBars() const
         const int min_px = hp_w * (cp_zone_bottom - cp_zone_top) / 10;
         if (cp_px < min_px || mp_px < min_px) continue;
 
+        // Знаходимо фактичний Y-діапазон CP і MP барів всередині зон.
+        // Зберігаємо точний rect бару (не всю зону) — бо CalcBarPercentValueRobust
+        // сэмплює рядки 25/50/75% зони і промахується повз ~8px бар у 20px зоні.
+        auto findBarRect = [&](const cv::Mat& mask, const cv::Rect& zone_rect) -> cv::Rect {
+            std::vector<std::vector<cv::Point>> cc;
+            cv::Mat mask_copy = mask.clone();
+            cv::findContours(mask_copy, cc, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+            if (!cc.empty()) {
+                // Найбільший контур = сам бар
+                auto best = cc[0];
+                for (const auto& c : cc)
+                    if (cv::contourArea(c) > cv::contourArea(best)) best = c;
+                cv::Rect cr = cv::boundingRect(best);
+                // Конвертуємо в абсолютні coords та розширюємо до full bar width
+                cr.x += zone_rect.x;
+                cr.y += zone_rect.y;
+                cr.x  = hp_x;
+                cr.width = hp_w;
+                cr.height = std::max(cr.height, m_my_bar_min_height);
+                return cr;
+            }
+            return zone_rect; // fallback: повна зона
+        };
+
         struct MyBars my_bars = {};
         my_bars.hp_bar = rect;
-        my_bars.cp_bar = cp_zone_rect;
-        my_bars.mp_bar = mp_zone_rect;
+        my_bars.cp_bar = findBarRect(cp_mask, cp_zone_rect);
+        my_bars.mp_bar = findBarRect(mp_mask, mp_zone_rect);
         return my_bars;
     }
 
