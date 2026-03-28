@@ -244,9 +244,9 @@ void Dashboard::DrawStatus(const Eyes::Me& me, const Eyes::Target& tgt, const St
     // Ширина бару: половина екрану мінус мітки та числа
     int bar_w = std::max(10, m_cols / 2 - 16);
 
-    DrawBar(m_win_status, 0, 1, bar_w, me.hp, COLOR_HP_BAR, "HP");
-    DrawBar(m_win_status, 1, 1, bar_w, me.mp, COLOR_MP_BAR, "MP");
-    DrawBar(m_win_status, 2, 1, bar_w, me.cp, COLOR_CP_BAR, "CP");
+    DrawBar(m_win_status, 0, 1, bar_w, me.cp, COLOR_CP_BAR, "CP");
+    DrawBar(m_win_status, 1, 1, bar_w, me.hp, COLOR_HP_BAR, "HP");
+    DrawBar(m_win_status, 2, 1, bar_w, me.mp, COLOR_MP_BAR, "MP");
 
     // Права колонка: статистика і target HP
     int rx = m_cols / 2 + 2;

@@ -296,9 +296,17 @@ void Brain::HandleTargeting() {
             return;
         }
         m_dead_target_esc_count++;
-        Log("[TARGETING] Мертвий таргет hp=0 → ESC ×" + std::to_string(m_dead_target_esc_count));
-        if (m_dead_target_esc_count <= 5) {
-            // Звичайний мертвий моб — знімаємо одразу
+        if (m_dead_target_esc_count == 1) {
+            // Перший тік hp=0: чекаємо підтвердження (гра рендерить UI ~100-200мс після F2/macro).
+            // Якщо наступний тік теж hp=0 → справжній мертвий моб → ESC.
+            // Якщо наступний тік hp>0 → фалш-негатив детекції → продовжуємо до ATTACKING.
+            Log("[TARGETING] Мертвий таргет hp=0 ×1 → чекаємо підтвердження...", LogLevel::Debug);
+            m_hands.Send(100);
+            return;
+        }
+        Log("[TARGETING] Мертвий таргет hp=0 → ESC ×" + std::to_string(m_dead_target_esc_count - 1));
+        if (m_dead_target_esc_count <= 6) {
+            // Підтверджений мертвий моб (2+ тіки hp=0) — знімаємо таргет
             m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
             m_hands.Send(100);
             return;
