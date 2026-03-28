@@ -52,8 +52,6 @@ std::vector<Eyes::NPC> Eyes::DetectNPCs()
 {
     // Opt: повний HSV потрібен тут — конвертуємо якщо ще не зроблено
     EnsureFullHSV();
-    // Opt: blind spot тільки тут (не в Open) — потрібен лише для NPC detection
-    cv::circle(m_hsv, {m_hsv.cols / 2, m_hsv.rows / 2}, m_blind_spot_radius, cv::Scalar(0, 0, 0), -1);
 
     // extract regions with white NPC names
     cv::Mat white;
@@ -78,6 +76,9 @@ std::vector<Eyes::NPC> Eyes::DetectNPCs()
 
     std::vector<NPC> npcs;
 
+    const int bcx = m_hsv.cols / 2, bcy = m_hsv.rows / 2;
+    const int blind_r2 = m_blind_spot_radius * m_blind_spot_radius;
+
     for (const auto &contour : contours) {
         const auto rect = cv::boundingRect(contour);
 
@@ -87,6 +88,11 @@ std::vector<Eyes::NPC> Eyes::DetectNPCs()
         ) {
             continue;
         }
+
+        // Blind spot: пропускаємо NPC в центрі екрану (гравець) — без деструктивного cv::circle
+        const cv::Point npc_center = {rect.x + rect.width / 2, rect.y + rect.height / 2};
+        const int bdx = npc_center.x - bcx, bdy = npc_center.y - bcy;
+        if (bdx * bdx + bdy * bdy < blind_r2) continue;
 
         const auto target_image = white(rect);
         const auto threshold = cv::countNonZero(target_image) / target_image.total();
@@ -119,8 +125,9 @@ std::vector<Eyes::FarNPC> Eyes::DetectFarNPCs()
     // diff current frame with 3 previous frames
     cv::Mat diff_sum;
 
-    for (decltype(m_frame) i = m_frame; i-- > m_frame - 3;) {
-        const auto frame = m_hsv_frames[i % m_hsv_frames.size()];
+    for (int k = 1; k <= 3; k++) {
+        if (m_frame < (size_t)k) continue;
+        const auto frame = m_hsv_frames[(m_frame - k) % m_hsv_frames.size()];
 
         if (frame.empty()) {
             continue;
@@ -610,9 +617,7 @@ int Eyes::CalcBarPercentValue(
     const cv::Scalar &to_color,
     bool whole_bar
 ) {
-    CV_Assert(bar.rows >= 1);
-    CV_Assert(bar.depth() == CV_8U);
-    CV_Assert(bar.channels() >= 3);
+    if (bar.rows < 1 || bar.depth() != CV_8U || bar.channels() < 3) return 0;
 
     const auto row = bar.ptr<uchar>(bar.rows / 2);
     auto channel = (bar.cols - 1) * bar.channels();
@@ -738,11 +743,14 @@ float Eyes::GetMovementFlow() const {
 
     // Сітка точок у центральній ігровій зоні (half-res координати)
     // Вікно 683×384 (half 1366×768): уникаємо верхні 75px + нижні 100px + бокові 100px
-    std::vector<cv::Point2f> pts;
-    const int step = 40; // крок сітки (в half-res пікселях)
-    for (int y = 75; y < 285; y += step)
-        for (int x = 100; x < 580; x += step)
-            pts.push_back({(float)x, (float)y});
+    // Статична сітка точок — будується один раз, не виділяє пам'ять щотіку
+    static const std::vector<cv::Point2f> pts = []() {
+        std::vector<cv::Point2f> p;
+        for (int y = 75; y < 285; y += 40)
+            for (int x = 100; x < 580; x += 40)
+                p.push_back({(float)x, (float)y});
+        return p;
+    }();
 
     if (pts.empty()) { gray.copyTo(m_nav_prev_gray); return 0.0f; }
 

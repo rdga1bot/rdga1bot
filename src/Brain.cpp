@@ -13,12 +13,8 @@ void Brain::Log(const std::string& msg, LogLevel level) {
     char ts[10];
     std::strftime(ts, sizeof(ts), "%H:%M:%S", std::localtime(&t));
     std::string line = std::string("[") + ts + "] " + msg;
-    if (m_log_callback) {
-        std::cout << line << "\n";
-        m_log_callback(std::move(line)); // уникаємо зайвого copy до Dashboard
-    } else {
-        std::cout << line << "\n";
-    }
+    std::cout << line << "\n";
+    if (m_log_callback) m_log_callback(std::move(line));
 }
 
 Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
@@ -682,14 +678,17 @@ void Brain::HandleAttacking() {
 
     // Approach re-target: тільки якщо мінімапа показує інших мобів.
     // Без цієї перевірки ESC+F2 в порожній зоні = втрата таргету → фейкове вбивство.
+    // Opt: DetectMinimap() (~2-5мс) тільки якщо всі дешеві умови виконані.
     {
-        auto approach_dots = m_eyes.DetectMinimap();
-        if (m_approach_retarget_count < 3 &&
+        const bool approach_possible = (m_approach_retarget_count < 3 &&
             !m_first_attack &&
             m_approach_entry_hp >= 90 &&
             m_target.has_value() && m_target->hp >= m_approach_entry_hp - 5 &&
             SecsSince(m_combat_watchdog_start) < 2.0 &&
-            SecsSince(m_approach_last_retarget) >= 1.0 &&
+            SecsSince(m_approach_last_retarget) >= 1.0);
+        auto approach_dots = approach_possible ? m_eyes.DetectMinimap()
+                                               : std::vector<Eyes::MinimapDot>{};
+        if (approach_possible &&
             !approach_dots.empty()) // є куди переключатись
         {
             // ESC скидає живу ціль — інакше /nexttarget (F2) може ігноруватись грою
@@ -1016,6 +1015,8 @@ void Brain::CheckPotions(const Eyes::Me& me) {
 
     // CP потіон
     if (me.cp > 0 && me.cp < m_cfg.cp_threshold && SecsSince(m_last_cp_pot) > 5.0) {
+        Log("[POTION] CP " + std::to_string(me.cp) + "% < " +
+            std::to_string(m_cfg.cp_threshold) + "% → вживаємо CP потіон");
         m_hands.PressKeyboardKey(m_cfg.cp_key);
         m_hands.Send(50);
         m_last_cp_pot = Now();
