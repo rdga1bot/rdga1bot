@@ -205,18 +205,20 @@ void Brain::Process(bool debug) {
         CheckPotions(me);
     }
 
-    // Перевірка часу бафів: тільки в TARGETING + інтервал минув + N спроб без мобів
-    // Post-combat cooldown: замість SecsSince(last_kill) використовуємо m_macro_attempts
-    // (кількість consecutive targeting спроб без знахідки) — proxy для "мобів немає N сек".
-    // На активних спотах SecsSince(last_kill) ніколи не досягає cooldown → баф не відбувається.
-    // m_macro_attempts скидається в EnterState(Targeting), тому N спроб = час без мобів.
+    // Перевірка часу бафів: тільки в IDLE/TARGETING + інтервал минув + cooldown пройшов.
+    // Cooldown: АБО N consecutive targeting спроб без мобів (активний спот — kills кожні 2-5с)
+    //           АБО SecsSince(last_kill) >= cooldown (старт/тривала пауза/пустий спот).
+    // При старті: m_last_kill_time = Now()-1год → SecsSince >= cooldown одразу.
     const int buff_empty_attempts =
         (int)(m_cfg.buff_post_combat_cooldown * 1000.0 / 150.0); // 150мс/спроба
+    const bool buff_cooldown_ok =
+        (m_state == State::Targeting && m_macro_attempts >= buff_empty_attempts) ||
+        SecsSince(m_last_kill_time) >= (double)m_cfg.buff_post_combat_cooldown;
     if (m_cfg.buff_enabled &&
-        m_state == State::Targeting &&
+        (m_state == State::Idle || m_state == State::Targeting) &&
         (m_cfg.buff_use_altb || !m_cfg.buff_keys.empty()) &&
         SecsSince(m_last_buff) >= (double)m_cfg.buff_interval &&
-        m_macro_attempts >= buff_empty_attempts) {
+        buff_cooldown_ok) {
         EnterState(State::Buffing);
         return;
     }
