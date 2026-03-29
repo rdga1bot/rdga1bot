@@ -935,7 +935,7 @@ void Brain::HandleBuffing() {
         float tab_score = 0.0f;
         auto tab_pt = m_buff_tab_templ.empty()
             ? std::optional<cv::Point>{}
-            : m_eyes.FindTemplate(m_buff_tab_templ, 0.60f, &tab_score);
+            : m_eyes.FindTemplate(m_buff_tab_templ, 0.40f, &tab_score);
 
         if (!tab_pt.has_value() && m_buff_open_retries < 3) {
             // Вікно не з'явилось — чекаємо ще (без ALT+B toggle щоб не закрити відкрите вікно)

@@ -352,28 +352,44 @@ int main(int argc, char* argv[]) {
                 brain.SetMemPlayerState(mem_reader.ReadPlayer());
             }
 
-            // KnownList: blind scan — не потребує координат і не залежить від MemReader
+            // KnownList: blind scan у фоновому thread — не блокує головний цикл
+            // blindScan() сканує ~1GB heap (~20с) — занадто довго для main loop
             if (cfg.knownlist_enabled && kl_scanner && !brain.HasPlayerBase()) {
+                static std::atomic<bool>     kl_scan_running{false};
+                static std::atomic<uintptr_t> kl_scan_result{0};
                 static int kl_scan_attempts = 0;
                 static auto kl_last_attempt =
                     std::chrono::steady_clock::now() - std::chrono::seconds(10);
+
+                // Перевіряємо чи фоновий scan завершився
+                if (kl_scan_result.load() != 0) {
+                    uintptr_t base = kl_scan_result.exchange(0);
+                    brain.SetPlayerBase(base);
+                    if (!brain.GetWorldState()) {
+                        brain.SetWorldState(
+                            std::make_unique<WorldState>(kl_pid, *kl_scanner));
+                    }
+                    kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
+                    std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base
+                              << std::dec << " WorldState активовано\n";
+                }
+
+                // Запускаємо новий scan кожні 30с якщо попередній завершився
                 auto kl_now = std::chrono::steady_clock::now();
-                // Пробуємо кожні 5с (blind scan ~2-10с, дорого)
-                if (kl_now - kl_last_attempt >= std::chrono::seconds(5)) {
+                if (!kl_scan_running.load() &&
+                    kl_now - kl_last_attempt >= std::chrono::seconds(30)) {
                     kl_last_attempt = kl_now;
                     kl_scan_attempts++;
-                    std::cerr << "[KnownList] blind scan спроба #" << kl_scan_attempts << "\n";
-                    uintptr_t base = kl_scanner->blindScan();
-                    if (base) {
-                        brain.SetPlayerBase(base);
-                        if (!brain.GetWorldState()) {
-                            brain.SetWorldState(
-                                std::make_unique<WorldState>(kl_pid, *kl_scanner));
-                        }
-                        kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
-                        std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base
-                                  << std::dec << " WorldState активовано\n";
-                    }
+                    kl_scan_running = true;
+                    std::cerr << "[KnownList] blind scan спроба #" << kl_scan_attempts << " (фон)\n";
+                    auto* scanner_ptr = kl_scanner.get();
+                    auto* running_ptr = &kl_scan_running;
+                    auto* result_ptr  = &kl_scan_result;
+                    std::thread([scanner_ptr, running_ptr, result_ptr]() {
+                        uintptr_t base = scanner_ptr->blindScan();
+                        result_ptr->store(base);
+                        running_ptr->store(false);
+                    }).detach();
                 }
             }
 
