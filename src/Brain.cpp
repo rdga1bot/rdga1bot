@@ -365,8 +365,13 @@ void Brain::HandleTargeting() {
         }
         Log("[TARGETING] Мертвий таргет не зникає після 5 ESC → пробуємо F2", LogLevel::Warning);
     } else {
-        m_dead_target_esc_count = 0; // живий або відсутній таргет — скидаємо лічильник
-        m_dead_cycles_total = 0;     // живий таргет → скидаємо лічильник dead-циклів
+        m_dead_target_esc_count = 0; // живий або відсутній таргет — скидаємо ESC лічильник
+        // dead_cycles скидаємо тільки при ЖИВОМУ таргеті (hp>0).
+        // При відсутності таргету (після ESC) — НЕ скидаємо: лічильник має накопичуватись
+        // через цикли щоб після 3 fallthrough перейти на /target макрос.
+        if (m_target.has_value() && m_target->hp > 0) {
+            m_dead_cycles_total = 0;
+        }
     }
 
     m_macro_attempts++;
