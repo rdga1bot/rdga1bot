@@ -127,10 +127,11 @@ TARGETING → ATTACKING → LOOTING → TARGETING (цикл)
 **DEAD:** Grace 10с при старті, 30с після respawn; HP=0 → 3 тіки debounce
 
 **BUFFING:**
-- Тригер: в IDLE/TARGETING + `SecsSince(last_buff) >= buff_interval` + `buff_cooldown_ok`. Cooldown — об'єднана умова `||`:
-  - `m_macro_attempts >= N` де `N = cooldown_sec * 1000 / 150` (proxy "N спроб без мобів ≈ cooldown секунд") — для активних спотів (kills кожні 2-5с → `SecsSince(last_kill)` ніколи не досягає cooldown)
-  - `SecsSince(last_kill_time) >= cooldown` — для старту і тривалих пауз (`m_last_kill_time` ініціалізується годину тому → умова одразу true)
-  - Обидва у `Process()` до входу в BUFFING — бот ніколи не входить в BUFFING якщо є активний бій
+- Тригер: в IDLE/TARGETING + `SecsSince(last_buff) >= buff_interval` + `SecsSince(last_kill_time) >= 2.0s`.
+  - 2с достатньо щоб LOOTING (~300мс) завершився і ми були в TARGETING
+  - На активному споті (kills кожні 3-5с): через 2с після kill ми вже в TARGETING → баф спрацьовує
+  - При старті: `m_last_kill_time = Now()-1год` → умова одразу true
+  - HandleBuffing() також скасовує якщо kill < 2с (edge case) і перепланує через 30с
 - `buff_use_altb=true`: ALT+B → 1500мс → знайти "Баффер" (template або координати) → 800мс → знайти "tty" → 1с → ALT+B (закриває вікно)
   - **Template matching**: `buff_tab.png` + `buff_profile.png` в папці бота — якщо є, використовуються автоматично
   - **Fallback**: `BuffTabX/Y` + `BuffProfileX/Y` якщо шаблони не знайдено або не збіглися (threshold 0.75)
@@ -738,10 +739,10 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **MemReader (2026-03-29)**: `src/MemReader.cpp` — читання HP/MP/CP/XYZ з Wine L2 процесу через `process_vm_readv` (без root). `[MemReader]` секція в .ini з hex offsets. При `Enabled=true` значення з пам'яті перекривають OpenCV детекцію. ✓
 - **GetMinimapFlow() optical flow (2026-03-29)**: Lucas-Kanade на мінімапі ROI (185×165px) замість повного кадру. `goodFeaturesToTrack` + `calcOpticalFlowPyrLK` між кадрами мінімапи. flow<0.3 протягом 2с при наявних мобах на мінімапі → escape rotation. Надійніше ніж frame diff центру (підземелля мають одноманітні текстури). `FlowDetection=true` в .ini. ✓
 - **Buff cooldown у Process() (2026-03-29)**: cooldown перевіряється в `Process()` до `EnterState(Buffing)` — бот не входить в BUFFING якщо є активний бій (nещодавній kill). Прибрано blocking 1с×20с wait з `HandleBuffing()`. Більше ніяких `[Buffs] Чекаємо cooldown 19с...` з мобами поряд. ✓
-- **Buff trigger: SecsSince→m_macro_attempts (2026-03-29)**: `SecsSince(last_kill_time) >= cooldown` ніколи не виконувалась на активних спотах (kills кожні 2-5с, cooldown 10с → постійний reset). Замінено на `m_macro_attempts >= (int)(cooldown * 1000/150)` — proxy "N consecutive targeting attempts without mob". m_macro_attempts=0 при EnterState(Targeting), тому вимірює реальний час без мобів. ✓
+- **Buff trigger fix (2026-03-29→refix)**: `m_macro_attempts >= N` proxy виявився зламаним — на активному споті моб знаходиться за 1-2 спроби, N ніколи не досягається. HandleBuffing() guard `< post_combat_cooldown (20с)` також скасовував баф кожен раз. Фікс: `SecsSince(last_kill_time) >= 2.0s` — LOOTING займає 300мс → 2с після kill ми вже в TARGETING. HandleBuffing() guard знижено до `< 2.0s`. ✓
 - **Flow-stuck false positives FIX (2026-03-29)**: GetMinimapFlow() повертає ~0 коли персонаж стоїть (звичайний таргетинг F2) → окремий 2с таймер тригерив `[NAV] Flow-stuck: flow=0.00 2с` 24+ рази за сесію. Прибрано окремий блок (lines 504-539); GetMinimapFlow() тепер тільки всередині `m_nav_prev_was_walk` блоку як третій сигнал руху. ✓
 - **m_attack_was_unreachable (2026-03-29)**: якщо HP-stable (5с без пошкоджень) → `m_attack_was_unreachable=true` → наступний TARGETING відкладає макроси до attempt 15 (замість 2) → навігація має час вийти з кімнати. Скидається коли мінімапа показує мобів. ✓
-- **Buff trigger: SecsSince→m_macro_attempts (2026-03-29)**: `SecsSince(last_kill_time) >= cooldown` ніколи не виконувалась на активних спотах (kills кожні 2-5с, cooldown 10с → постійний reset). Замінено на `m_macro_attempts >= (int)(cooldown * 1000/150)` — proxy "N consecutive targeting attempts without mob". m_macro_attempts=0 при EnterState(Targeting), тому вимірює реальний час без мобів. ✓
+- **Buff trigger fix (2026-03-29→refix)**: `m_macro_attempts >= N` proxy виявився зламаним — на активному споті моб знаходиться за 1-2 спроби, N ніколи не досягається. HandleBuffing() guard `< post_combat_cooldown (20с)` також скасовував баф кожен раз. Фікс: `SecsSince(last_kill_time) >= 2.0s` — LOOTING займає 300мс → 2с після kill ми вже в TARGETING. HandleBuffing() guard знижено до `< 2.0s`. ✓
 - **Flow-stuck false positives FIX (2026-03-29)**: GetMinimapFlow() повертає ~0 коли персонаж стоїть (звичайний таргетинг F2) → окремий 2с таймер тригерив `[NAV] Flow-stuck: flow=0.00 2с` 24+ рази за сесію. Прибрано окремий блок; GetMinimapFlow() тепер тільки всередині `m_nav_prev_was_walk` блоку як третій сигнал руху. ✓
 - **Code quality fixes (2026-03-29)**: ✓
   - `Brain::Log()`: прибрано `if/else` дублікат — `cout` завжди, потім `callback`

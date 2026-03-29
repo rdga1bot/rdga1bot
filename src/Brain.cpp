@@ -216,14 +216,10 @@ void Brain::Process(bool debug) {
     }
 
     // Перевірка часу бафів: тільки в IDLE/TARGETING + інтервал минув + cooldown пройшов.
-    // Cooldown: АБО N consecutive targeting спроб без мобів (активний спот — kills кожні 2-5с)
-    //           АБО SecsSince(last_kill) >= cooldown (старт/тривала пауза/пустий спот).
-    // При старті: m_last_kill_time = Now()-1год → SecsSince >= cooldown одразу.
-    const int buff_empty_attempts =
-        (int)(m_cfg.buff_post_combat_cooldown * 1000.0 / 150.0); // 150мс/спроба
-    const bool buff_cooldown_ok =
-        (m_state == State::Targeting && m_macro_attempts >= buff_empty_attempts) ||
-        SecsSince(m_last_kill_time) >= (double)m_cfg.buff_post_combat_cooldown;
+    // Cooldown: >= 2с після останнього вбивства (LOOTING займає ~300мс → 2с завжди в TARGETING).
+    // При старті: m_last_kill_time = Now()-1год → SecsSince >= 2 одразу.
+    // На активному споті: kills кожні 3-5с → через 2с після kill ми вже в TARGETING → баф.
+    const bool buff_cooldown_ok = SecsSince(m_last_kill_time) >= 2.0;
     if (m_cfg.buff_enabled &&
         (m_state == State::Idle || m_state == State::Targeting) &&
         (m_cfg.buff_use_altb || !m_cfg.buff_keys.empty()) &&
@@ -841,10 +837,9 @@ void Brain::HandleDead() {
 void Brain::HandleBuffing() {
     if (!m_hands.IsReady()) return;
 
-    // Safety: якщо вбивство сталося вже після входу в BUFFING (edge case) — виходимо.
-    // Основна перевірка cooldown відбувається в Process() ще до EnterState(Buffing).
-    if (SecsSince(m_last_kill_time) < (double)m_cfg.buff_post_combat_cooldown) {
-        Log("[Buffs] Бій щойно завершився → скасовуємо баф, чекаємо cooldown", LogLevel::Debug);
+    // Safety: якщо вбивство сталося після входу в BUFFING (edge case) — виходимо.
+    if (SecsSince(m_last_kill_time) < 2.0) {
+        Log("[Buffs] Kill щойно → скасовуємо баф", LogLevel::Debug);
         m_last_buff = Now() - std::chrono::seconds(m_cfg.buff_interval - 30);
         EnterState(State::Idle);
         return;
