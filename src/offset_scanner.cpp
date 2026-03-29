@@ -94,10 +94,11 @@ uintptr_t OffsetScanner::blindScan() {
             std::memcpy(&klPtr, buf.data() + i + 0x120, 4);
             if (!isValidPtr(klPtr)) continue;
 
-            // ── Перевірка 2: candidate + 0x124 → knownCount [1..500] ───────
+            // ── Перевірка 2: candidate + 0x124 → knownCount [5..500] ───────
+            // Мінімум 5: навіть у порожній кімнаті є NPC/предмети; 1-4 = false positive
             int32_t klCount = 0;
             std::memcpy(&klCount, buf.data() + i + 0x124, 4);
-            if (klCount < 1 || klCount > 500) continue;
+            if (klCount < 5 || klCount > 500) continue;
 
             // ── Перевірка 3: knownListPtr[0] → перший об'єкт ────────────────
             uint32_t firstObjPtr = rpm<uint32_t>(klPtr);
@@ -110,8 +111,8 @@ uintptr_t OffsetScanner::blindScan() {
             if (!isL2Coord(ox, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(oy, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(oz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // Не біля нуля: справжні L2 локації мають |X|>500 або |Y|>500
-            if (std::fabsf(ox) < 500.f && std::fabsf(oy) < 500.f) continue;
+            // Обидва X і Y мають бути значущими: справжні L2 локації мають |X|>500 І |Y|>500
+            if (std::fabsf(ox) < 500.f || std::fabsf(oy) < 500.f) continue;
 
             // ── Перевірка 5: сам кандидат (PlayerBase XYZ) ──────────────────
             float px = 0.f, py = 0.f, pz = 0.f;
@@ -128,9 +129,9 @@ uintptr_t OffsetScanner::blindScan() {
             if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // Не біля нуля: справжні L2 координати гравця мають |X|>500 або |Y|>500
-            if (std::fabsf(px) < 500.f && std::fabsf(py) < 500.f) continue;
-            // X,Y не рівні між собою (захист від однакових значень)
+            // Обидва X і Y мають бути значущими (справжній гравець ніколи не Y=0 або X=0)
+            if (std::fabsf(px) < 500.f || std::fabsf(py) < 500.f) continue;
+            // X,Y не рівні між собою
             if (px == py && py == pz) continue;
 
             uintptr_t candidate = region.base + i;
