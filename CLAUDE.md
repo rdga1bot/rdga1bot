@@ -720,6 +720,16 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **Buff trigger: SecsSince→m_macro_attempts (2026-03-29)**: `SecsSince(last_kill_time) >= cooldown` ніколи не виконувалась на активних спотах (kills кожні 2-5с, cooldown 10с → постійний reset). Замінено на `m_macro_attempts >= (int)(cooldown * 1000/150)` — proxy "N consecutive targeting attempts without mob". m_macro_attempts=0 при EnterState(Targeting), тому вимірює реальний час без мобів. ✓
 - **Flow-stuck false positives FIX (2026-03-29)**: GetMinimapFlow() повертає ~0 коли персонаж стоїть (звичайний таргетинг F2) → окремий 2с таймер тригерив `[NAV] Flow-stuck: flow=0.00 2с` 24+ рази за сесію. Прибрано окремий блок (lines 504-539); GetMinimapFlow() тепер тільки всередині `m_nav_prev_was_walk` блоку як третій сигнал руху. ✓
 - **m_attack_was_unreachable (2026-03-29)**: якщо HP-stable (5с без пошкоджень) → `m_attack_was_unreachable=true` → наступний TARGETING відкладає макроси до attempt 15 (замість 2) → навігація має час вийти з кімнати. Скидається коли мінімапа показує мобів. ✓
+- **Buff trigger: SecsSince→m_macro_attempts (2026-03-29)**: `SecsSince(last_kill_time) >= cooldown` ніколи не виконувалась на активних спотах (kills кожні 2-5с, cooldown 10с → постійний reset). Замінено на `m_macro_attempts >= (int)(cooldown * 1000/150)` — proxy "N consecutive targeting attempts without mob". m_macro_attempts=0 при EnterState(Targeting), тому вимірює реальний час без мобів. ✓
+- **Flow-stuck false positives FIX (2026-03-29)**: GetMinimapFlow() повертає ~0 коли персонаж стоїть (звичайний таргетинг F2) → окремий 2с таймер тригерив `[NAV] Flow-stuck: flow=0.00 2с` 24+ рази за сесію. Прибрано окремий блок; GetMinimapFlow() тепер тільки всередині `m_nav_prev_was_walk` блоку як третій сигнал руху. ✓
+- **Code quality fixes (2026-03-29)**: ✓
+  - `Brain::Log()`: прибрано `if/else` дублікат — `cout` завжди, потім `callback`
+  - `Eyes::DetectFarNPCs()`: `size_t` underflow при `m_frame<3` → безпечний `for(k=1;k<=3)`
+  - `Eyes::DetectNPCs()`: прибрано деструктивний `cv::circle(m_hsv)` blind spot → фільтрація за відстанню в циклі контурів (m_hsv не псується)
+  - `Eyes::CalcBarPercentValue()`: `CV_Assert` → `if (...) return 0` (no-throw, безпечно в release)
+  - `Brain::CheckPotions()`: доданий `[POTION] CP N%` лог (HP/MP вже були)
+  - `Brain::HandleAttacking()`: `DetectMinimap()` (~2-5мс) тільки коли `approach_possible=true`
+  - `Eyes::GetMovementFlow()`: `static` сітка точок — будується один раз, не виділяє пам'ять щотіку
 
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
@@ -741,9 +751,9 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-1. **Тест Flow Detection**: у логах шукати `[NAV] Flow-stuck: flow=0.XX 2с → WalkBack + Rotate` — підтверджує що GetMinimapFlow() спрацював. Якщо не з'являється при застряганні → flow > 0.3 (текстура мінімапи нестабільна) або мінімапа порожня.
-2. **Тест buff cooldown fix**: переконатись що `[Buffs] Чекаємо cooldown Nс...` більше не з'являється. Баф має старту вати лише коли `buff_in=0с` в `[HB]` рядку і між TARGETING спробами є пауза >20с.
+1. **Тест buff trigger fix**: після ~N спроб без мобів (`N = cooldown_sec * 1000/150`, напр. 10с → ~67 спроб) — в логах має з'явитись `[STATE] TARGETING → BUFFING`. Якщо не з'являється → перевірити `buff_in=Nс` в `[HB]` рядку.
+2. **Тест Flow Detection (після FIX)**: `[NAV] Flow-stuck` тепер не повинен з'являтись при звичайному F2 таргетингу (бот стоїть на місці). Має з'являтись лише після `WalkForward` якщо персонаж не зрушив.
 3. **Тест unreachable mob fix**: якщо `[ATTACKING] HP стабільний 5с` → наступний TARGETING лог не повинен мати `[target macro]` в перших 15 спробах — тільки F2 + навігація.
 4. **MemReader offsets**: якщо хочемо точні HP/MP/CP з пам'яті — знайти offsets через Cheat Engine під Wine, вписати в `[MemReader]` + `Enabled = true`.
 5. **Patrol налаштування**: для прямолінійних коридорів: `PatrolEnabled = true`, `PatrolPath = F2000,R700,F1500,L700`. Тестувати поки мінімапа порожня.
-6. **Тривалий фарм** — бот стабільний. Моніторити логи на `[NAV] Flow-stuck` і `[ATTACKING] HP стабільний`.
+6. **Тривалий фарм** — бот стабільний. Моніторити логи на `[ATTACKING] HP стабільний`.
