@@ -52,6 +52,98 @@ bool OffsetScanner::readBytes(uintptr_t addr, void* buf, size_t len) const {
     return n == (ssize_t)len;
 }
 
+// ── Перевірка що float є валідною L2-координатою ─────────────────────────────
+static bool isL2Coord(float v, float lo, float hi) {
+    // Відсіюємо NaN, Inf і значення поза L2 світом
+    return std::isfinite(v) && v > lo && v < hi;
+}
+
+// ── blindScan: знаходить PlayerBase без координат ────────────────────────────
+// Алгоритм: сканує кожні 4 байти кожного readable heap-регіону як кандидата.
+// Для кожного кандидата перевіряє СТРУКТУРНУ валідність:
+//   1. candidate + 0x120 → uint32 ptr → isValidPtr
+//   2. candidate + 0x124 → int32 count → [1, 500]
+//   3. knownListPtr[0]   → uint32 ptr → isValidPtr (перший об'єкт)
+//   4. firstObj + 0x24/0x28/0x2C → float XYZ → в межах L2 світу
+//   5. candidate + 0x24/0x28/0x2C → float XYZ → в межах L2 світу (сам гравець)
+//   6. X,Y,Z не всі нулі і не рівні між собою
+uintptr_t OffsetScanner::blindScan() {
+    // L2 world bounds (Lineage 2 game world limits)
+    // X/Y: Gracia Final world is roughly [-327668, 327668]
+    // Z (висота): [-16384, 16384] для більшості зон
+    constexpr float WORLD_XY_MIN = -327000.f;
+    constexpr float WORLD_XY_MAX =  327000.f;
+    constexpr float WORLD_Z_MIN  = -16000.f;
+    constexpr float WORLD_Z_MAX  =  16000.f;
+
+    const auto regions = getReadableRegions();
+    size_t total_bytes = 0;
+    for (const auto& r : regions) total_bytes += r.size;
+    std::cerr << "[OffsetScanner] blindScan: " << regions.size() << " регіонів, "
+              << (total_bytes / 1024 / 1024) << " MB\n";
+
+    std::vector<uint8_t> buf;
+    for (const auto& region : regions) {
+        buf.resize(region.size);
+        if (!readBytes(region.base, buf.data(), region.size)) continue;
+
+        // Крок 4 байти — перевіряємо кожен вирівняний offset як candidate playerBase
+        for (size_t i = 0; i + 0x130 <= buf.size(); i += 4) {
+            // ── Перевірка 1: candidate + 0x120 → knownListPtr ──────────────
+            uint32_t klPtr = 0;
+            std::memcpy(&klPtr, buf.data() + i + 0x120, 4);
+            if (!isValidPtr(klPtr)) continue;
+
+            // ── Перевірка 2: candidate + 0x124 → knownCount [1..500] ───────
+            int32_t klCount = 0;
+            std::memcpy(&klCount, buf.data() + i + 0x124, 4);
+            if (klCount < 1 || klCount > 500) continue;
+
+            // ── Перевірка 3: knownListPtr[0] → перший об'єкт ────────────────
+            uint32_t firstObjPtr = rpm<uint32_t>(klPtr);
+            if (!isValidPtr(firstObjPtr)) continue;
+
+            // ── Перевірка 4: перший об'єкт XYZ в межах L2 світу ────────────
+            float ox = rpm<float>(firstObjPtr + 0x24);
+            float oy = rpm<float>(firstObjPtr + 0x28);
+            float oz = rpm<float>(firstObjPtr + 0x2C);
+            if (!isL2Coord(ox, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+            if (!isL2Coord(oy, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+            if (!isL2Coord(oz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
+            // Не всі нулі
+            if (ox == 0.f && oy == 0.f && oz == 0.f) continue;
+
+            // ── Перевірка 5: сам кандидат (PlayerBase XYZ) ──────────────────
+            float px = 0.f, py = 0.f, pz = 0.f;
+            // Якщо залишились байти в буфері — беремо звідти без додаткового rpm
+            if (i + 0x2C + 4 <= buf.size()) {
+                std::memcpy(&px, buf.data() + i + 0x24, 4);
+                std::memcpy(&py, buf.data() + i + 0x28, 4);
+                std::memcpy(&pz, buf.data() + i + 0x2C, 4);
+            } else {
+                px = rpm<float>(region.base + i + 0x24);
+                py = rpm<float>(region.base + i + 0x28);
+                pz = rpm<float>(region.base + i + 0x2C);
+            }
+            if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+            if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+            if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
+            if (px == 0.f && py == 0.f && pz == 0.f) continue;
+            // X,Y не рівні між собою (захист від нулів-з-однаковими-значеннями)
+            if (px == py && py == pz) continue;
+
+            uintptr_t candidate = region.base + i;
+            std::cerr << "[OffsetScanner] blindScan: PlayerBase=0x" << std::hex << candidate
+                      << " XYZ=(" << std::dec << (int)px << "," << (int)py << "," << (int)pz
+                      << ") KnownCount=" << klCount << "\n";
+            return candidate;
+        }
+    }
+
+    std::cerr << "[OffsetScanner] blindScan: PlayerBase не знайдено\n";
+    return 0;
+}
+
 // ── Крок 1: знайти PlayerBase ─────────────────────────────────────────────────
 uintptr_t OffsetScanner::findPlayerBase(float x, float y, float z, float tolerance) {
     const auto regions = getReadableRegions();

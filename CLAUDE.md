@@ -754,7 +754,13 @@ printf "status\n" | ./rdga1bot --no-tui --quick
   - Instant kill detection: `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` без debounce ×8
   - `offsets.json` кеш — завантажується при старті, не потребує re-scan щоразу
   - `CALIBRATION.md` — покрокова інструкція
-  - **Потребує**: `[MemReader] Enabled=true` + правильні PosX/Y/Z offsets (Cheat Engine)
+- **`OffsetScanner::blindScan()` (2026-03-29)**: STANDALONE пошук PlayerBase без координат і без MemReader ✓
+  - Курка і яйце усунуто: стара `findPlayerBase(x,y,z)` потребувала координат з MemReader, який потребував Cheat Engine offsets
+  - `blindScan()` знаходить PlayerBase чисто структурно: `base+0x120` → валідний масив об'єктів з L2-координатами
+  - Перевірки: knownListPtr валідний → count [1..500] → перший об'єкт XYZ в межах L2 світу → сам кандидат XYZ в межах L2 світу → не всі нулі → X≠Y≠Z
+  - `[KnownList] Enabled=true` тепер працює **АВТОНОМНО** — не потребує `[MemReader]`, Cheat Engine або координат
+  - Запуск кожні 5с у main loop (дорогий scan ~2-10с), зупиняється після першого успіху
+  - Після знаходження → `saveOffsets(offsets.json)` → наступний запуск завантажує без scan
 
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
@@ -776,14 +782,14 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-1. **KnownList активація**: `[KnownList] Enabled=true` вже вписано в ini. Потрібно:
-   - Встановити `[MemReader] Enabled=true` + знайти offsets (Cheat Engine → PosX/Y/Z)
-   - При першому запуску бот автоматично знайде PlayerBase (`[OffsetScanner] findPlayerBase`)
-   - Перевірити в логах: `[KnownList] PlayerBase=0x... WorldState активовано`
-   - Потім `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` замість `NoTarget ×8`
-   - Якщо `findPlayerBase` не знаходить → перевірити що PosXYZ offsets правильні
-   - Детальна інструкція: `CALIBRATION.md`
-2. **MemReader offsets**: знайти через Cheat Engine під Wine → `[MemReader] Enabled=true` → активує і MemReader, і KnownList autoscan.
+1. **KnownList тест**: `[KnownList] Enabled=true` вже вписано. Просто запустіть бот і чекайте в stderr:
+   - `[KnownList] blind scan спроба #1` — скан запустився
+   - `[OffsetScanner] blindScan: PlayerBase=0xXXX XYZ=(X,Y,Z) KnownCount=N` — знайдено!
+   - `[KnownList] PlayerBase=0x... WorldState активовано` — KnownList активний
+   - `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` — instant kill detection працює
+   - При невдачі (`blindScan: PlayerBase не знайдено`): скан повторюється кожні 5с
+   - **Не потребує `[MemReader]` або Cheat Engine**
+2. **MemReader offsets (опціонально)**: для точних HP/MP/CP барів — знайти через Cheat Engine → `[MemReader] Enabled=true`. KnownList вже незалежний від цього.
 3. **Тест buff trigger fix**: після ~N спроб без мобів (`N = cooldown_sec * 1000/150`, напр. 10с → ~67 спроб) — в логах має з'явитись `[STATE] TARGETING → BUFFING`.
 4. **Тест Flow Detection (після FIX)**: `[NAV] Flow-stuck` не повинен з'являтись при звичайному F2 (бот стоїть). Тільки після `WalkForward`.
 5. **Patrol налаштування**: для прямолінійних коридорів: `PatrolEnabled = true`, `PatrolPath = F2000,R700,F1500,L700`.

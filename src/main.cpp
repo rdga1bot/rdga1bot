@@ -18,6 +18,9 @@
 #include "FPS.h"
 #include "Utils.h"
 #include "Intercept.h"
+#include <dirent.h>
+#include <cctype>
+#include <fstream>
 #include "MemReader.h"
 #include "offset_scanner.h"
 #include "world_state.h"
@@ -142,22 +145,47 @@ int main(int argc, char* argv[]) {
 
         ApplyConfig(cfg, hands, eyes, brain, &mem_reader);
 
-        // KnownList: OffsetScanner + WorldState (якщо увімкнено)
+        // KnownList: OffsetScanner + WorldState (незалежно від [MemReader])
+        // blindScan() не потребує координат — знаходить PlayerBase структурно.
         std::unique_ptr<OffsetScanner> kl_scanner;
-        if (cfg.knownlist_enabled && mem_reader.IsOpen()) {
-            kl_scanner = std::make_unique<OffsetScanner>(mem_reader.GetPid());
-            // Спробуємо завантажити кешовані offsets з файлу
-            bool loaded = kl_scanner->loadOffsets(cfg.knownlist_offsets_file);
-            // Якщо завантажено — відразу створюємо WorldState
-            if (loaded) {
-                brain.SetWorldState(
-                    std::make_unique<WorldState>(mem_reader.GetPid(), *kl_scanner));
-                std::cerr << "[KnownList] WorldState активовано з " << cfg.knownlist_offsets_file << "\n";
-            } else if (!cfg.knownlist_autoscan) {
-                std::cerr << "[KnownList] offsets.json не знайдено, autoscan=false → KnownList вимкнено\n";
+        pid_t kl_pid = 0; // PID l2.exe для KnownList (може відрізнятись від mem_reader)
+        if (cfg.knownlist_enabled) {
+            // Шукаємо PID l2.exe незалежно від mem_reader
+            kl_pid = mem_reader.IsOpen()
+                ? mem_reader.GetPid()
+                : [&]() -> pid_t {
+                    // Мінімальний пошук PID через /proc (як в MemReader::FindPid)
+                    DIR* dir = opendir("/proc");
+                    if (!dir) return 0;
+                    struct dirent* e;
+                    pid_t found = 0;
+                    while ((e = readdir(dir)) != nullptr && !found) {
+                        bool num = true;
+                        for (char c : std::string(e->d_name))
+                            if (!isdigit(c)) { num = false; break; }
+                        if (!num) continue;
+                        std::ifstream cmd("/proc/" + std::string(e->d_name) + "/cmdline");
+                        std::string line; std::getline(cmd, line, '\0');
+                        auto p = line.rfind('/');
+                        std::string exe = (p != std::string::npos) ? line.substr(p+1) : line;
+                        auto lc = [](std::string s){ for(auto& c:s) c=(char)tolower((unsigned char)c); return s; };
+                        if (lc(exe) == "l2.exe") { found = (pid_t)std::stoi(e->d_name); }
+                    }
+                    closedir(dir);
+                    return found;
+                }();
+
+            if (kl_pid) {
+                kl_scanner = std::make_unique<OffsetScanner>(kl_pid);
+                // Спробуємо завантажити кешовані offsets
+                if (kl_scanner->loadOffsets(cfg.knownlist_offsets_file)) {
+                    // offsets.json вже є — WorldState буде створено після blindScan
+                    // PlayerBase ще не відомий, але offsets завантажені
+                    std::cerr << "[KnownList] Offsets завантажено, blind scan знайде PlayerBase\n";
+                }
+            } else {
+                std::cerr << "[KnownList] l2.exe не знайдено → KnownList вимкнено\n";
             }
-            // Якщо autoscan=true і offsets не завантажено — сканування відбудеться
-            // в першому тіку коли MemReader матиме валідні координати гравця
         }
 
         // Підключаємо лог-callback до Dashboard
@@ -324,26 +352,27 @@ int main(int argc, char* argv[]) {
                 brain.SetMemPlayerState(mem_reader.ReadPlayer());
             }
 
-            // KnownList: autoscan PlayerBase якщо ще не знайдено
-            if (cfg.knownlist_enabled && kl_scanner && mem_reader.IsOpen()) {
-                if (brain.GetMemPlayerState().valid && brain.GetMemPlayerState().x != 0.f) {
-                    const auto& ps = brain.GetMemPlayerState();
-                    // Скануємо PlayerBase один раз
-                    static bool kl_scan_done = false;
-                    if (!kl_scan_done) {
-                        uintptr_t base = kl_scanner->findPlayerBase(ps.x, ps.y, ps.z);
-                        if (base) {
-                            brain.SetPlayerBase(base);
-                            // Якщо WorldState ще не створено — створюємо тепер
-                            if (cfg.knownlist_autoscan) {
-                                brain.SetWorldState(
-                                    std::make_unique<WorldState>(mem_reader.GetPid(), *kl_scanner));
-                                kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
-                                std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base
-                                          << std::dec << " WorldState активовано\n";
-                            }
-                            kl_scan_done = true;
+            // KnownList: blind scan — не потребує координат і не залежить від MemReader
+            if (cfg.knownlist_enabled && kl_scanner && !brain.HasPlayerBase()) {
+                static int kl_scan_attempts = 0;
+                static auto kl_last_attempt =
+                    std::chrono::steady_clock::now() - std::chrono::seconds(10);
+                auto kl_now = std::chrono::steady_clock::now();
+                // Пробуємо кожні 5с (blind scan ~2-10с, дорого)
+                if (kl_now - kl_last_attempt >= std::chrono::seconds(5)) {
+                    kl_last_attempt = kl_now;
+                    kl_scan_attempts++;
+                    std::cerr << "[KnownList] blind scan спроба #" << kl_scan_attempts << "\n";
+                    uintptr_t base = kl_scanner->blindScan();
+                    if (base) {
+                        brain.SetPlayerBase(base);
+                        if (!brain.GetWorldState()) {
+                            brain.SetWorldState(
+                                std::make_unique<WorldState>(kl_pid, *kl_scanner));
                         }
+                        kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
+                        std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base
+                                  << std::dec << " WorldState активовано\n";
                     }
                 }
             }

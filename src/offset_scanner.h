@@ -9,19 +9,25 @@
 // Автоматичний пошук KnownList offsets у Wine/L2 процесі.
 // Використовує /proc/<pid>/maps та process_vm_readv — без root, без Cheat Engine.
 //
-// Типовий флоу:
+// Типовий флоу (без Cheat Engine, без координат):
 //   1. scanner.loadOffsets("offsets.json")   // якщо є — пропускаємо сканування
 //   2. Якщо не вдалось:
-//      base = scanner.findPlayerBase(x, y, z)  // стоячи нерухомо в грі
-//      scanner.findKnownListOffset(base, mob_x, mob_y)
+//      base = scanner.blindScan()  // STANDALONE — не потребує жодних координат
 //   3. scanner.saveOffsets("offsets.json")
 class OffsetScanner {
 public:
     explicit OffsetScanner(pid_t pid);
 
-    // Крок 1: знайти PlayerBase, скануючи всю пам'ять на triplet float X/Y/Z.
-    // x,y,z — поточні координати гравця (з MemReader або з логу клієнту).
-    // tolerance — допуск у L2 units (1.0 = дуже точно; 5.0 = якщо є дрейф).
+    // ── ОСНОВНИЙ МЕТОД: сліпий скан без координат ────────────────────────────
+    // Знаходить PlayerBase чисто структурно — перевіряє base+0x120 → масив obj
+    // з координатами в межах L2 світу. Не потребує MemReader, Cheat Engine,
+    // або будь-яких попередніх знань.
+    // Час виконання: ~2-10с залежно від розміру heap.
+    // Повертає 0 при невдачі.
+    uintptr_t blindScan();
+
+    // Знайти PlayerBase якщо координати гравця вже відомі (швидший, точніший).
+    // Використовується як fallback якщо blindScan() дає помилкових кандидатів.
     // Повертає 0 при невдачі.
     uintptr_t findPlayerBase(float x, float y, float z, float tolerance = 1.0f);
 
