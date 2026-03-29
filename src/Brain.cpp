@@ -627,13 +627,11 @@ void Brain::HandleAttacking() {
         m_last_target_redetect = Now();
     }
 
-    // KnownList: якщо WorldState увімкнено і таргет встановлений — instant kill detection
-    if (m_world && m_world->hasValidTarget() == false && m_world->targetIsDead()) {
-        if (!m_first_attack) {
-            Log("[ATTACKING] [KnownList] Таргет мертвий → LOOTING");
-            EnterState(State::Looting);
-            return;
-        }
+    // KnownList: якщо живих мобів стало менше — хтось загинув → instant LOOTING
+    if (m_world && !m_first_attack && m_world->anyMobDiedThisTick()) {
+        Log("[ATTACKING] [KnownList] Таргет мертвий → LOOTING");
+        EnterState(State::Looting);
+        return;
     }
 
     // Детекція смерті моба: HP ≤2% — потрібно 3 тіки поспіль (debounce false positives)
@@ -925,25 +923,29 @@ void Brain::HandleBuffing() {
     case 0: // Відкрити ALT+B, почекати поки вікно з'явиться
         Log("[Buffs] ALT+B → відкриваємо вікно...");
         sendAltB();
-        m_hands.Delay(2500); // збільшено 1500→2500мс: вікно повільно рендериться
+        m_hands.Delay(2000); // ALT+B відкривається ~1с + запас
         m_hands.Send();
         m_buff_stage = 1;
         break;
 
     case 1: { // Знайти і натиснути вкладку "Баффер"
-        // Перевіряємо чи ALT+B вікно відкрилось (шаблон)
+        // Зберігаємо кожну спробу: buff_stage1_check0.png, _check1.png, _check2.png
+        m_eyes.SaveFrame("tmp/buff_stage1_check"
+            + std::to_string(m_buff_open_retries) + ".png");
         float tab_score = 0.0f;
         auto tab_pt = m_buff_tab_templ.empty()
             ? std::optional<cv::Point>{}
-            : m_eyes.FindTemplate(m_buff_tab_templ, 0.40f, &tab_score);
+            : m_eyes.FindTemplate(m_buff_tab_templ, 0.50f, &tab_score); // знижено 0.60→0.50
 
         if (!tab_pt.has_value() && m_buff_open_retries < 3) {
-            // Вікно не з'явилось — чекаємо ще (без ALT+B toggle щоб не закрити відкрите вікно)
+            // BBS не відкрилась — один ALT+B щоб відкрити (або закрити якщо на
+            // неправильній сторінці, тоді наступний retry відкриє).
             m_buff_open_retries++;
             Log("[Buffs] Баффер не знайдено (score="
-                + std::to_string((int)(tab_score * 100)) + "%) — retry "
+                + std::to_string((int)(tab_score * 100)) + "%) — ALT+B retry "
                 + std::to_string(m_buff_open_retries) + "/3", LogLevel::Warning);
-            m_hands.Delay(2000); // чекаємо без toggle
+            sendAltB();
+            m_hands.Delay(2500); // чекаємо завантаження BBS
             m_hands.Send();
             // залишаємось в stage 1
             break;
@@ -969,7 +971,7 @@ void Brain::HandleBuffing() {
         m_hands.MoveMouseTo({cx, cy}); // WindowPoint() додає offset вікна → правильні screen coords
         m_hands.Delay(200);
         m_hands.LeftMouseButtonClick();
-        m_hands.Delay(2500); // чекаємо поки відкриється вікно профілів
+        m_hands.Delay(4000); // чекаємо поки сервер завантажить профілі
         m_hands.Send();
         m_buff_stage = 2;
         break;
@@ -977,26 +979,37 @@ void Brain::HandleBuffing() {
 
     case 2: { // Знайти і натиснути профіль "tty"
         m_eyes.SaveFrame("tmp/buff_stage2_after_tab.png"); // кадр ПІСЛЯ кліку на Баффер
-        // Якщо шаблон не знайдено — обчислюємо fallback відносно позиції "Баффер"
-        // (вікно могло бути в іншому місці ніж INI координати)
         int fb_x = m_cfg.buff_profile_x;
         int fb_y = m_cfg.buff_profile_y;
         if (m_buff_tab_click_pos.x > 0 && m_cfg.buff_tab_x > 0) {
-            // Зміщення реального табу відносно конфіг-координат
             int dx = m_buff_tab_click_pos.x - m_cfg.buff_tab_x;
             int dy = m_buff_tab_click_pos.y - m_cfg.buff_tab_y;
             fb_x = m_cfg.buff_profile_x + dx;
             fb_y = m_cfg.buff_profile_y + dy;
-            Log("[Buffs] Профіль fallback скориговано за позицією табу: delta=("
-                + std::to_string(dx) + "," + std::to_string(dy) + ") → ("
-                + std::to_string(fb_x) + "," + std::to_string(fb_y) + ")",
-                LogLevel::Debug);
         }
-        auto [cx, cy] = resolveClick(m_buff_profile_templ, fb_x, fb_y, "tty");
-        m_hands.MoveMouseTo({cx, cy}); // window-relative → правильні screen coords
+        float prof_score = 0.f;
+        auto prof_pt = m_buff_profile_templ.empty()
+            ? std::optional<cv::Point>{}
+            : m_eyes.FindTemplate(m_buff_profile_templ, 0.60f, &prof_score);
+
+        // Не ретруємо — профілі вже завантажені після Delay(4000) в Stage 1.
+        // Retries тут тільки з'їдали б 10с і дозволяли BBS авто-закритись.
+        int cx, cy;
+        if (prof_pt.has_value()) {
+            Log("[Buffs] tty знайдено (score=" + std::to_string((int)(prof_score*100))
+                + "%): " + std::to_string(prof_pt->x) + "," + std::to_string(prof_pt->y));
+            cx = prof_pt->x; cy = prof_pt->y;
+        } else {
+            m_eyes.SaveFrame("tmp/buff_debug_tty.png"); // зберігаємо що бачить бот
+            Log("[Buffs] tty не знайдено (score=" + std::to_string((int)(prof_score*100))
+                + "%) → fallback (" + std::to_string(fb_x)
+                + "," + std::to_string(fb_y) + ")", LogLevel::Warning);
+            cx = fb_x; cy = fb_y;
+        }
+        m_hands.MoveMouseTo({cx, cy});
         m_hands.Delay(200);
         m_hands.LeftMouseButtonClick();
-        m_hands.Delay(1000); // чекаємо застосування бафів
+        m_hands.Delay(1000);
         m_hands.Send();
         m_buff_stage = 3;
         break;

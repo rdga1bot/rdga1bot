@@ -20,16 +20,12 @@ std::vector<L2Object> KnownListReader::readAll(uintptr_t playerBase) const {
     if (!playerBase) return result;
 
     uintptr_t knownListPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
-    int32_t   knownCount   = rpm<int32_t> (playerBase + m_off.knownCountOff);
+    if (!isValidPtr(knownListPtr)) return result;
 
-    if (!isValidPtr(knownListPtr) || knownCount < 1 || knownCount > 2000)
-        return result;
-
-    result.reserve((size_t)knownCount);
-
-    for (int i = 0; i < knownCount; ++i) {
+    // Kamael client: +0x124 — NOT a count (it's a pointer). Use sentinel iteration.
+    for (int i = 0; i < 2000; ++i) {
         uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
-        if (!isValidPtr(objPtr)) continue;
+        if (!isValidPtr(objPtr)) break;
 
         L2Object obj;
         obj.memPtr   = objPtr;
@@ -57,14 +53,11 @@ std::vector<L2Character> KnownListReader::readMobs(uintptr_t playerBase) const {
     if (!playerBase) return result;
 
     uintptr_t knownListPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
-    int32_t   knownCount   = rpm<int32_t> (playerBase + m_off.knownCountOff);
+    if (!isValidPtr(knownListPtr)) return result;
 
-    if (!isValidPtr(knownListPtr) || knownCount < 1 || knownCount > 2000)
-        return result;
-
-    for (int i = 0; i < knownCount; ++i) {
+    for (int i = 0; i < 2000; ++i) {
         uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
-        if (!isValidPtr(objPtr)) continue;
+        if (!isValidPtr(objPtr)) break;
 
         int32_t typeRaw = rpm<int32_t>(objPtr + m_off.objTypeOff);
         if (typeRaw != 0) continue; // тільки Mob

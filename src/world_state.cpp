@@ -1,5 +1,6 @@
 #include "world_state.h"
 #include <algorithm>
+#include <iostream>
 
 WorldState::WorldState(pid_t pid, const OffsetScanner& offsets)
     : m_reader(pid, offsets) {}
@@ -11,6 +12,22 @@ void WorldState::update(uintptr_t playerBase) {
     // Тут оновлюємо тільки списки об'єктів KnownList.
     m_mobs  = m_reader.readMobs(playerBase);
     m_items = m_reader.readItems(playerBase);
+
+    // Kill detection: порівнюємо кількість живих мобів з попереднім тіком
+    int alive = 0;
+    for (const auto& mob : m_mobs)
+        if (!mob.isDead && mob.hp > 0.f) alive++;
+    m_mob_died_this_tick = (m_prev_alive_count > 0 && alive < m_prev_alive_count);
+
+    // DEBUG: раз на 5с виводимо кількість мобів (тимчасово)
+    static int dbg_tick = 0;
+    if (++dbg_tick % 50 == 0)
+        std::cerr << "[KnownList] mobs=" << m_mobs.size()
+                  << " alive=" << alive
+                  << " prev_alive=" << m_prev_alive_count
+                  << " died=" << m_mob_died_this_tick << "\n";
+
+    m_prev_alive_count = alive;
 
     // Оновити поточний таргет якщо він встановлений
     if (m_targetID != 0) {

@@ -49,6 +49,9 @@ public:
     bool saveOffsets(const std::string& path) const;
     bool loadOffsets(const std::string& path);
 
+    // Публічне читання для діагностики
+    bool readBytesPublic(uintptr_t addr, void* buf, size_t len) const { return readBytes(addr, buf, len); }
+
     // Runtime-значення offsets (перевизначаються findKnownListOffset або loadOffsets)
     uintptr_t knownListOff   = OFF_KNOWN_LIST;
     uintptr_t knownCountOff  = OFF_KNOWN_COUNT;

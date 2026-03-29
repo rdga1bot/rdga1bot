@@ -94,27 +94,15 @@ uintptr_t OffsetScanner::blindScan() {
             std::memcpy(&klPtr, buf.data() + i + 0x120, 4);
             if (!isValidPtr(klPtr)) continue;
 
-            // ── Перевірка 2: candidate + 0x124 → knownCount [5..500] ───────
-            // Мінімум 5: навіть у порожній кімнаті є NPC/предмети; 1-4 = false positive
-            int32_t klCount = 0;
-            std::memcpy(&klCount, buf.data() + i + 0x124, 4);
-            if (klCount < 5 || klCount > 500) continue;
-
-            // ── Перевірка 3: knownListPtr[0] → перший об'єкт ────────────────
+            // ── Перевірка 2: knownListPtr[0] → перший об'єкт (valid ptr) ───
+            // Примітка: +0x124 в Kamael клієнті — НЕ count, а другий ptr.
+            // Тому перевірку count прибрано; замість неї — valid ptr на перший obj.
             uint32_t firstObjPtr = rpm<uint32_t>(klPtr);
             if (!isValidPtr(firstObjPtr)) continue;
+            // klPtr і firstObjPtr мають бути в різних діапазонах (list ≠ element)
+            if (klPtr == firstObjPtr) continue;
 
-            // ── Перевірка 4: перший об'єкт XYZ в межах L2 світу ────────────
-            float ox = rpm<float>(firstObjPtr + 0x24);
-            float oy = rpm<float>(firstObjPtr + 0x28);
-            float oz = rpm<float>(firstObjPtr + 0x2C);
-            if (!isL2Coord(ox, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
-            if (!isL2Coord(oy, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
-            if (!isL2Coord(oz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // Обидва X і Y мають бути значущими: справжні L2 локації мають |X|>500 І |Y|>500
-            if (std::fabsf(ox) < 500.f || std::fabsf(oy) < 500.f) continue;
-
-            // ── Перевірка 5: сам кандидат (PlayerBase XYZ) ──────────────────
+            // ── Перевірка 3: сам кандидат (PlayerBase XYZ) ──────────────────
             float px = 0.f, py = 0.f, pz = 0.f;
             // Якщо залишились байти в буфері — беремо звідти без додаткового rpm
             if (i + 0x2C + 4 <= buf.size()) {
@@ -129,15 +117,16 @@ uintptr_t OffsetScanner::blindScan() {
             if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // Обидва X і Y мають бути значущими (справжній гравець ніколи не Y=0 або X=0)
+            // X і Y мають бути значущими (справжній гравець ніколи не X=0 або Y=0)
             if (std::fabsf(px) < 500.f || std::fabsf(py) < 500.f) continue;
-            // X,Y не рівні між собою
+            // Z не може бути точно 0 або степінь двійки (сміттєвий float)
+            if (std::fabsf(pz) < 10.f) continue;
+            // Координати не мають бути рівними між собою
             if (px == py && py == pz) continue;
 
             uintptr_t candidate = region.base + i;
             std::cerr << "[OffsetScanner] blindScan: PlayerBase=0x" << std::hex << candidate
-                      << " XYZ=(" << std::dec << (int)px << "," << (int)py << "," << (int)pz
-                      << ") KnownCount=" << klCount << "\n";
+                      << " XYZ=(" << std::dec << (int)px << "," << (int)py << "," << (int)pz << ")\n";
             return candidate;
         }
     }

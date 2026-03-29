@@ -767,9 +767,17 @@ printf "status\n" | ./rdga1bot --no-tui --quick
   - Запуск кожні 5с у main loop (дорогий scan ~2-10с), зупиняється після першого успіху
   - Після знаходження → `saveOffsets(offsets.json)` → наступний запуск завантажує без scan
 
+- **ALT+B buff FIX (2026-03-29)**: Stage 1 — threshold знижено 0.60→0.50; retry тепер надсилає один ALT+B (не два!) щоб відкрити; збережені debug скріни `tmp/buff_stage1_check0.png` per retry. **Результат: score=99% для обох шаблонів, баф працює** ✓
+  - Root cause was: два `sendAltB()` поспіль в retry = відкрити + одразу закрити. OpenCV не встигала нічого побачити.
+  - Stage 2: прибрано retry loop (5×2000ms=10с → BBS auto-close). Immediate fallback if template fails.
+- **Тест 2026-03-29 (після buff fix)**: 24 kills за 2:17хв = **10.5 kill/min**, 0 deaths ✓
+- **KnownList blindScan confirmed (2026-03-29)**: PlayerBase=0x3fb558 знаходиться коректно, knownListOff=0x120. Але `mobs=0 alive=0` — objTypeOff та інші offsets не відкалібровані для ElmoreLab Kamael client (тільки knownListOff верифіковано blindScan-ом).
+- **Мінімапа dx=25 завжди праворуч**: кожен TARGETING цикл однаково — підозрілий artifact або реальний моб справа від spawn.
+
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
-- **Buff template score 37%**: якщо ALT+B вікно не відкривається → fallback + retry 120с. Якщо регулярно → перезняти `template/buff_tab.png`
+- **KnownList mobs=0**: blindScan знаходить PlayerBase, але читання мобів порожнє. Причина: `objTypeOff`, `charHpOff` та ін. — дефолтні значення з `offsets_config.h` не підходять для цього клієнту. Потрібна калібровка цих offsets.
+- **Мінімапа dx=25 константно**: перевірити чи це реальний моб або artifact детекції.
 
 ## ПОТОЧНИЙ СТАН КЛАВІШ
 
@@ -787,15 +795,24 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-1. **KnownList тест**: `[KnownList] Enabled=true` вже вписано. Просто запустіть бот і чекайте в stderr:
-   - `[KnownList] blind scan спроба #1` — скан запустився
-   - `[OffsetScanner] blindScan: PlayerBase=0xXXX XYZ=(X,Y,Z) KnownCount=N` — знайдено!
-   - `[KnownList] PlayerBase=0x... WorldState активовано` — KnownList активний
-   - `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` — instant kill detection працює
-   - При невдачі (`blindScan: PlayerBase не знайдено`): скан повторюється кожні 5с
-   - **Не потребує `[MemReader]` або Cheat Engine**
-2. **MemReader offsets (опціонально)**: для точних HP/MP/CP барів — знайти через Cheat Engine → `[MemReader] Enabled=true`. KnownList вже незалежний від цього.
-3. **Тест buff trigger fix**: після ~N спроб без мобів (`N = cooldown_sec * 1000/150`, напр. 10с → ~67 спроб) — в логах має з'явитись `[STATE] TARGETING → BUFFING`.
-4. **Тест Flow Detection (після FIX)**: `[NAV] Flow-stuck` не повинен з'являтись при звичайному F2 (бот стоїть). Тільки після `WalkForward`.
-5. **Patrol налаштування**: для прямолінійних коридорів: `PatrolEnabled = true`, `PatrolPath = F2000,R700,F1500,L700`.
-6. **Тривалий фарм** — бот стабільний. Моніторити логи на `[ATTACKING] HP стабільний`.
+### Пріоритет 1: Калібровка KnownList offsets для ElmoreLab Kamael
+`blindScan()` знаходить `PlayerBase` і `knownListOff=0x120` ✓, але `mobs=0` бо інші offsets (objTypeOff, charHpOff, objXOff та ін.) — дефолти з `offsets_config.h` що не підходять для цього клієнту.
+
+**Задача**: знайти реальні offsets для ElmoreLab Kamael client:
+- `OFF_OBJ_TYPE` — який тип у мобів (0? 1? 2?)
+- `OFF_OBJ_X/Y/Z` — координати об'єкту
+- `OFF_CHAR_HP/HP_MAX/IS_DEAD` — стан моба
+- Метод: `OffsetScanner::calibrateObjectOffsets(objPtr, expectedX, expectedY, expectedZ)` вже є — передати ptr першого об'єкту з KnownList + відомі координати моба → знаходить XYZ offset. Для type/hp — scanувати вручну або через Cheat Engine.
+
+**Ціль**: `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` замість watchdog/OpenCV kill detection.
+
+### Пріоритет 2: Мінімапа dx=25 константно
+Кожен TARGETING показує `Найближчий моб праворуч (dx=25, rot=1)`. Підозра: artifact детекції червоних dots або статичний елемент UI що збігається з HSV фільтром мобів.
+
+**Задача**: зробити F12 → `tmp/calibrate.png` під час TARGETING і перевірити мінімапу в правому верхньому куті. Якщо dx=25 не реальний моб → знайти джерело artifact і відфільтрувати (виключити координати, підвищити S threshold, зменшити ROI).
+
+### Пріоритет 3: Тривалий фарм
+Бот стабільний (10.5 kill/min, 0 deaths). Запустити `./farm.sh` на 2+ годин і моніторити:
+- `[ATTACKING] HP стабільний 5с` — моб недосяжний → чи навігація виходить?
+- `[Buffs] Завершено` кожні 600с — баф підтверджено щоразу
+- Загальний uptime без зупинок
