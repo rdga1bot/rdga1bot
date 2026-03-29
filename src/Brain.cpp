@@ -853,15 +853,6 @@ void Brain::HandleBuffing() {
         EnterState(State::Idle);
         return;
     }
-    if (HasTarget()) {
-        // Відкладаємо на 10с (було 30с) — на активних спотах моби з'являються кожні 5-10с,
-        // 30с означає що бот ніколи не встигає зробити реальний баф.
-        m_last_buff = Now() - std::chrono::seconds(m_cfg.buff_interval - 10);
-        Log("[Buffs] Є таргет → перериваємо бафи, retry через 10с\n");
-        EnterState(State::Attacking);
-        return;
-    }
-
     // Хелпер: надіслати ALT+B (відкрити/закрити вікно баффера)
     auto sendAltB = [&]() {
         m_hands.KeyboardKeyDown(Input::KeyboardKey::LeftAlt);
@@ -872,6 +863,19 @@ void Brain::HandleBuffing() {
         m_hands.Delay(50);
         m_hands.KeyboardKeyUp(Input::KeyboardKey::LeftAlt);
     };
+
+    if (HasTarget()) {
+        // Якщо ALT+B вікно вже відкрито (stage >= 1) — закриваємо перед виходом,
+        // інакше наступна спроба надішле ALT+B і закриє вже відкрите вікно.
+        if (m_buff_stage >= 1) {
+            sendAltB();
+            m_hands.Send();
+        }
+        m_last_buff = Now() - std::chrono::seconds(m_cfg.buff_interval - 10);
+        Log("[Buffs] Є таргет → перериваємо бафи, retry через 10с\n");
+        EnterState(State::Attacking);
+        return;
+    }
 
     // Хелпер: визначити координати кліку через шаблон або fallback
     auto resolveClick = [&](const cv::Mat& templ, int fallback_x, int fallback_y,
@@ -921,7 +925,7 @@ void Brain::HandleBuffing() {
     case 0: // Відкрити ALT+B, почекати поки вікно з'явиться
         Log("[Buffs] ALT+B → відкриваємо вікно...");
         sendAltB();
-        m_hands.Delay(1500); // чекаємо поки вікно відкриється
+        m_hands.Delay(2500); // збільшено 1500→2500мс: вікно повільно рендериться
         m_hands.Send();
         m_buff_stage = 1;
         break;
@@ -934,13 +938,12 @@ void Brain::HandleBuffing() {
             : m_eyes.FindTemplate(m_buff_tab_templ, 0.60f, &tab_score);
 
         if (!tab_pt.has_value() && m_buff_open_retries < 3) {
-            // Вікно не відкрилось — повторити ALT+B
+            // Вікно не з'явилось — чекаємо ще (без ALT+B toggle щоб не закрити відкрите вікно)
             m_buff_open_retries++;
-            Log("[Buffs] ALT+B вікно не знайдено (score="
+            Log("[Buffs] Баффер не знайдено (score="
                 + std::to_string((int)(tab_score * 100)) + "%) — retry "
                 + std::to_string(m_buff_open_retries) + "/3", LogLevel::Warning);
-            sendAltB();
-            m_hands.Delay(2000); // довша пауза при retry
+            m_hands.Delay(2000); // чекаємо без toggle
             m_hands.Send();
             // залишаємось в stage 1
             break;
