@@ -19,6 +19,8 @@
 #include "Utils.h"
 #include "Intercept.h"
 #include "MemReader.h"
+#include "offset_scanner.h"
+#include "world_state.h"
 
 // ─── Signal handling (збереження stats при Ctrl+C / kill) ──────────────────
 static std::function<void()> g_cleanup;
@@ -139,6 +141,24 @@ int main(int argc, char* argv[]) {
         MemReader mem_reader;
 
         ApplyConfig(cfg, hands, eyes, brain, &mem_reader);
+
+        // KnownList: OffsetScanner + WorldState (якщо увімкнено)
+        std::unique_ptr<OffsetScanner> kl_scanner;
+        if (cfg.knownlist_enabled && mem_reader.IsOpen()) {
+            kl_scanner = std::make_unique<OffsetScanner>(mem_reader.GetPid());
+            // Спробуємо завантажити кешовані offsets з файлу
+            bool loaded = kl_scanner->loadOffsets(cfg.knownlist_offsets_file);
+            // Якщо завантажено — відразу створюємо WorldState
+            if (loaded) {
+                brain.SetWorldState(
+                    std::make_unique<WorldState>(mem_reader.GetPid(), *kl_scanner));
+                std::cerr << "[KnownList] WorldState активовано з " << cfg.knownlist_offsets_file << "\n";
+            } else if (!cfg.knownlist_autoscan) {
+                std::cerr << "[KnownList] offsets.json не знайдено, autoscan=false → KnownList вимкнено\n";
+            }
+            // Якщо autoscan=true і offsets не завантажено — сканування відбудеться
+            // в першому тіку коли MemReader матиме валідні координати гравця
+        }
 
         // Підключаємо лог-callback до Dashboard
         if (use_tui) {
@@ -303,6 +323,31 @@ int main(int argc, char* argv[]) {
             if (cfg.mem_enabled && mem_reader.IsOpen()) {
                 brain.SetMemPlayerState(mem_reader.ReadPlayer());
             }
+
+            // KnownList: autoscan PlayerBase якщо ще не знайдено
+            if (cfg.knownlist_enabled && kl_scanner && mem_reader.IsOpen()) {
+                if (brain.GetMemPlayerState().valid && brain.GetMemPlayerState().x != 0.f) {
+                    const auto& ps = brain.GetMemPlayerState();
+                    // Скануємо PlayerBase один раз
+                    static bool kl_scan_done = false;
+                    if (!kl_scan_done) {
+                        uintptr_t base = kl_scanner->findPlayerBase(ps.x, ps.y, ps.z);
+                        if (base) {
+                            brain.SetPlayerBase(base);
+                            // Якщо WorldState ще не створено — створюємо тепер
+                            if (cfg.knownlist_autoscan) {
+                                brain.SetWorldState(
+                                    std::make_unique<WorldState>(mem_reader.GetPid(), *kl_scanner));
+                                kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
+                                std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base
+                                          << std::dec << " WorldState активовано\n";
+                            }
+                            kl_scan_done = true;
+                        }
+                    }
+                }
+            }
+
             brain.Process(cfg.debug && !use_tui);
             eyes.Close();
 

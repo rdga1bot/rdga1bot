@@ -43,6 +43,9 @@ SRCS="
   $SRC/Intercept.cpp
   $SRC/Intercept_Linux.cpp
   $SRC/MemReader.cpp
+  $SRC/offset_scanner.cpp
+  $SRC/knownlist_reader.cpp
+  $SRC/world_state.cpp
 "
 
 echo "[1/2] Компіляція..."

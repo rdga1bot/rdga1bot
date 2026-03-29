@@ -300,6 +300,12 @@ bool Config::Load(const std::string& path) {
         }
     }
 
+    // [KnownList]
+    knownlist_enabled      = GetBool  ("KnownList", "Enabled",      knownlist_enabled);
+    knownlist_autoscan     = GetBool  ("KnownList", "AutoScan",     knownlist_autoscan);
+    knownlist_offsets_file = Get      ("KnownList", "OffsetsFile",  knownlist_offsets_file);
+    knownlist_max_range    = (float)GetDouble("KnownList", "MaxRange", (double)knownlist_max_range);
+
     // [MemReader]
     mem_enabled   = GetBool  ("MemReader", "Enabled",    mem_enabled);
     mem_proc_name = Get      ("MemReader", "ProcName",   mem_proc_name);

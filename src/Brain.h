@@ -3,12 +3,14 @@
 #include <chrono>
 #include <functional>
 #include <string>
+#include <memory>
 #include "Eyes.h"
 #include "Hands.h"
 #include "Config.h"
 #include "Stats.h"
 #include "Notify.h"
 #include "MemReader.h"
+#include "world_state.h"
 
 class Brain {
 public:
@@ -35,6 +37,10 @@ public:
     // Memory Reading: оновлення стану гравця з пам'яті (викликається з main loop)
     void SetMemPlayerState(const MemReader::PlayerState& s) { m_mem_player = s; }
     const MemReader::PlayerState& GetMemPlayerState() const { return m_mem_player; }
+
+    // KnownList: встановити WorldState (main.cpp передає ownership)
+    void SetWorldState(std::unique_ptr<WorldState> world) { m_world = std::move(world); }
+    void SetPlayerBase(uintptr_t base) { m_player_base = base; }
 
     // Рівень логування
     void SetLogLevel(LogLevel level) { m_min_log_level = level; }
@@ -145,6 +151,10 @@ private:
 
     // Memory Reading: стан гравця з пам'яті (оновлюється з main loop кожен тік)
     MemReader::PlayerState m_mem_player;
+
+    // KnownList: WorldState (null якщо KnownList вимкнено)
+    std::unique_ptr<WorldState> m_world;
+    uintptr_t m_player_base = 0;
 
     // Лог з рівнем (рівень за замовчуванням — Info)
     void Log(const std::string& msg, LogLevel level = LogLevel::Info);

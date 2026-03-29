@@ -45,11 +45,18 @@ rdga1bot/
 │   ├── Capture_Linux.cpp   — XShm screen capture
 │   ├── Window_Linux.cpp    — X11 window finding
 │   ├── MemReader.cpp/.h    — читання пам'яті L2 процесу (Wine) через process_vm_readv
+│   ├── offsets_config.h    — constexpr KnownList offsets (HF client defaults)
+│   ├── l2_objects.h        — L2Object, L2Character, L2ObjectType structs
+│   ├── offset_scanner.h/.cpp — OffsetScanner: авто-пошук PlayerBase + KnownList offset
+│   ├── knownlist_reader.h/.cpp — читання KnownList через process_vm_readv
+│   ├── world_state.h/.cpp  — WorldState: tick aggregator для Brain
 │   └── FPS.h               — FPS counter
 ├── build.sh                — g++ пряма компіляція (cmake не потрібен)
 ├── launch.sh               — запуск з перевіркою /dev/uinput
 ├── rdga1bot.ini            — конфігурація (НЕ в git — містить Telegram токен)
 ├── rdga1bot.example.ini    — приклад з УСІМА опціями і коментарями (в git)
+├── offsets.json            — кешовані KnownList offsets (генерується OffsetScanner, НЕ в git)
+├── CALIBRATION.md          — покрокова інструкція з налаштування KnownList сканера
 ├── template/               — постійні шаблони для template matching
 │   ├── buff_tab.png        — кнопка "Баффер" в ALT+B навігації
 │   └── buff_profile.png    — профіль "tty1" в бафер-менеджері
@@ -327,6 +334,14 @@ MaxCP_Offset = 0x0
 PosX_Offset  = 0x0
 PosY_Offset  = 0x0
 PosZ_Offset  = 0x0
+
+[KnownList]
+# KnownList сканер: читає мобів/предмети з пам'яті Wine/L2 процесу
+# Потребує [MemReader] Enabled=true + правильні PosX/Y/Z_Offset
+Enabled = true           # true = активувати WorldState
+AutoScan = true          # true = авто-пошук PlayerBase при старті (потрібні координати)
+OffsetsFile = offsets.json  # кешовані offsets (генерується OffsetScanner)
+MaxRange = 1200          # L2 units — радіус пошуку мобів/лута
 ```
 
 `Config::Validate()` — перевіряє MacroKeys, AttackKeys, конфлікти клавіш, HP threshold.
@@ -358,6 +373,8 @@ PosZ_Offset  = 0x0
 | `WallDetection`     | `[Navigation]`| `false` | `true` → Sobel wall detection (experimental). |
 | `PatrolEnabled`     | `[Patrol]`    | `false` | `true` → патруль по PatrolPath коли мінімапа порожня N спроб. |
 | `MemReader.Enabled` | `[MemReader]` | `false` | `true` → читати HP/MP/CP/XYZ з пам'яті Wine процесу замість OpenCV. Потребує правильних offsets. |
+| `KnownList.Enabled` | `[KnownList]` | `false` | `true` → активує WorldState (OffsetScanner + KnownListReader). Instant kill detection в ATTACKING. Потребує `[MemReader] Enabled=true` + правильні PosXYZ offsets. |
+| `KnownList.AutoScan` | `[KnownList]` | `true` | `false` → не сканувати автоматично; використовувати тільки `offsets.json` якщо він є. |
 
 ### Приклади конфігурацій
 
@@ -730,6 +747,14 @@ printf "status\n" | ./rdga1bot --no-tui --quick
   - `Brain::CheckPotions()`: доданий `[POTION] CP N%` лог (HP/MP вже були)
   - `Brain::HandleAttacking()`: `DetectMinimap()` (~2-5мс) тільки коли `approach_possible=true`
   - `Eyes::GetMovementFlow()`: `static` сітка точок — будується один раз, не виділяє пам'ять щотіку
+- **KnownList scanner (2026-03-29)**: `OffsetScanner` + `KnownListReader` + `WorldState` ✓
+  - `src/offsets_config.h`, `l2_objects.h`, `offset_scanner.h/.cpp`, `knownlist_reader.h/.cpp`, `world_state.h/.cpp`
+  - Linux ONLY: `process_vm_readv`, `/proc/<pid>/maps` — zero Windows API ✓
+  - `[KnownList]` секція в .ini: `Enabled`, `AutoScan`, `OffsetsFile`, `MaxRange`
+  - Instant kill detection: `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` без debounce ×8
+  - `offsets.json` кеш — завантажується при старті, не потребує re-scan щоразу
+  - `CALIBRATION.md` — покрокова інструкція
+  - **Потребує**: `[MemReader] Enabled=true` + правильні PosX/Y/Z offsets (Cheat Engine)
 
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
@@ -751,9 +776,15 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-1. **Тест buff trigger fix**: після ~N спроб без мобів (`N = cooldown_sec * 1000/150`, напр. 10с → ~67 спроб) — в логах має з'явитись `[STATE] TARGETING → BUFFING`. Якщо не з'являється → перевірити `buff_in=Nс` в `[HB]` рядку.
-2. **Тест Flow Detection (після FIX)**: `[NAV] Flow-stuck` тепер не повинен з'являтись при звичайному F2 таргетингу (бот стоїть на місці). Має з'являтись лише після `WalkForward` якщо персонаж не зрушив.
-3. **Тест unreachable mob fix**: якщо `[ATTACKING] HP стабільний 5с` → наступний TARGETING лог не повинен мати `[target macro]` в перших 15 спробах — тільки F2 + навігація.
-4. **MemReader offsets**: якщо хочемо точні HP/MP/CP з пам'яті — знайти offsets через Cheat Engine під Wine, вписати в `[MemReader]` + `Enabled = true`.
-5. **Patrol налаштування**: для прямолінійних коридорів: `PatrolEnabled = true`, `PatrolPath = F2000,R700,F1500,L700`. Тестувати поки мінімапа порожня.
+1. **KnownList активація**: `[KnownList] Enabled=true` вже вписано в ini. Потрібно:
+   - Встановити `[MemReader] Enabled=true` + знайти offsets (Cheat Engine → PosX/Y/Z)
+   - При першому запуску бот автоматично знайде PlayerBase (`[OffsetScanner] findPlayerBase`)
+   - Перевірити в логах: `[KnownList] PlayerBase=0x... WorldState активовано`
+   - Потім `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` замість `NoTarget ×8`
+   - Якщо `findPlayerBase` не знаходить → перевірити що PosXYZ offsets правильні
+   - Детальна інструкція: `CALIBRATION.md`
+2. **MemReader offsets**: знайти через Cheat Engine під Wine → `[MemReader] Enabled=true` → активує і MemReader, і KnownList autoscan.
+3. **Тест buff trigger fix**: після ~N спроб без мобів (`N = cooldown_sec * 1000/150`, напр. 10с → ~67 спроб) — в логах має з'явитись `[STATE] TARGETING → BUFFING`.
+4. **Тест Flow Detection (після FIX)**: `[NAV] Flow-stuck` не повинен з'являтись при звичайному F2 (бот стоїть). Тільки після `WalkForward`.
+5. **Patrol налаштування**: для прямолінійних коридорів: `PatrolEnabled = true`, `PatrolPath = F2000,R700,F1500,L700`.
 6. **Тривалий фарм** — бот стабільний. Моніторити логи на `[ATTACKING] HP стабільний`.

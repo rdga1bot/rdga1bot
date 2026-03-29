@@ -134,6 +134,12 @@ public:
     int target_wnd_w = 179;          // TargetStatusWnd width
     int target_wnd_h = 46;           // TargetStatusWnd height
 
+    // [KnownList] — KnownList сканер (OffsetScanner + KnownListReader)
+    bool        knownlist_enabled      = false;
+    bool        knownlist_autoscan     = true;   // автопошук playerBase при старті
+    std::string knownlist_offsets_file = "offsets.json"; // файл кешованих offsets
+    float       knownlist_max_range    = 1200.f; // L2 units — радіус пошуку мобів
+
     // [MemReader] — читання пам'яті L2 процесу (Wine, /proc/PID/mem)
     // Всі значення = 0 → вимкнено (використовується OpenCV детекція)
     bool     mem_enabled     = false;

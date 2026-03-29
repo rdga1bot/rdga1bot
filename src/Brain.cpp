@@ -160,6 +160,16 @@ void Brain::Process(bool debug) {
         m_detect_me_fail_count = 0;
     }
 
+    // KnownList: оновлюємо WorldState кожен тік (якщо увімкнено)
+    if (m_world && m_player_base) {
+        if (m_mem_player.valid) {
+            m_world->playerX = m_mem_player.x;
+            m_world->playerY = m_mem_player.y;
+            m_world->playerZ = m_mem_player.z;
+        }
+        m_world->update(m_player_base);
+    }
+
     // Авто-калібрування TargetStatusWnd: логуємо якщо x змінився
     if (m_eyes.GetAutoCalX() >= 0) {
         Log("[Eyes] TargetWnd авто-калібрування: x=" +
@@ -619,6 +629,15 @@ void Brain::HandleAttacking() {
         m_eyes.ResetTarget();
         m_target = m_eyes.DetectTarget();
         m_last_target_redetect = Now();
+    }
+
+    // KnownList: якщо WorldState увімкнено і таргет встановлений — instant kill detection
+    if (m_world && m_world->hasValidTarget() == false && m_world->targetIsDead()) {
+        if (!m_first_attack) {
+            Log("[ATTACKING] [KnownList] Таргет мертвий → LOOTING");
+            EnterState(State::Looting);
+            return;
+        }
     }
 
     // Детекція смерті моба: HP ≤2% — потрібно 3 тіки поспіль (debounce false positives)
