@@ -77,7 +77,7 @@ void Brain::EnterState(State s) {
             break;
 
         case State::Targeting:
-            m_macro_idx = 0;
+            // m_macro_idx НЕ скидаємо — він зберігається між циклами для ротації F7→F8→F9→...
             m_macro_attempts = 0;
             m_prev_target_hp = -1;
             m_minimap_rotate_count = 0;
@@ -431,17 +431,25 @@ void Brain::HandleTargeting() {
         Log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable flag", LogLevel::Debug);
     }
 
-    // Резервний: /target макроси — перебираємо F7-F11.
-    // Якщо попередній ATTACKING закінчився HP-stable (моб недосяжний) →
-    // затримуємо макроси до attempt 15, щоб навігація мала час вийти з кімнати.
-    // Нормальний режим: макроси після 2 F2 спроб (кожна парна).
-    static constexpr int kMacroFallbackAfter        = 2;
-    static constexpr int kMacroFallbackAfterUnreach = 15; // більше спроб навігації після stuck
-    const int macro_threshold = m_attack_was_unreachable
-                                    ? kMacroFallbackAfterUnreach
-                                    : kMacroFallbackAfter;
-    if (!m_cfg.target_macro_keys.empty() && m_macro_attempts > macro_threshold
-        && m_macro_attempts % 2 == 0) {
+    // /target макроси (F7-F11) — ротація по черзі.
+    // m_macro_idx НЕ скидається між циклами → природня ротація F7→F8→F9→...
+    //
+    // Режим 1 (attempt==1, нормальний): макрос ЗАМІСТЬ F2 на першій спробі кожного циклу.
+    //   → бот таргетує різних мобів по іменах, а не завжди найближчого (F2).
+    //   → якщо макрос не знайшов → attempt 2+ → F2 як fallback.
+    //
+    // Режим 2 (attempt > threshold, парна): fallback якщо F2 теж не знайшов.
+    //
+    // Unreachable: при m_attack_was_unreachable=true — відкладаємо до attempt 15
+    //   (навігація повинна вийти з кімнати перш ніж макроси знову спрацюють).
+    static constexpr int kMacroFallbackAfterUnreach = 15;
+    const bool macro_at_start = !m_cfg.target_macro_keys.empty()
+                                && !m_attack_was_unreachable
+                                && m_macro_attempts == 1;
+    const bool macro_fallback = !m_cfg.target_macro_keys.empty()
+                                && m_macro_attempts > (m_attack_was_unreachable ? kMacroFallbackAfterUnreach : 2)
+                                && m_macro_attempts % 2 == 0;
+    if (macro_at_start || macro_fallback) {
         m_hands.Delay(80);
         m_hands.TargetMacro(m_macro_idx);
         m_macro_idx = (m_macro_idx + 1) % (int)m_cfg.target_macro_keys.size();
