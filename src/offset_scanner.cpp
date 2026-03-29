@@ -110,8 +110,8 @@ uintptr_t OffsetScanner::blindScan() {
             if (!isL2Coord(ox, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(oy, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(oz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // Не всі нулі
-            if (ox == 0.f && oy == 0.f && oz == 0.f) continue;
+            // Не біля нуля: справжні L2 локації мають |X|>500 або |Y|>500
+            if (std::fabsf(ox) < 500.f && std::fabsf(oy) < 500.f) continue;
 
             // ── Перевірка 5: сам кандидат (PlayerBase XYZ) ──────────────────
             float px = 0.f, py = 0.f, pz = 0.f;
@@ -128,8 +128,9 @@ uintptr_t OffsetScanner::blindScan() {
             if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            if (px == 0.f && py == 0.f && pz == 0.f) continue;
-            // X,Y не рівні між собою (захист від нулів-з-однаковими-значеннями)
+            // Не біля нуля: справжні L2 координати гравця мають |X|>500 або |Y|>500
+            if (std::fabsf(px) < 500.f && std::fabsf(py) < 500.f) continue;
+            // X,Y не рівні між собою (захист від однакових значень)
             if (px == py && py == pz) continue;
 
             uintptr_t candidate = region.base + i;
