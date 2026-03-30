@@ -53,7 +53,9 @@ public:
     bool targetIsDead()   const;
 
     // Чи впав лічильник живих мобів з минулого тіку? (kill detection без objectID)
-    bool anyMobDiedThisTick() const { return m_mob_died_this_tick; }
+    bool anyMobDiedThisTick() const {
+        return m_mob_died_this_tick.load(std::memory_order_relaxed);
+    }
 
     // Чи є предмети для збору в радіусі range L2-юнітів від (px,py)?
     bool hasLootNearby(float px, float py, float range = 300.f) const;
@@ -87,7 +89,7 @@ private:
     std::optional<L2Character> m_target;
     int m_targetID = 0;
     int m_prev_alive_count = -1;  // -1 = не ініціалізовано
-    bool m_mob_died_this_tick = false;
+    std::atomic<bool> m_mob_died_this_tick{false};
 
     // Фоновий сканер
     std::thread             m_bg_thread;

@@ -50,7 +50,7 @@ void WorldState::bgLoop() {
                 bool died = (m_prev_alive_count > 0 && alive < m_prev_alive_count);
                 m_mobs  = std::move(mobs);
                 m_items = std::move(items);
-                m_mob_died_this_tick = died;
+                m_mob_died_this_tick.store(died, std::memory_order_relaxed);
                 m_prev_alive_count   = alive;
 
                 // Оновлюємо поточний таргет якщо він є
@@ -62,13 +62,20 @@ void WorldState::bgLoop() {
                 }
             }
 
-            // Логуємо тільки при зміні кількості мобів (не кожні 3с)
+            // Зберігаємо розміри під lock для безпечного логування поза lock
+            size_t snap_mobs = 0, snap_items = 0;
+            {
+                std::lock_guard<std::mutex> lk2(m_mutex);
+                snap_mobs  = m_mobs.size();
+                snap_items = m_items.size();
+            }
+
             static size_t prev_log_mobs = SIZE_MAX;
-            if (m_mobs.size() != prev_log_mobs) {
-                std::cerr << "[KnownList] mobs=" << m_mobs.size()
+            if (snap_mobs != prev_log_mobs) {
+                std::cerr << "[KnownList] mobs=" << snap_mobs
                           << " alive=" << alive
-                          << " items=" << m_items.size() << "\n";
-                prev_log_mobs = m_mobs.size();
+                          << " items=" << snap_items << "\n";
+                prev_log_mobs = snap_mobs;
             }
 
             // Одноразова діагностика при першому порожньому скані
@@ -129,7 +136,7 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
 
     // Fast re-read: перечитуємо hp/isDead поточного таргету між скануваннями
     std::lock_guard<std::mutex> lk(m_mutex);
-    m_mob_died_this_tick = false;
+    m_mob_died_this_tick.store(false, std::memory_order_relaxed);
     if (m_target.has_value() && m_target->memPtr) {
         float hp = 0.f;
         int32_t dead = 0;
@@ -138,7 +145,7 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
         m_target->hp     = hp;
         m_target->isDead = (dead != 0);
         if (m_target->isDead || hp <= 0.f) {
-            m_mob_died_this_tick = true;
+            m_mob_died_this_tick.store(true, std::memory_order_relaxed);
         }
     }
 }
