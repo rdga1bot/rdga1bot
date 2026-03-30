@@ -27,6 +27,8 @@ constexpr uintptr_t OFF_CHAR_HP_MAX  = 0x1F8;  // float  — MaxHP
 constexpr uintptr_t OFF_CHAR_IS_DEAD = 0x210;  // int32  — 1=мертвий
 
 // Region scan параметри (Kamael ElmoreLab, підтверджено calibrate 2026-03-30)
-// Об'єкти гри знаходяться у фіксованому регіоні l2.exe flat object array
+// Об'єкти гри знаходяться у фіксованому регіоні l2.exe flat object array.
+// 0x3F0000-0x500000 = 704KB покриває підтверджений діапазон + буфер для далеких мобів.
+// stride=0x5C0 (1472 bytes) → 704KB / 1472 ≈ 490 object slots.
 constexpr uintptr_t OFF_REGION_SCAN_BASE = 0x3F0000; // початок сканування
-constexpr uintptr_t OFF_REGION_SCAN_END  = 0x440000; // кінець (320KB)
+constexpr uintptr_t OFF_REGION_SCAN_END  = 0x500000; // кінець (704KB, розширено з 320KB)

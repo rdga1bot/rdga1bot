@@ -5,14 +5,13 @@
 WorldState::WorldState(pid_t pid, const OffsetScanner& offsets)
     : m_reader(pid, offsets) {}
 
-void WorldState::update(uintptr_t playerBase) {
+void WorldState::update(uintptr_t playerBase, float mob_range, float item_range) {
     if (!playerBase) return;
 
     // Region scan: пряме сканування пам'яті замість KnownList pointer chain.
-    // Для ElmoreLab Kamael: pb+0x120 → DLL/code space, не масив об'єктів.
-    // readMobsRegionScan() сканує 0x3F0000-0x440000 по 64KB чанках.
-    m_mobs  = m_reader.readMobsRegionScan(playerBase, 1500.f);
-    m_items = m_reader.readItemsRegionScan(playerBase, 500.f);
+    // mob_range передається з cfg.knownlist_max_range (дефолт 2500 > радіус мінімарти ~1560).
+    m_mobs  = m_reader.readMobsRegionScan(playerBase, mob_range);
+    m_items = m_reader.readItemsRegionScan(playerBase, item_range);
 
     // Kill detection: порівнюємо кількість живих мобів з попереднім тіком
     int alive = 0;

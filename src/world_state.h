@@ -14,7 +14,9 @@ public:
     WorldState(pid_t pid, const OffsetScanner& offsets);
 
     // Оновити стан (викликати кожен тік, якщо playerBase відомий)
-    void update(uintptr_t playerBase);
+    // mob_range  — радіус пошуку мобів (L2 units); дефолт = 2500 (більше радіуса мінімарти ~1560)
+    // item_range — радіус пошуку лута (L2 units)
+    void update(uintptr_t playerBase, float mob_range = 2500.f, float item_range = 500.f);
 
     // Аксесори
     const std::vector<L2Character>& mobs()  const { return m_mobs;  }

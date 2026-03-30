@@ -167,7 +167,7 @@ void Brain::Process(bool debug) {
             m_world->playerY = m_mem_player.y;
             m_world->playerZ = m_mem_player.z;
         }
-        m_world->update(m_player_base);
+        m_world->update(m_player_base, m_cfg.knownlist_max_range);
     }
 
     // Авто-калібрування TargetStatusWnd: логуємо якщо x змінився
