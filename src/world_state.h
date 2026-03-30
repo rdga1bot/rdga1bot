@@ -35,10 +35,19 @@ public:
     // Повний scan тепер у фоновому thread; тут тільки fast re-read таргету.
     void update(uintptr_t playerBase, float mob_range = 2500.f, float item_range = 500.f);
 
-    // Аксесори
-    const std::vector<L2Character>& mobs()  const { return m_mobs;  }
-    const std::vector<L2Object>&    items() const { return m_items; }
-    const std::optional<L2Character>& target() const { return m_target; }
+    // Аксесори — повертають snapshot-copy під lock (bg thread може оновлювати m_mobs)
+    std::vector<L2Character> mobs() const {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        return m_mobs;
+    }
+    std::vector<L2Object> items() const {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        return m_items;
+    }
+    std::optional<L2Character> target() const {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        return m_target;
+    }
 
     bool hasValidTarget() const;
     bool targetIsDead()   const;
@@ -87,7 +96,7 @@ private:
     uintptr_t               m_playerBase   = 0;
     float                   m_mob_range    = 2500.f;
     float                   m_item_range   = 500.f;
-    static constexpr int    kScanIntervalMs = 3000;
+    static constexpr int    kScanIntervalMs = 1000;  // 1с — kill detection затримка max 1с
 
     void bgLoop(); // тіло фонового потоку
 };

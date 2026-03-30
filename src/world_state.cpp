@@ -38,6 +38,7 @@ void WorldState::bgLoop() {
             if (mobs.empty()) {
                 mobs = m_reader.readAllAsChars(pb);
             }
+            const bool all_mobs_empty = mobs.empty(); // захоплюємо до std::move
             auto items = m_reader.readItemsRegionScan(pb, item_r);
 
             int alive = 0;
@@ -70,9 +71,13 @@ void WorldState::bgLoop() {
                 prev_log_mobs = m_mobs.size();
             }
 
-            // Діагностика при першому порожньому скані
+            // Одноразова діагностика при першому порожньому скані
+            // (обидва методи повернули 0 — objTypeOff або offsets не відкалібровані)
             static bool diagnosed = false;
-            if (!diagnosed && m_mobs.empty() && m_items.empty()) {
+            if (!diagnosed && all_mobs_empty) {
+                std::cerr << "[KnownList] WARN: обидва методи повернули 0 мобів.\n"
+                          << "[KnownList] Запусти: ./rdga1bot --dump-objects\n"
+                          << "[KnownList] і перевір objTypeOff в offsets.json\n";
                 m_reader.diagnoseTypes(pb);
                 diagnosed = true;
             }

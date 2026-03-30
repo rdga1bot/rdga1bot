@@ -1058,8 +1058,13 @@ int main(int argc, char* argv[]) {
                     uintptr_t base = kl_scan_result.exchange(0);
                     brain.SetPlayerBase(base);
                     if (!brain.GetWorldState()) {
-                        brain.SetWorldState(
-                            std::make_unique<WorldState>(kl_pid, *kl_scanner));
+                        auto ws = std::make_unique<WorldState>(kl_pid, *kl_scanner);
+                        ws->startBackground(base,
+                            cfg.knownlist_max_range, 500.f);
+                        brain.SetWorldState(std::move(ws));
+                    } else {
+                        // Re-scan після respawn/restart: оновити playerBase у bg thread
+                        brain.GetWorldState()->setPlayerBase(base);
                     }
                     kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
                     std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base

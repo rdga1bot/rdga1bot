@@ -550,7 +550,7 @@ void Brain::HandleTargeting() {
 
     // ── Memory навігація (пріоритет над мінімапою якщо увімкнено) ────────────
     if (m_cfg.navigation.enabled && m_world && m_player_base) {
-        const auto& kl_mobs = m_world->mobs();
+        auto kl_mobs = m_world->mobs(); // snapshot copy (thread-safe)
         if (!kl_mobs.empty()) {
             auto nearest = m_world->findNearestMob(
                 kl_mobs, m_mem_player.x, m_mem_player.y, 1200.f);
@@ -677,7 +677,9 @@ void Brain::HandleAttacking() {
     // KnownList memory read: instant kill detection + HP update
     // Якщо feature flag вимкнено → логіка як раніше (OpenCV + debounce).
     if (m_world && !m_first_attack) {
-        const auto& mem_mobs = m_world->mobs();
+        // Fast re-read таргету між bgLoop сканами
+        if (m_player_base) m_world->update(m_player_base, m_cfg.knownlist_max_range);
+        auto mem_mobs = m_world->mobs(); // snapshot copy (thread-safe)
 
         // Instant kill detection (mem_use_for_kill_detect або anyMobDiedThisTick)
         if (m_cfg.mem_use_for_kill_detect && !mem_mobs.empty()) {
