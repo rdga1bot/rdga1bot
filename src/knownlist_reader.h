@@ -24,6 +24,10 @@ public:
         float playerX, float playerY,
         float maxRange = 1200.f) const;
 
+    // Діагностика типів: логує offsets +0x14..+0x20 для перших 10 об'єктів.
+    // Допомагає знайти правильний objTypeOff якщо readMobs() порожній.
+    void diagnoseTypes(uintptr_t playerBase) const;
+
 private:
     pid_t                m_pid;
     const OffsetScanner& m_off;

@@ -23,9 +23,15 @@ std::vector<L2Object> KnownListReader::readAll(uintptr_t playerBase) const {
     if (!isValidPtr(knownListPtr)) return result;
 
     // Kamael client: +0x124 — NOT a count (it's a pointer). Use sentinel iteration.
+    // Sparse arrays may have null gaps → continue; only 8 consecutive nulls = end.
+    int null_streak = 0;
     for (int i = 0; i < 2000; ++i) {
         uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
-        if (!isValidPtr(objPtr)) break;
+        if (!isValidPtr(objPtr)) {
+            if (++null_streak >= 8) break;
+            continue;
+        }
+        null_streak = 0;
 
         L2Object obj;
         obj.memPtr   = objPtr;
@@ -55,9 +61,14 @@ std::vector<L2Character> KnownListReader::readMobs(uintptr_t playerBase) const {
     uintptr_t knownListPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
     if (!isValidPtr(knownListPtr)) return result;
 
+    int null_streak2 = 0;
     for (int i = 0; i < 2000; ++i) {
         uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
-        if (!isValidPtr(objPtr)) break;
+        if (!isValidPtr(objPtr)) {
+            if (++null_streak2 >= 8) break;
+            continue;
+        }
+        null_streak2 = 0;
 
         int32_t typeRaw = rpm<int32_t>(objPtr + m_off.objTypeOff);
         if (typeRaw != 0) continue; // тільки Mob
@@ -86,6 +97,35 @@ std::vector<L2Object> KnownListReader::readItems(uintptr_t playerBase) const {
         if (obj.type == L2ObjectType::Item)
             items.push_back(obj);
     return items;
+}
+
+// ── Діагностика типів об'єктів ────────────────────────────────────────────────
+void KnownListReader::diagnoseTypes(uintptr_t playerBase) const {
+    uintptr_t klPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
+    if (!isValidPtr(klPtr)) return;
+
+    std::cerr << "[KnownList] Type diagnosis (first 10 objects):\n";
+    int null_streak = 0;
+    for (int i = 0; i < 10; ++i) {
+        uintptr_t objPtr = rpm<uint32_t>(klPtr + (uintptr_t)i * 4);
+        if (!isValidPtr(objPtr)) {
+            if (++null_streak >= 3) break;
+            continue;
+        }
+        null_streak = 0;
+        int32_t typeAt14 = rpm<int32_t>(objPtr + 0x14);
+        int32_t typeAt18 = rpm<int32_t>(objPtr + 0x18);
+        int32_t typeAt1C = rpm<int32_t>(objPtr + 0x1C);
+        int32_t typeAt20 = rpm<int32_t>(objPtr + 0x20);
+        float   x        = rpm<float>  (objPtr + m_off.objXOff);
+        float   y        = rpm<float>  (objPtr + m_off.objYOff);
+        std::cerr << "  obj[" << i << "] ptr=0x" << std::hex << objPtr
+                  << " +0x14=" << std::dec << typeAt14
+                  << " +0x18=" << typeAt18
+                  << " +0x1C=" << typeAt1C
+                  << " +0x20=" << typeAt20
+                  << " X=" << (int)x << " Y=" << (int)y << "\n";
+    }
 }
 
 // ── Знайти найближчого живого моба ────────────────────────────────────────────

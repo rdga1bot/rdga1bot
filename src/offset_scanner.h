@@ -52,6 +52,12 @@ public:
     // Публічне читання для діагностики
     bool readBytesPublic(uintptr_t addr, void* buf, size_t len) const { return readBytes(addr, buf, len); }
 
+    // Публічні обгортки для --calibrate і validity re-check
+    template<typename T>
+    T rpm_pub(uintptr_t addr) const { return rpm<T>(addr); }
+
+    bool isValidPtr_pub(uintptr_t v) const { return isValidPtr(v); }
+
     // Runtime-значення offsets (перевизначаються findKnownListOffset або loadOffsets)
     uintptr_t knownListOff   = OFF_KNOWN_LIST;
     uintptr_t knownCountOff  = OFF_KNOWN_COUNT;

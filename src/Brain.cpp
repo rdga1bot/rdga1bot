@@ -921,7 +921,9 @@ void Brain::HandleBuffing() {
     switch (m_buff_stage) {
 
     case 0: // Відкрити ALT+B, почекати поки вікно з'явиться
-        Log("[Buffs] ALT+B → відкриваємо вікно...");
+        Log("[Buffs] ESC + ALT+B → знімаємо таргет і відкриваємо вікно...");
+        m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+        m_hands.Delay(300); // L2 обробляє ESC, таргет/флаг знятий
         sendAltB();
         m_hands.Delay(2000); // ALT+B відкривається ~1с + запас
         m_hands.Send();

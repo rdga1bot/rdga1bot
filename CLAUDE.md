@@ -722,9 +722,6 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **Log move semantics (2026-03-24)**: `m_log_callback(std::move(line))` — уникає зайвого string copy до Dashboard. ✓
 - **Buff score=32%→retry→99% підтверджено (2026-03-24)**: логи тесту: retry 1/3 → score=99% → успішно. ✓
 - **Autocal одноразова (2026-03-24)**: x=598→559 при першому таргеті, далі жодних стрибків (guard scan_best≥8 + ±150px від base). ✓
-- **Screen-Y фільтр retuned (2026-03-24)**: 450→**300**, макс відхилень 10→**3** — пустеля 450 була надто агресивна для підземель; 3 відхилення → приймаємо будь-який таргет ✓
-- **Kill threshold 5%→2% (2026-03-24)**: 5% → хибні LOOTING при живих мобах 1-3% (1px = 0.66%, бар 152px). 2% — безпечний мінімум: моб з 1px залишку = hp≈1% → ще атакується. ✓
-- **farm.sh: --quick fix (2026-03-24)**: `./rdga1bot --no-tui` без `--quick` → setup wizard читав stdin=/dev/null → ESC → зупинка. Додано `--quick`. ✓
 - **Screen-Y та MaxFarRejects → .ini (2026-03-24)**: `NearbyYThreshold` (дефолт 200) і `MaxFarRejects` (дефолт 5) у `[Targeting]`. `0` = вимкнено. Для підземель 0-200, для пустелі 350-450. ✓
 - **Minimap S поріг 180→100, area_min 4.0→2.0 (2026-03-24)**: в підземеллях точки мобів менші і менш насичені. Нові значення сумісні з обома локаціями. ✓
 - **LootEnabled / BuffEnabled (2026-03-28)**: master on/off перемикачі для LOOTING і BUFFING. `false` = відповідний стан повністю пропускається. ✓
@@ -773,10 +770,15 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **Тест 2026-03-29 (після buff fix)**: 24 kills за 2:17хв = **10.5 kill/min**, 0 deaths ✓
 - **KnownList blindScan confirmed (2026-03-29)**: PlayerBase=0x3fb558 знаходиться коректно, knownListOff=0x120. Але `mobs=0 alive=0` — objTypeOff та інші offsets не відкалібровані для ElmoreLab Kamael client (тільки knownListOff верифіковано blindScan-ом).
 - **Мінімапа dx=25 завжди праворуч**: кожен TARGETING цикл однаково — підозрілий artifact або реальний моб справа від spawn.
+- **KnownList Fix 1 (2026-03-30)**: `readAll()`/`readMobs()` — `break`→`continue` + `null_streak>=8` guard. Sparse arrays з null-gap між валідними об'єктами більше не зупиняють ітерацію передчасно. ✓
+- **KnownList Fix 2 (2026-03-30)**: `rpm_pub<T>()` + `GetPlayerBase()` + validity re-check кожні 30с: `vx/vy = rpm_pub<float>(base+0x24/28)` → якщо не валідні → скидаємо `SetPlayerBase(0)` → тригеримо re-scan. ✓
+- **KnownList Fix 3 (2026-03-30)**: `diagnoseTypes()` — логує `+0x14/18/1C/20` int32 та XY координати для перших 10 об'єктів KnownList. Викликається з `WorldState::update()` один раз якщо `mobs.empty() && items.empty()` після 50+ тіків. ✓
+- **`--calibrate` CLI mode (2026-03-30)**: `./rdga1bot --calibrate` — `blindScan()` → hex/int32/float таблиця першого KL об'єкту (0x00..0x100) + XYZ scan 5 об'єктів (0x18..0x40). Знаходить objXOff без Cheat Engine. ✓
+- **Buff rebuff FIX (2026-03-30)**: Stage 0 тепер надсилає `ESC + Delay(300мс)` перед `ALT+B`. Усуває "2 невірних кліки + community window" при 10-хвилинному rebuff — персонаж знімає активний таргет/бойовий стан перед відкриттям BBS. ✓
 
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
-- **KnownList mobs=0**: blindScan знаходить PlayerBase, але читання мобів порожнє. Причина: `objTypeOff`, `charHpOff` та ін. — дефолтні значення з `offsets_config.h` не підходять для цього клієнту. Потрібна калібровка цих offsets.
+- **KnownList mobs=0**: blindScan знаходить PlayerBase, але читання мобів порожнє. Причина: `objTypeOff`, `charHpOff` та ін. — дефолтні значення з `offsets_config.h` не підходять для цього клієнту. Запустити `--calibrate` під час фарму → знайти objXOff/typeOff. Або дочекатись виводу `diagnoseTypes()` в логах.
 - **Мінімапа dx=25 константно**: перевірити чи це реальний моб або artifact детекції.
 
 ## ПОТОЧНИЙ СТАН КЛАВІШ
@@ -798,21 +800,23 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 ### Пріоритет 1: Калібровка KnownList offsets для ElmoreLab Kamael
 `blindScan()` знаходить `PlayerBase` і `knownListOff=0x120` ✓, але `mobs=0` бо інші offsets (objTypeOff, charHpOff, objXOff та ін.) — дефолти з `offsets_config.h` що не підходять для цього клієнту.
 
-**Задача**: знайти реальні offsets для ElmoreLab Kamael client:
-- `OFF_OBJ_TYPE` — який тип у мобів (0? 1? 2?)
-- `OFF_OBJ_X/Y/Z` — координати об'єкту
-- `OFF_CHAR_HP/HP_MAX/IS_DEAD` — стан моба
-- Метод: `OffsetScanner::calibrateObjectOffsets(objPtr, expectedX, expectedY, expectedZ)` вже є — передати ptr першого об'єкту з KnownList + відомі координати моба → знаходить XYZ offset. Для type/hp — scanувати вручну або через Cheat Engine.
+**Метод A** (автоматичний): запустити бота як звичайно → в логах `[KnownList] Type diagnosis` з'явиться один раз через ~50 тіків якщо mobs.empty(). Аналізуємо +0x14/18/1C/20 — знаходимо правильний `objTypeOff` (той де значення = 0 для мобів, 1 для гравців, 2 для предметів).
+
+**Метод B** (ручний): поки є моби поряд, запустити:
+```bash
+./rdga1bot --calibrate 2>&1 | head -80
+```
+Порівняти `as_float` значення у таблиці з реальними координатами `/loc` → знаходимо `objXOff`. Поряд — `objTypeOff`.
+
+**Після знаходження offsets**: вписати в `offsets_config.h` і перебілдити. Або задати через `offsets.json`.
 
 **Ціль**: `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` замість watchdog/OpenCV kill detection.
 
-### Пріоритет 2: Мінімапа dx=25 константно
-Кожен TARGETING показує `Найближчий моб праворуч (dx=25, rot=1)`. Підозра: artifact детекції червоних dots або статичний елемент UI що збігається з HSV фільтром мобів.
-
-**Задача**: зробити F12 → `tmp/calibrate.png` під час TARGETING і перевірити мінімапу в правому верхньому куті. Якщо dx=25 не реальний моб → знайти джерело artifact і відфільтрувати (виключити координати, підвищити S threshold, зменшити ROI).
+### Пріоритет 2: Перевірити rebuff fix
+`[Buffs] ESC + ALT+B → знімаємо таргет і відкриваємо вікно...` має з'явитись замість `[Buffs] ALT+B → відкриваємо вікно...`. Перевірити що через 600с `[Buffs] Завершено` (без "2 кліків поряд").
 
 ### Пріоритет 3: Тривалий фарм
-Бот стабільний (10.5 kill/min, 0 deaths). Запустити `./farm.sh` на 2+ годин і моніторити:
+Бот стабільний. Запустити `./farm.sh` на 2+ годин і моніторити:
+- `[Buffs] Завершено` кожні 600с — rebuff fix підтверджено
 - `[ATTACKING] HP стабільний 5с` — моб недосяжний → чи навігація виходить?
-- `[Buffs] Завершено` кожні 600с — баф підтверджено щоразу
-- Загальний uptime без зупинок
+- `[KnownList] Type diagnosis` в перших 5 хвилинах — якщо mobs=0

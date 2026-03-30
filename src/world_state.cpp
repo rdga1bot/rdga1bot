@@ -27,6 +27,13 @@ void WorldState::update(uintptr_t playerBase) {
                   << " prev_alive=" << m_prev_alive_count
                   << " died=" << m_mob_died_this_tick << "\n";
 
+    // Fix 3: якщо після 50 тіків мобів і предметів досі 0 — один раз виводимо діагностику
+    static bool diagnosed = false;
+    if (!diagnosed && dbg_tick >= 50 && m_mobs.empty() && m_items.empty()) {
+        m_reader.diagnoseTypes(playerBase);
+        diagnosed = true;
+    }
+
     m_prev_alive_count = alive;
 
     // Оновити поточний таргет якщо він встановлений

@@ -41,6 +41,7 @@ public:
     // KnownList: встановити WorldState (main.cpp передає ownership)
     void SetWorldState(std::unique_ptr<WorldState> world) { m_world = std::move(world); }
     void SetPlayerBase(uintptr_t base) { m_player_base = base; }
+    uintptr_t GetPlayerBase() const { return m_player_base; }
     bool HasPlayerBase() const { return m_player_base != 0; }
     WorldState* GetWorldState() const { return m_world.get(); }
 
