@@ -58,6 +58,10 @@ public:
 
     bool isValidPtr_pub(uintptr_t v) const { return isValidPtr(v); }
 
+    // Heading калібровка: стій нерухомо → запусти → повернись → запусти знову → порівняй.
+    // Виводить в cerr playerBase+[0x28..0x80] на float у[-pi..pi] або [0..360].
+    void calibrateHeadingOffset(uintptr_t playerBase) const;
+
     // Runtime-значення offsets (перевизначаються findKnownListOffset або loadOffsets)
     uintptr_t knownListOff   = OFF_KNOWN_LIST;
     uintptr_t knownCountOff  = OFF_KNOWN_COUNT;
@@ -91,7 +95,8 @@ private:
     }
 
     // Перевірка чи значення схоже на 32-bit pointer
+    // Wine 32-bit user space reaches 0xBFFFFFFF, not 0x7FFFFFFF
     static bool isValidPtr(uintptr_t v) {
-        return v > 0x10000 && v < 0x7FFF0000;
+        return v > 0x10000 && v < 0xBFFF0000;
     }
 };

@@ -132,6 +132,8 @@ private:
     int  m_walk_stuck_count  = 0;    // скільки тіків поспіль не рухались після WalkForward
     bool m_nav_prev_was_walk = false; // попередній тік виконав WalkForward → перевіряємо рух
     int  m_nav_stuck_recoveries = 0; // загальний лічильник відновлень → чергує L/R незалежно від macro_attempts
+    bool m_running_to_mob = false;   // RunTick() активний — персонаж біжить
+    TP   m_run_started{};            // коли почали бігти (для time-based escape)
 
     // Minimap optical flow stuck detection
     TP   m_minimap_low_flow_since{};  // коли почався period низького flow (0 = не активний)
@@ -154,6 +156,9 @@ private:
 
     // Memory Reading: стан гравця з пам'яті (оновлюється з main loop кожен тік)
     MemReader::PlayerState m_mem_player;
+
+    // KnownList memory read: чи HP/isDead цілі береться з пам'яті (для діагностики)
+    bool m_mem_target_hp_valid = false;
 
     // KnownList: WorldState (null якщо KnownList вимкнено)
     std::unique_ptr<WorldState> m_world;

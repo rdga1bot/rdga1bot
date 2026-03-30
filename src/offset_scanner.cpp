@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <iomanip>
 #include <cstring>
 #include <cmath>
 #include <cstdio>
@@ -289,4 +290,28 @@ bool OffsetScanner::loadOffsets(const std::string& path) {
     std::cerr << "[OffsetScanner] Offsets завантажено з " << path
               << " (KnownList=0x" << std::hex << knownListOff << ")\n" << std::dec;
     return true;
+}
+
+// ── Heading калібровка ─────────────────────────────────────────────────────────
+// Виводить playerBase+[0x28..0x80] floats що схожі на кут ([-pi..pi] або [0..360]).
+// Запускати двічі: стоячи і після повороту на 90° → offset що змінився = heading.
+void OffsetScanner::calibrateHeadingOffset(uintptr_t playerBase) const {
+    std::cerr << "[HeadingCal] PlayerBase+0x28..0x80:\n";
+    std::cerr << "  offset | float_val  | deg(if_rad) | note\n";
+    std::cerr << "  -------|------------|-------------|-----\n";
+    for (uintptr_t off = 0x28; off <= 0x80; off += 4) {
+        float v = rpm<float>(playerBase + off);
+        if (!std::isfinite(v)) continue;
+        // Якщо в [-pi, pi] → може бути heading в радіанах
+        bool maybe_rad = (v >= -3.15f && v <= 3.15f);
+        // Якщо в [0, 360] → може бути heading в градусах
+        bool maybe_deg = (v >= 0.f && v <= 360.f);
+        if (!maybe_rad && !maybe_deg) continue;
+        float deg_from_rad = maybe_rad ? (v * 180.f / 3.14159f) : v;
+        std::cerr << "  0x" << std::hex << std::setw(4) << off << std::dec
+                  << " | " << std::setw(10) << v
+                  << " | " << std::setw(11) << (int)deg_from_rad
+                  << " | " << (maybe_rad ? "rad?" : "deg?") << "\n";
+    }
+    std::cerr << "[HeadingCal] Повернись на 90° і запусти знову → знайди змінений offset.\n";
 }

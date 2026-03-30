@@ -34,6 +34,11 @@ public:
     std::vector<L2Object>    readItemsRegionScan(uintptr_t playerBase,
                                                  float maxRange = 500.f) const;
 
+    // Читає всі об'єкти як L2Character без type filter.
+    // Використовується поки objTypeOff не відкалібрований (readMobs() повертає 0).
+    // Фільтр: координати в межах L2 world + hp > 0 + hpMax в розумних межах.
+    std::vector<L2Character> readAllAsChars(uintptr_t playerBase) const;
+
     // Діагностика типів: логує offsets +0x14..+0x20 для перших 10 об'єктів.
     // Допомагає знайти правильний objTypeOff якщо readMobs() порожній.
     void diagnoseTypes(uintptr_t playerBase) const;
@@ -55,4 +60,11 @@ private:
         // Wine 32-bit user space reaches 0xBFFFFFFF, not 0x7FFFFFFF
         return v > 0x10000 && v < 0xBFFF0000;
     }
+
+    // Динамічний список регіонів пам'яті для сканування (з /proc/<pid>/maps).
+    // Кешується 30с — не читаємо /proc щотіку.
+    struct ScanRegion { uintptr_t base = 0; size_t size = 0; };
+    mutable std::vector<ScanRegion> m_scan_cache;
+    mutable time_t                  m_scan_cache_time = 0;
+    void refreshScanCache() const;
 };

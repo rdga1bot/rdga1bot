@@ -92,11 +92,14 @@ void Brain::EnterState(State s) {
             m_patrol_step_idx = 0;
             m_minimap_low_flow_since = TP{};
             m_minimap_flow_stuck = false;
+            m_running_to_mob = false;
+            m_run_started = TP{};
             // m_attack_was_unreachable НЕ скидаємо тут — скидається в HandleTargeting()
             // тільки коли мінімапа реально показала мобів (знайшли вихід з кімнати)
             break;
 
         case State::Attacking:
+            m_running_to_mob = false;
             m_no_target_count = 0;
             m_target_hp_zero_count = 0;
             m_first_attack = true;
@@ -484,69 +487,89 @@ void Brain::HandleTargeting() {
 
         if (m_nav_prev_was_walk) {
             m_nav_prev_was_walk = false;
-            // Три незалежні сигнали руху: frame diff, full-frame LK, minimap LK
-            const float flow    = m_cfg.nav_flow_detection ? m_eyes.GetMovementFlow()   : -1.0f;
-            const float mm_flow = m_cfg.nav_flow_detection ? m_eyes.GetMinimapFlow()    : -1.0f;
-            const bool actually_moved = is_moving || (flow > 1.5f) || (mm_flow > 0.3f);
-            if (!actually_moved) {
-                m_walk_stuck_count++;
-                Log("[NAV] Не рухаємось після WalkForward ×" + std::to_string(m_walk_stuck_count)
-                    + (flow >= 0 ? " flow=" + std::to_string(flow).substr(0,4) : ""),
-                    LogLevel::Debug);
-                if (m_walk_stuck_count >= m_cfg.nav_stuck_threshold) {
-                    m_walk_stuck_count = 0;
-                    // Прогресивний поворот: кожні 2 застрягання +450мс (900 → 1350 → 1800мс max)
-                    // Чергуємо R/L: ×1→Right, ×2→Left, ×3→Right...
+
+            if (m_running_to_mob) {
+                // Під час безперервного бігу flow ненадійний (підземелля: uniform walls,
+                // rotating minimap → flow завжди ~0.01-0.3 навіть при реальному русі).
+                // Використовуємо time-based escape: якщо біжимо >15с без таргету → поворот.
+                const double run_secs = SecsSince(m_run_started);
+                if (run_secs >= 15.0) {
                     const int rotation_ms = std::min(900 + (m_nav_stuck_recoveries / 2) * 450, 1800);
                     m_hands.WalkBack(300);
                     if (m_nav_stuck_recoveries % 2 == 0) {
                         m_hands.RotateRight(rotation_ms);
-                        Log("[NAV] Застряг ×" + std::to_string(m_nav_stuck_recoveries + 1) +
+                        Log("[NAV] Біг " + std::to_string((int)run_secs) + "с без таргету"
                             " → WalkBack + RotateRight(" + std::to_string(rotation_ms) + "мс)");
                     } else {
                         m_hands.RotateLeft(rotation_ms);
-                        Log("[NAV] Застряг ×" + std::to_string(m_nav_stuck_recoveries + 1) +
+                        Log("[NAV] Біг " + std::to_string((int)run_secs) + "с без таргету"
                             " → WalkBack + RotateLeft(" + std::to_string(rotation_ms) + "мс)");
                     }
-                    // WalkForward одразу після повороту → тест нового напрямку
-                    m_hands.WalkForward(500);
-                    m_nav_prev_was_walk = true;
                     m_nav_stuck_recoveries++;
+                    m_run_started = Now(); // скидаємо таймер після повороту
+                    m_nav_prev_was_walk = true; // перевіримо рух наступного тіку
                 }
+                // Якщо < 15с — продовжуємо бігти, ігноруємо flow
             } else {
-                m_walk_stuck_count = 0;
-                m_nav_stuck_recoveries = 0; // успішний рух → скидаємо лічильник застрягань
-                if (flow > 0) Log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4),
-                                  LogLevel::Debug);
+                // Звичайний WalkForward (не RunTick): flow-based stuck detection
+                const float flow    = m_cfg.nav_flow_detection ? m_eyes.GetMovementFlow()   : -1.0f;
+                const float mm_flow = m_cfg.nav_flow_detection ? m_eyes.GetMinimapFlow()    : -1.0f;
+                const bool actually_moved = is_moving || (flow > 1.5f) || (mm_flow > 0.3f);
+                if (!actually_moved) {
+                    m_walk_stuck_count++;
+                    Log("[NAV] Не рухаємось після WalkForward ×" + std::to_string(m_walk_stuck_count)
+                        + (flow >= 0 ? " flow=" + std::to_string(flow).substr(0,4) : ""),
+                        LogLevel::Debug);
+                    if (m_walk_stuck_count >= m_cfg.nav_stuck_threshold) {
+                        m_walk_stuck_count = 0;
+                        const int rotation_ms = std::min(900 + (m_nav_stuck_recoveries / 2) * 450, 1800);
+                        m_hands.WalkBack(300);
+                        if (m_nav_stuck_recoveries % 2 == 0) {
+                            m_hands.RotateRight(rotation_ms);
+                            Log("[NAV] Застряг ×" + std::to_string(m_nav_stuck_recoveries + 1) +
+                                " → WalkBack + RotateRight(" + std::to_string(rotation_ms) + "мс)");
+                        } else {
+                            m_hands.RotateLeft(rotation_ms);
+                            Log("[NAV] Застряг ×" + std::to_string(m_nav_stuck_recoveries + 1) +
+                                " → WalkBack + RotateLeft(" + std::to_string(rotation_ms) + "мс)");
+                        }
+                        m_hands.WalkForward(500);
+                        m_nav_prev_was_walk = true;
+                        m_nav_stuck_recoveries++;
+                    }
+                } else {
+                    m_walk_stuck_count = 0;
+                    m_nav_stuck_recoveries = 0;
+                    if (flow > 0) Log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4),
+                                      LogLevel::Debug);
+                }
             }
         }
     }
 
-    // ── Рух до моба (мінімапа показує напрямок) ─────────────────────────────
-    // 1. Якщо моб по центру І попереду (dy < -15) → WalkForward одразу (довший крок)
-    // 2. Fallback: кожні 4 спроби якщо ліміт ротацій не досягнуто
-    if (!minimap_dots.empty() && !m_nav_prev_was_walk
-        && m_minimap_rotate_count < kMinimapRotateLimit) {
-        const bool mob_ahead = (map_ref != nullptr
-            && std::abs(map_ref->dx) <= kMinimapDxThreshold
-            && map_ref->dy < -15);
-        const bool fallback_walk = (m_macro_attempts % 4 == 0);
-        if (mob_ahead || fallback_walk) {
-            if (m_cfg.nav_wall_detection && m_eyes.IsWallAhead()) {
-                Log("[NAV] Стіна/перешкода попереду → пропускаємо WalkForward", LogLevel::Debug);
-            } else if (m_eyes.IsGroundAhead()) {
-                // Моб прямо попереду → йдемо довше (700мс); fallback → 400мс
-                const int walk_ms = mob_ahead ? 700 : 400;
-                m_hands.WalkForward(walk_ms);
-                m_nav_prev_was_walk = true;
-                if (mob_ahead)
-                    Log("[MAP] Моб попереду (dy=" + std::to_string(map_ref->dy) +
-                        ") → WalkForward(" + std::to_string(walk_ms) + "мс)", LogLevel::Debug);
-                else
-                    Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) +
-                        " — підходимо до моба (мінімапа)");
-            }
+    // ── Біг до моба: RunTick() кожен тік поки є моби ────────────────────────
+    // RunTick() = HoldKeyboardKey(UP, 150мс) — персонаж біжить один тік.
+    // Наступний тік знову RunTick() → безперервний рух без стану.
+    // Ротація LEFT/RIGHT можлива одночасно з UP (L2 підтримує).
+    const bool kl_has_mobs = m_world && !m_world->mobs().empty();
+    const bool should_run  = (!minimap_dots.empty() || kl_has_mobs)
+                             && !m_nav_prev_was_walk;
+
+    if (should_run) {
+        if (!m_running_to_mob) {
+            m_running_to_mob = true;
+            m_run_started    = Now();
+            m_walk_stuck_count = 0;
+            Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) +
+                " — біжимо до моба");
         }
+        if (!(m_cfg.nav_wall_detection && m_eyes.IsWallAhead())) {
+            m_hands.RunTick(800);
+            m_nav_prev_was_walk = true; // stuck detection активний між ранами
+        }
+    } else if (m_running_to_mob) {
+        m_running_to_mob = false;
+        Log("[TARGETING] Зупиняємо біг — мобів не видно", LogLevel::Debug);
     }
 
     // ── Fallback ротація / Patrol / Розвідка ─────────────────────────────────
@@ -627,11 +650,40 @@ void Brain::HandleAttacking() {
         m_last_target_redetect = Now();
     }
 
-    // KnownList: якщо живих мобів стало менше — хтось загинув → instant LOOTING
-    if (m_world && !m_first_attack && m_world->anyMobDiedThisTick()) {
-        Log("[ATTACKING] [KnownList] Таргет мертвий → LOOTING");
-        EnterState(State::Looting);
-        return;
+    // KnownList memory read: instant kill detection + HP update
+    // Якщо feature flag вимкнено → логіка як раніше (OpenCV + debounce).
+    if (m_world && !m_first_attack) {
+        const auto& mem_mobs = m_world->mobs();
+
+        // Instant kill detection (mem_use_for_kill_detect або anyMobDiedThisTick)
+        if (m_cfg.mem_use_for_kill_detect && !mem_mobs.empty()) {
+            // Шукаємо мертвого моба в KnownList → instant LOOTING без debounce
+            for (const auto& mob : mem_mobs) {
+                if (mob.isDead || mob.hp <= 0.f) {
+                    m_mem_target_hp_valid = true;
+                    Log("[ATTACKING] [MEM] Instant kill (HP=" +
+                        std::to_string((int)mob.hp) + ") → LOOTING");
+                    EnterState(State::Looting);
+                    return;
+                }
+            }
+        } else if (m_world->anyMobDiedThisTick()) {
+            // Fallback: anyMobDiedThisTick() (працює навіть без mem_use_for_kill_detect)
+            Log("[ATTACKING] [KnownList] Таргет мертвий → LOOTING");
+            EnterState(State::Looting);
+            return;
+        }
+
+        // HP моба з пам'яті (якщо увімкнено) → оновлюємо m_target->hp для OpenCV pipeline
+        if (m_cfg.mem_use_for_target_hp && !mem_mobs.empty() && m_target.has_value()) {
+            for (const auto& mob : mem_mobs) {
+                if (!mob.isDead && mob.hp > 0.f && mob.hpMax > 0.f) {
+                    m_mem_target_hp_valid = true;
+                    m_target->hp = (int)mob.hpPercent();
+                    break;
+                }
+            }
+        }
     }
 
     // Детекція смерті моба: HP ≤2% — потрібно 3 тіки поспіль (debounce false positives)

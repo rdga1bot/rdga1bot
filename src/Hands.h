@@ -80,6 +80,11 @@ public:
     void RotateLeft(int ms = 300)  { HoldKeyboardKey(m_rotate_left,   ms); }
     void RotateRight(int ms = 300) { HoldKeyboardKey(m_rotate_right,  ms); }
 
+    // Безперервний біг: тримати UP весь тік (200мс), потім відпускати і одразу знову.
+    // Викликається кожен тік поки m_running_to_mob=true.
+    // L2 читає key-repeat, тому серія HoldKeyboardKey(up, 200) без паузи = безперервний рух.
+    void RunTick(int ms = 150) { HoldKeyboardKey(m_move_forward, ms); }
+
     void LookAround()
     {
         const auto center = WindowCenter();

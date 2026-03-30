@@ -5,6 +5,8 @@
 #include <iostream>
 #include <cstring>     // memcpy
 #include <cmath>       // isfinite
+#include <cstdio>      // snprintf, fopen
+#include <ctime>       // time_t
 #include <unordered_set>
 
 KnownListReader::KnownListReader(pid_t pid, const OffsetScanner& offsets)
@@ -103,6 +105,55 @@ std::vector<L2Object> KnownListReader::readItems(uintptr_t playerBase) const {
     return items;
 }
 
+// ── Читати всі об'єкти як L2Character без type filter ────────────────────────
+// Fallback коли readMobs() повертає 0 (objTypeOff не відкалібрований).
+// Критерій валідності: координати в межах L2 world + hpMax в розумних межах.
+std::vector<L2Character> KnownListReader::readAllAsChars(uintptr_t playerBase) const {
+    std::vector<L2Character> result;
+    if (!playerBase) return result;
+
+    uintptr_t knownListPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
+    if (!isValidPtr(knownListPtr)) return result;
+
+    int null_streak = 0;
+    for (int i = 0; i < 2000; ++i) {
+        uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
+        if (!isValidPtr(objPtr)) {
+            if (++null_streak >= 8) break;
+            continue;
+        }
+        null_streak = 0;
+
+        float x = rpm<float>(objPtr + m_off.objXOff);
+        float y = rpm<float>(objPtr + m_off.objYOff);
+        float z = rpm<float>(objPtr + m_off.objZOff);
+
+        // Фільтр: тільки об'єкти з валідними L2-координатами
+        if (!std::isfinite(x) || std::fabsf(x) < 100.f || std::fabsf(x) > 327000.f) continue;
+        if (!std::isfinite(y) || std::fabsf(y) < 100.f || std::fabsf(y) > 327000.f) continue;
+        if (!std::isfinite(z) || std::fabsf(z) > 16000.f) continue;
+
+        float hp    = rpm<float>(objPtr + m_off.charHpOff);
+        float hpMax = rpm<float>(objPtr + m_off.charHpMaxOff);
+
+        // Пропускаємо статичні об'єкти та items (hp=0, hpMax=0 або нереально великий)
+        if (hpMax <= 0.f || hpMax > 1000000.f) continue;
+        if (hp < 0.f) continue;
+
+        L2Character ch;
+        ch.memPtr   = objPtr;
+        ch.objectID = rpm<int32_t>(objPtr + OFF_OBJ_ID);
+        ch.type     = L2ObjectType::Unknown; // тип невідомий без відкаліброваного typeOff
+        ch.x = x; ch.y = y; ch.z = z;
+        ch.hp       = hp;
+        ch.hpMax    = hpMax;
+        ch.isDead   = (hp <= 0.f) || (rpm<int32_t>(objPtr + m_off.charIsDeadOff) != 0);
+
+        result.push_back(ch);
+    }
+    return result;
+}
+
 // ── Діагностика типів об'єктів ────────────────────────────────────────────────
 void KnownListReader::diagnoseTypes(uintptr_t playerBase) const {
     uintptr_t klPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
@@ -132,18 +183,51 @@ void KnownListReader::diagnoseTypes(uintptr_t playerBase) const {
     }
 }
 
-// ── Region scan: пряме сканування плоского масиву об'єктів ──────────────────
-// Для Kamael ElmoreLab: KnownList pointer (pb+0x120) веде в DLL/code space,
-// а не до масиву вказівників на об'єкти. Замість цього сканується регіон
-// де підтверджено знаходяться об'єкти гри (OFF_REGION_SCAN_BASE..END).
-//
-// Алгоритм:
-// 1. Читаємо регіон чанками по 64KB (process_vm_readv один раз на чанк)
-// 2. Скануємо кожен 4-байтний offset на float X: L2 world bounds + dist від гравця
-// 3. objBase = xAddr - OFF_OBJ_X (0x90); type at objBase + OFF_OBJ_TYPE (0x5C)
-// 4. Дедуплікуємо по objBase
+// ── Динамічне оновлення кешу регіонів пам'яті (/proc/<pid>/maps) ─────────────
+// Читає всі readable регіони Wine/l2.exe процесу.
+// Фільтри: readable (r--), base >= 0x10000, base < 0x70000000 (пропускаємо DLL),
+//          розмір [objXOff+12 .. 8MB].
+// Кешується 30с — не читаємо /proc щотіку.
+void KnownListReader::refreshScanCache() const {
+    time_t now = time(nullptr);
+    if (!m_scan_cache.empty() && (now - m_scan_cache_time) < 30) return;
+    m_scan_cache.clear();
+    m_scan_cache_time = now;
+
+    char path[64];
+    std::snprintf(path, sizeof(path), "/proc/%d/maps", (int)m_pid);
+    FILE* f = std::fopen(path, "r");
+    if (!f) {
+        // fallback до хардкодованого регіону якщо /proc недоступний
+        m_scan_cache.push_back({OFF_REGION_SCAN_BASE,
+                                OFF_REGION_SCAN_END - OFF_REGION_SCAN_BASE});
+        return;
+    }
+
+    char line[512];
+    while (std::fgets(line, sizeof(line), f)) {
+        uintptr_t start, end;
+        char perms[8] = {};
+        char name[256] = {};
+        std::sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s", &start, &end, perms, name);
+        if (perms[0] != 'r' || perms[1] != 'w') continue; // тільки read+write (heap)
+        if (perms[2] == 'x') continue;            // пропускаємо executable (код)
+        if (start < 0x10000u) continue;            // пропускаємо нульову сторінку
+        if (start >= 0x70000000u) continue;        // пропускаємо Wine DLL space
+        // пропускаємо іменовані файлові відображення (Wine DLL, SO libraries)
+        if (name[0] == '/') continue;
+        size_t sz = end - start;
+        if (sz < (size_t)(m_off.objXOff + 12)) continue; // надто маленький
+        if (sz > 2u * 1024 * 1024) continue;      // пропускаємо > 2MB
+        m_scan_cache.push_back({start, sz});
+    }
+    std::fclose(f);
+    std::cerr << "[KnownList] scan cache updated: " << m_scan_cache.size()
+              << " regions\n";
+}
+
+// ── Спільний читач типу з буферу або через readv ──────────────────────────────
 namespace {
-    // Зчитати тип об'єкта: спочатку з буфера, якщо не потрапляє — через readv
     int32_t readTypeFromBuf(pid_t pid,
                              const uint8_t* chunk, uintptr_t chunkAddr, size_t chunkSz,
                              uintptr_t typeAddr)
@@ -160,6 +244,10 @@ namespace {
     }
 } // namespace
 
+// ── Region scan: динамічне сканування всіх heap-регіонів процесу ─────────────
+// Читає /proc/<pid>/maps (кеш 30с), ітерує readable heap-регіони,
+// сканує кожен 4-байтний offset на XYZ float triplet у межах L2 світу,
+// фільтрує за відстанню від гравця та типом об'єкту.
 std::vector<L2Character> KnownListReader::readMobsRegionScan(
         uintptr_t playerBase, float maxRange) const
 {
@@ -167,10 +255,10 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
     float py = rpm<float>(playerBase + OFF_PLAYER_Y);
     if (!std::isfinite(px) || !std::isfinite(py)) return {};
 
-    const uintptr_t kBase  = OFF_REGION_SCAN_BASE;
-    const uintptr_t kEnd   = OFF_REGION_SCAN_END;
-    const size_t    kChunk = 0x10000; // 64KB
-    const float     kMaxR2 = maxRange * maxRange;
+    refreshScanCache();
+
+    const size_t kChunk = 0x10000; // 64KB
+    const float  kMaxR2 = maxRange * maxRange;
     const float kXYmin = -327680.f, kXYmax = 327680.f;
     const float kZmin  =  -16384.f, kZmax  =  16384.f;
 
@@ -179,41 +267,43 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
     std::unordered_set<uintptr_t> seen;
     seen.reserve(64);
 
-    for (uintptr_t addr = kBase; addr < kEnd; addr += kChunk) {
-        size_t sz = (size_t)std::min((uintptr_t)kChunk, kEnd - addr);
-        if (!readBytes(addr, chunk.data(), sz)) continue;
+    for (const auto& reg : m_scan_cache) {
+        const uintptr_t rEnd = reg.base + reg.size;
+        for (uintptr_t addr = reg.base; addr < rEnd; addr += kChunk) {
+            size_t sz = (size_t)std::min((uintptr_t)kChunk, rEnd - addr);
+            if (!readBytes(addr, chunk.data(), sz)) continue;
 
-        for (size_t o = 0; o + 12 <= sz; o += 4) {
-            float x, y, z;
-            std::memcpy(&x, chunk.data() + o,     4);
-            std::memcpy(&y, chunk.data() + o + 4, 4);
-            std::memcpy(&z, chunk.data() + o + 8, 4);
+            for (size_t o = 0; o + 12 <= sz; o += 4) {
+                float x, y, z;
+                std::memcpy(&x, chunk.data() + o,     4);
+                std::memcpy(&y, chunk.data() + o + 4, 4);
+                std::memcpy(&z, chunk.data() + o + 8, 4);
 
-            if (!std::isfinite(x) || x < kXYmin || x > kXYmax) continue;
-            if (!std::isfinite(y) || y < kXYmin || y > kXYmax) continue;
-            if (!std::isfinite(z) || z < kZmin  || z > kZmax)  continue;
+                if (!std::isfinite(x) || x < kXYmin || x > kXYmax) continue;
+                if (!std::isfinite(y) || y < kXYmin || y > kXYmax) continue;
+                if (!std::isfinite(z) || z < kZmin  || z > kZmax)  continue;
 
-            float dx = x - px, dy = y - py;
-            if (dx*dx + dy*dy > kMaxR2) continue;
+                float dx = x - px, dy = y - py;
+                if (dx*dx + dy*dy > kMaxR2) continue;
 
-            uintptr_t xAddr = addr + (uintptr_t)o;
-            if (xAddr < m_off.objXOff) continue;
-            uintptr_t objBase = xAddr - m_off.objXOff;
-            if (!seen.insert(objBase).second) continue;
+                uintptr_t xAddr = addr + (uintptr_t)o;
+                if (xAddr < m_off.objXOff) continue;
+                uintptr_t objBase = xAddr - m_off.objXOff;
+                if (!seen.insert(objBase).second) continue;
 
-            int32_t typeRaw = readTypeFromBuf(
-                m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
-            if (typeRaw != 0) continue; // тільки Mob
+                int32_t typeRaw = readTypeFromBuf(
+                    m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
+                if (typeRaw != 0) continue; // тільки Mob
 
-            L2Character ch;
-            ch.memPtr = objBase;
-            ch.type   = L2ObjectType::Mob;
-            ch.x = x; ch.y = y; ch.z = z;
-            // HP offsets ще не відкалібровані — best-effort
-            ch.hp     = rpm<float>  (objBase + m_off.charHpOff);
-            ch.hpMax  = rpm<float>  (objBase + m_off.charHpMaxOff);
-            ch.isDead = rpm<int32_t>(objBase + m_off.charIsDeadOff) != 0;
-            result.push_back(ch);
+                L2Character ch;
+                ch.memPtr = objBase;
+                ch.type   = L2ObjectType::Mob;
+                ch.x = x; ch.y = y; ch.z = z;
+                ch.hp     = rpm<float>  (objBase + m_off.charHpOff);
+                ch.hpMax  = rpm<float>  (objBase + m_off.charHpMaxOff);
+                ch.isDead = rpm<int32_t>(objBase + m_off.charIsDeadOff) != 0;
+                result.push_back(ch);
+            }
         }
     }
     return result;
@@ -226,10 +316,10 @@ std::vector<L2Object> KnownListReader::readItemsRegionScan(
     float py = rpm<float>(playerBase + OFF_PLAYER_Y);
     if (!std::isfinite(px) || !std::isfinite(py)) return {};
 
-    const uintptr_t kBase  = OFF_REGION_SCAN_BASE;
-    const uintptr_t kEnd   = OFF_REGION_SCAN_END;
-    const size_t    kChunk = 0x10000;
-    const float     kMaxR2 = maxRange * maxRange;
+    refreshScanCache();
+
+    const size_t kChunk = 0x10000;
+    const float  kMaxR2 = maxRange * maxRange;
     const float kXYmin = -327680.f, kXYmax = 327680.f;
     const float kZmin  = -16384.f,  kZmax  = 16384.f;
 
@@ -238,37 +328,40 @@ std::vector<L2Object> KnownListReader::readItemsRegionScan(
     std::unordered_set<uintptr_t> seen;
     seen.reserve(32);
 
-    for (uintptr_t addr = kBase; addr < kEnd; addr += kChunk) {
-        size_t sz = (size_t)std::min((uintptr_t)kChunk, kEnd - addr);
-        if (!readBytes(addr, chunk.data(), sz)) continue;
+    for (const auto& reg : m_scan_cache) {
+        const uintptr_t rEnd = reg.base + reg.size;
+        for (uintptr_t addr = reg.base; addr < rEnd; addr += kChunk) {
+            size_t sz = (size_t)std::min((uintptr_t)kChunk, rEnd - addr);
+            if (!readBytes(addr, chunk.data(), sz)) continue;
 
-        for (size_t o = 0; o + 12 <= sz; o += 4) {
-            float x, y, z;
-            std::memcpy(&x, chunk.data() + o,     4);
-            std::memcpy(&y, chunk.data() + o + 4, 4);
-            std::memcpy(&z, chunk.data() + o + 8, 4);
+            for (size_t o = 0; o + 12 <= sz; o += 4) {
+                float x, y, z;
+                std::memcpy(&x, chunk.data() + o,     4);
+                std::memcpy(&y, chunk.data() + o + 4, 4);
+                std::memcpy(&z, chunk.data() + o + 8, 4);
 
-            if (!std::isfinite(x) || x < kXYmin || x > kXYmax) continue;
-            if (!std::isfinite(y) || y < kXYmin || y > kXYmax) continue;
-            if (!std::isfinite(z) || z < kZmin  || z > kZmax)  continue;
+                if (!std::isfinite(x) || x < kXYmin || x > kXYmax) continue;
+                if (!std::isfinite(y) || y < kXYmin || y > kXYmax) continue;
+                if (!std::isfinite(z) || z < kZmin  || z > kZmax)  continue;
 
-            float dx = x - px, dy = y - py;
-            if (dx*dx + dy*dy > kMaxR2) continue;
+                float dx = x - px, dy = y - py;
+                if (dx*dx + dy*dy > kMaxR2) continue;
 
-            uintptr_t xAddr = addr + (uintptr_t)o;
-            if (xAddr < m_off.objXOff) continue;
-            uintptr_t objBase = xAddr - m_off.objXOff;
-            if (!seen.insert(objBase).second) continue;
+                uintptr_t xAddr = addr + (uintptr_t)o;
+                if (xAddr < m_off.objXOff) continue;
+                uintptr_t objBase = xAddr - m_off.objXOff;
+                if (!seen.insert(objBase).second) continue;
 
-            int32_t typeRaw = readTypeFromBuf(
-                m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
-            if (typeRaw != 2) continue; // тільки Item
+                int32_t typeRaw = readTypeFromBuf(
+                    m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
+                if (typeRaw != 2) continue; // тільки Item
 
-            L2Object obj;
-            obj.memPtr = objBase;
-            obj.type   = L2ObjectType::Item;
-            obj.x = x; obj.y = y; obj.z = z;
-            result.push_back(obj);
+                L2Object obj;
+                obj.memPtr = objBase;
+                obj.type   = L2ObjectType::Item;
+                obj.x = x; obj.y = y; obj.z = z;
+                result.push_back(obj);
+            }
         }
     }
     return result;

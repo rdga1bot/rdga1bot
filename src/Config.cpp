@@ -300,6 +300,11 @@ bool Config::Load(const std::string& path) {
         }
     }
 
+    // [Memory] — feature flags для memory read інтеграції
+    mem_use_for_target_hp   = GetBool("Memory", "UseForTargetHP",   mem_use_for_target_hp);
+    mem_use_for_kill_detect = GetBool("Memory", "UseForKillDetect", mem_use_for_kill_detect);
+    mem_fallback_to_opencv  = GetBool("Memory", "FallbackToOpenCV", mem_fallback_to_opencv);
+
     // [KnownList]
     knownlist_enabled      = GetBool  ("KnownList", "Enabled",      knownlist_enabled);
     knownlist_autoscan     = GetBool  ("KnownList", "AutoScan",     knownlist_autoscan);

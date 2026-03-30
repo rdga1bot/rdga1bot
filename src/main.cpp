@@ -685,42 +685,72 @@ int main(int argc, char* argv[]) {
                   << scanner.rpm_pub<float>(playerBase + 0x28) << " / "
                   << scanner.rpm_pub<float>(playerBase + 0x2C) << "\n";
 
-        // Дамп першого об'єкту
-        uintptr_t firstObjPtr = scanner.rpm_pub<uint32_t>(klPtr);
-        std::cerr << "\n[CAL] First object ptr=0x" << std::hex
-                  << firstObjPtr << std::dec << "\n";
-        std::cerr << "[CAL] Memory dump (0x00..0x100):\n";
-        std::cerr << std::left
-                  << std::setw(8)  << "offset"
-                  << std::setw(14) << "hex_uint32"
-                  << std::setw(14) << "as_int32"
-                  << "as_float\n";
-        std::cerr << std::string(50, '-') << "\n";
-        for (uintptr_t off = 0; off <= 0x100; off += 4) {
-            uint32_t raw  = scanner.rpm_pub<uint32_t>(firstObjPtr + off);
-            int32_t  as_i = (int32_t)raw;
-            float    as_f = 0.f;
-            std::memcpy(&as_f, &raw, 4);
-            std::cerr << "0x" << std::hex << std::setw(4) << off << "  "
-                      << "0x" << std::setw(10) << raw << "  "
-                      << std::dec << std::setw(12) << as_i << "  "
-                      << as_f << "\n";
+        // Знайти перший читабельний об'єкт (не all-zeros)
+        auto dumpObjFull = [&](uintptr_t oPtr, int idx) {
+            std::cerr << "\n[CAL] obj[" << idx << "] ptr=0x" << std::hex
+                      << oPtr << std::dec << " — full dump (0x00..0x140):\n";
+            std::cerr << std::left
+                      << std::setw(8)  << "offset"
+                      << std::setw(14) << "hex_uint32"
+                      << std::setw(14) << "as_int32"
+                      << "as_float\n";
+            std::cerr << std::string(50, '-') << "\n";
+            for (uintptr_t off = 0; off <= 0x140; off += 4) {
+                uint32_t raw  = scanner.rpm_pub<uint32_t>(oPtr + off);
+                int32_t  as_i = (int32_t)raw;
+                float    as_f = 0.f;
+                std::memcpy(&as_f, &raw, 4);
+                // Позначаємо рядки що виглядають як L2-координати
+                bool coord_like = std::isfinite(as_f)
+                    && std::fabsf(as_f) > 500.f && std::fabsf(as_f) < 400000.f;
+                bool icoord_like = std::abs(as_i) > 500 && std::abs(as_i) < 400000;
+                std::cerr << "0x" << std::hex << std::setw(4) << off << "  "
+                          << "0x" << std::setw(10) << raw << "  "
+                          << std::dec << std::setw(12) << as_i << "  "
+                          << as_f;
+                if (coord_like || icoord_like) std::cerr << "  ← coord?";
+                std::cerr << "\n";
+            }
+        };
+
+        // Шукаємо перший читабельний об'єкт (не all-zeros, не нульовий ptr)
+        int first_readable = -1;
+        {
+            int null_s2 = 0;
+            for (int i = 0; i < 20; ++i) {
+                uintptr_t oPtr = scanner.rpm_pub<uint32_t>(klPtr + (uintptr_t)i * 4);
+                if (!scanner.isValidPtr_pub(oPtr)) {
+                    if (++null_s2 >= 8) break;
+                    continue;
+                }
+                null_s2 = 0;
+                // Перевіряємо чи перші 4 байти не нулі
+                uint32_t v0 = scanner.rpm_pub<uint32_t>(oPtr);
+                uint32_t v4 = scanner.rpm_pub<uint32_t>(oPtr + 4);
+                if (v0 != 0 || v4 != 0) { first_readable = i; break; }
+            }
+        }
+        if (first_readable >= 0) {
+            uintptr_t oPtr = scanner.rpm_pub<uint32_t>(klPtr + (uintptr_t)first_readable * 4);
+            dumpObjFull(oPtr, first_readable);
+        } else {
+            std::cerr << "[CAL] Жодного читабельного об'єкту не знайдено в KL array\n";
         }
 
-        // Перші 5 об'єктів: XYZ scan
-        std::cerr << "\n[CAL] First 5 objects — XYZ scan (offsets 0x18..0x40):\n";
+        // Перші 20 об'єктів: розширений XYZ scan (0x10..0x100)
+        std::cerr << "\n[CAL] First 20 objects — XYZ scan (offsets 0x10..0x100):\n";
         int null_s = 0;
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < 20; ++i) {
             uintptr_t oPtr = scanner.rpm_pub<uint32_t>(klPtr + (uintptr_t)i * 4);
             if (!scanner.isValidPtr_pub(oPtr)) {
-                if (++null_s >= 3) break;
+                if (++null_s >= 8) break;
                 continue;
             }
             null_s = 0;
             std::cerr << "  obj[" << i << "] 0x" << std::hex << oPtr << std::dec;
-            for (uintptr_t off = 0x18; off <= 0x40; off += 4) {
+            for (uintptr_t off = 0x10; off <= 0x100; off += 4) {
                 float v = scanner.rpm_pub<float>(oPtr + off);
-                if (std::isfinite(v) && std::fabsf(v) > 100.f
+                if (std::isfinite(v) && std::fabsf(v) > 500.f
                                      && std::fabsf(v) < 400000.f)
                     std::cerr << " [0x" << std::hex << off << "="
                               << std::dec << (int)v << "]";
@@ -728,9 +758,12 @@ int main(int argc, char* argv[]) {
             std::cerr << "\n";
         }
 
-        std::cerr << "\n[CAL] Compare float values above with mob coordinates\n"
-                  << "[CAL] in-game (/loc or Alt+coords) to identify objXOff.\n"
-                  << "[CAL] Then check int32 values near XYZ offset for typeID.\n";
+        std::cerr << "\n[CAL] Player XYZ: "
+                  << (int)scanner.rpm_pub<float>(playerBase + 0x24) << " / "
+                  << (int)scanner.rpm_pub<float>(playerBase + 0x28) << " / "
+                  << (int)scanner.rpm_pub<float>(playerBase + 0x2C) << "\n";
+        std::cerr << "[CAL] Знайди offset де значення ≈ XYZ гравця або мобів поряд.\n"
+                  << "[CAL] Перевір int32 значення поряд з XYZ для typeID (0=mob,1=player,2=item).\n";
         return 0;
     }
 

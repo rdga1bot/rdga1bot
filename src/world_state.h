@@ -1,6 +1,10 @@
 #pragma once
 #include <vector>
 #include <optional>
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <thread>
 #include <sys/types.h>
 #include "l2_objects.h"
 #include "knownlist_reader.h"
@@ -12,10 +16,22 @@
 class WorldState {
 public:
     WorldState(pid_t pid, const OffsetScanner& offsets);
+    ~WorldState();
 
-    // Оновити стан (викликати кожен тік, якщо playerBase відомий)
-    // mob_range  — радіус пошуку мобів (L2 units); дефолт = 2500 (більше радіуса мінімарти ~1560)
-    // item_range — радіус пошуку лута (L2 units)
+    // Запустити фоновий сканер (викликати один раз після отримання playerBase)
+    void startBackground(uintptr_t playerBase,
+                         float mob_range  = 2500.f,
+                         float item_range = 500.f);
+    void stopBackground();
+
+    // Оновити playerBase (якщо re-scan знайшов нову адресу)
+    void setPlayerBase(uintptr_t pb) {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_playerBase = pb;
+    }
+
+    // Оновити стан (викликати кожен тік, якщо playerBase відомий).
+    // Повний scan тепер у фоновому thread; тут тільки fast re-read таргету.
     void update(uintptr_t playerBase, float mob_range = 2500.f, float item_range = 500.f);
 
     // Аксесори
@@ -41,10 +57,23 @@ public:
 
 private:
     KnownListReader          m_reader;
+    pid_t                    m_pid;
+    const OffsetScanner&     m_off;
     std::vector<L2Character> m_mobs;
     std::vector<L2Object>    m_items;
     std::optional<L2Character> m_target;
     int m_targetID = 0;
     int m_prev_alive_count = -1;  // -1 = не ініціалізовано
     bool m_mob_died_this_tick = false;
+
+    // Фоновий сканер
+    std::thread             m_bg_thread;
+    mutable std::mutex      m_mutex;
+    std::atomic<bool>       m_bg_stop{false};
+    uintptr_t               m_playerBase   = 0;
+    float                   m_mob_range    = 2500.f;
+    float                   m_item_range   = 500.f;
+    static constexpr int    kScanIntervalMs = 3000;
+
+    void bgLoop(); // тіло фонового потоку
 };

@@ -140,6 +140,12 @@ public:
     std::string knownlist_offsets_file = "offsets.json"; // файл кешованих offsets
     float       knownlist_max_range    = 2500.f; // L2 units — радіус пошуку мобів (> радіус мінімарти ~1560)
 
+    // [Memory] — feature flags для memory read інтеграції (KnownList)
+    // Головний вимикач: false = все як раніше (OpenCV only), true = з memory read
+    bool mem_use_for_target_hp   = false; // HP моба з пам'яті замість OpenCV color detection
+    bool mem_use_for_kill_detect = false; // isDead з пам'яті (instant, без 800мс debounce)
+    bool mem_fallback_to_opencv  = true;  // при збої memory → fallback до OpenCV
+
     // [MemReader] — читання пам'яті L2 процесу (Wine, /proc/PID/mem)
     // Всі значення = 0 → вимкнено (використовується OpenCV детекція)
     bool     mem_enabled     = false;
