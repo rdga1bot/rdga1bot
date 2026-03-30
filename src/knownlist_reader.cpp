@@ -1,7 +1,11 @@
 #include "knownlist_reader.h"
+#include "offsets_config.h"
 #include <sys/uio.h>   // process_vm_readv
 #include <algorithm>
 #include <iostream>
+#include <cstring>     // memcpy
+#include <cmath>       // isfinite
+#include <unordered_set>
 
 KnownListReader::KnownListReader(pid_t pid, const OffsetScanner& offsets)
     : m_pid(pid), m_off(offsets) {}
@@ -126,6 +130,148 @@ void KnownListReader::diagnoseTypes(uintptr_t playerBase) const {
                   << " +0x20=" << typeAt20
                   << " X=" << (int)x << " Y=" << (int)y << "\n";
     }
+}
+
+// ── Region scan: пряме сканування плоского масиву об'єктів ──────────────────
+// Для Kamael ElmoreLab: KnownList pointer (pb+0x120) веде в DLL/code space,
+// а не до масиву вказівників на об'єкти. Замість цього сканується регіон
+// де підтверджено знаходяться об'єкти гри (OFF_REGION_SCAN_BASE..END).
+//
+// Алгоритм:
+// 1. Читаємо регіон чанками по 64KB (process_vm_readv один раз на чанк)
+// 2. Скануємо кожен 4-байтний offset на float X: L2 world bounds + dist від гравця
+// 3. objBase = xAddr - OFF_OBJ_X (0x90); type at objBase + OFF_OBJ_TYPE (0x5C)
+// 4. Дедуплікуємо по objBase
+namespace {
+    // Зчитати тип об'єкта: спочатку з буфера, якщо не потрапляє — через readv
+    int32_t readTypeFromBuf(pid_t pid,
+                             const uint8_t* chunk, uintptr_t chunkAddr, size_t chunkSz,
+                             uintptr_t typeAddr)
+    {
+        int32_t v = -1;
+        if (typeAddr >= chunkAddr && typeAddr + 4 <= chunkAddr + chunkSz) {
+            std::memcpy(&v, chunk + (typeAddr - chunkAddr), 4);
+        } else {
+            struct iovec loc = { &v, 4 };
+            struct iovec rem = { (void*)typeAddr, 4 };
+            process_vm_readv(pid, &loc, 1, &rem, 1, 0);
+        }
+        return v;
+    }
+} // namespace
+
+std::vector<L2Character> KnownListReader::readMobsRegionScan(
+        uintptr_t playerBase, float maxRange) const
+{
+    float px = rpm<float>(playerBase + OFF_PLAYER_X);
+    float py = rpm<float>(playerBase + OFF_PLAYER_Y);
+    if (!std::isfinite(px) || !std::isfinite(py)) return {};
+
+    const uintptr_t kBase  = OFF_REGION_SCAN_BASE;
+    const uintptr_t kEnd   = OFF_REGION_SCAN_END;
+    const size_t    kChunk = 0x10000; // 64KB
+    const float     kMaxR2 = maxRange * maxRange;
+    const float kXYmin = -327680.f, kXYmax = 327680.f;
+    const float kZmin  =  -16384.f, kZmax  =  16384.f;
+
+    std::vector<uint8_t> chunk(kChunk);
+    std::vector<L2Character> result;
+    std::unordered_set<uintptr_t> seen;
+    seen.reserve(64);
+
+    for (uintptr_t addr = kBase; addr < kEnd; addr += kChunk) {
+        size_t sz = (size_t)std::min((uintptr_t)kChunk, kEnd - addr);
+        if (!readBytes(addr, chunk.data(), sz)) continue;
+
+        for (size_t o = 0; o + 12 <= sz; o += 4) {
+            float x, y, z;
+            std::memcpy(&x, chunk.data() + o,     4);
+            std::memcpy(&y, chunk.data() + o + 4, 4);
+            std::memcpy(&z, chunk.data() + o + 8, 4);
+
+            if (!std::isfinite(x) || x < kXYmin || x > kXYmax) continue;
+            if (!std::isfinite(y) || y < kXYmin || y > kXYmax) continue;
+            if (!std::isfinite(z) || z < kZmin  || z > kZmax)  continue;
+
+            float dx = x - px, dy = y - py;
+            if (dx*dx + dy*dy > kMaxR2) continue;
+
+            uintptr_t xAddr = addr + (uintptr_t)o;
+            if (xAddr < m_off.objXOff) continue;
+            uintptr_t objBase = xAddr - m_off.objXOff;
+            if (!seen.insert(objBase).second) continue;
+
+            int32_t typeRaw = readTypeFromBuf(
+                m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
+            if (typeRaw != 0) continue; // тільки Mob
+
+            L2Character ch;
+            ch.memPtr = objBase;
+            ch.type   = L2ObjectType::Mob;
+            ch.x = x; ch.y = y; ch.z = z;
+            // HP offsets ще не відкалібровані — best-effort
+            ch.hp     = rpm<float>  (objBase + m_off.charHpOff);
+            ch.hpMax  = rpm<float>  (objBase + m_off.charHpMaxOff);
+            ch.isDead = rpm<int32_t>(objBase + m_off.charIsDeadOff) != 0;
+            result.push_back(ch);
+        }
+    }
+    return result;
+}
+
+std::vector<L2Object> KnownListReader::readItemsRegionScan(
+        uintptr_t playerBase, float maxRange) const
+{
+    float px = rpm<float>(playerBase + OFF_PLAYER_X);
+    float py = rpm<float>(playerBase + OFF_PLAYER_Y);
+    if (!std::isfinite(px) || !std::isfinite(py)) return {};
+
+    const uintptr_t kBase  = OFF_REGION_SCAN_BASE;
+    const uintptr_t kEnd   = OFF_REGION_SCAN_END;
+    const size_t    kChunk = 0x10000;
+    const float     kMaxR2 = maxRange * maxRange;
+    const float kXYmin = -327680.f, kXYmax = 327680.f;
+    const float kZmin  = -16384.f,  kZmax  = 16384.f;
+
+    std::vector<uint8_t> chunk(kChunk);
+    std::vector<L2Object> result;
+    std::unordered_set<uintptr_t> seen;
+    seen.reserve(32);
+
+    for (uintptr_t addr = kBase; addr < kEnd; addr += kChunk) {
+        size_t sz = (size_t)std::min((uintptr_t)kChunk, kEnd - addr);
+        if (!readBytes(addr, chunk.data(), sz)) continue;
+
+        for (size_t o = 0; o + 12 <= sz; o += 4) {
+            float x, y, z;
+            std::memcpy(&x, chunk.data() + o,     4);
+            std::memcpy(&y, chunk.data() + o + 4, 4);
+            std::memcpy(&z, chunk.data() + o + 8, 4);
+
+            if (!std::isfinite(x) || x < kXYmin || x > kXYmax) continue;
+            if (!std::isfinite(y) || y < kXYmin || y > kXYmax) continue;
+            if (!std::isfinite(z) || z < kZmin  || z > kZmax)  continue;
+
+            float dx = x - px, dy = y - py;
+            if (dx*dx + dy*dy > kMaxR2) continue;
+
+            uintptr_t xAddr = addr + (uintptr_t)o;
+            if (xAddr < m_off.objXOff) continue;
+            uintptr_t objBase = xAddr - m_off.objXOff;
+            if (!seen.insert(objBase).second) continue;
+
+            int32_t typeRaw = readTypeFromBuf(
+                m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
+            if (typeRaw != 2) continue; // тільки Item
+
+            L2Object obj;
+            obj.memPtr = objBase;
+            obj.type   = L2ObjectType::Item;
+            obj.x = x; obj.y = y; obj.z = z;
+            result.push_back(obj);
+        }
+    }
+    return result;
 }
 
 // ── Знайти найближчого живого моба ────────────────────────────────────────────

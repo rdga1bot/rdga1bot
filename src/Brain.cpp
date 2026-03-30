@@ -920,15 +920,31 @@ void Brain::HandleBuffing() {
     // ALT+B режим — багатостадійний FSM з template matching
     switch (m_buff_stage) {
 
-    case 0: // Відкрити ALT+B, почекати поки вікно з'явиться
+    case 0: { // Чекаємо скидання бойового стану L2 → ESC + ALT+B
+        // L2 combat/peace status скидається ~15с після останньої атаки.
+        // До цього ALT+B не відкриє вікно ком'юніті — гра блокує.
+        const double kCombatExpire = 15.0;
+        const double secs_since_kill = SecsSince(m_last_kill_time);
+        if (secs_since_kill < kCombatExpire) {
+            // Log кожні ~5с (50 тіків × 100мс)
+            if (m_buff_open_retries % 50 == 0) {
+                Log("[Buffs] Чекаємо скидання бойового стану ще " +
+                    std::to_string((int)(kCombatExpire - secs_since_kill)) + "с...",
+                    LogLevel::Debug);
+            }
+            ++m_buff_open_retries;
+            return; // m_buff_stage залишається 0 → наступний тік перевіряємо знову
+        }
+        m_buff_open_retries = 0; // скидаємо — використовується в stage 1 для retries
         Log("[Buffs] ESC + ALT+B → знімаємо таргет і відкриваємо вікно...");
         m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-        m_hands.Delay(300); // L2 обробляє ESC, таргет/флаг знятий
+        m_hands.Delay(300); // L2 обробляє ESC, таргет знятий
         sendAltB();
         m_hands.Delay(2000); // ALT+B відкривається ~1с + запас
         m_hands.Send();
         m_buff_stage = 1;
         break;
+    }
 
     case 1: { // Знайти і натиснути вкладку "Баффер"
         // Зберігаємо кожну спробу: buff_stage1_check0.png, _check1.png, _check2.png

@@ -8,10 +8,11 @@ WorldState::WorldState(pid_t pid, const OffsetScanner& offsets)
 void WorldState::update(uintptr_t playerBase) {
     if (!playerBase) return;
 
-    // Координати гравця заповнює main.cpp через Brain::SetMemPlayerState().
-    // Тут оновлюємо тільки списки об'єктів KnownList.
-    m_mobs  = m_reader.readMobs(playerBase);
-    m_items = m_reader.readItems(playerBase);
+    // Region scan: пряме сканування пам'яті замість KnownList pointer chain.
+    // Для ElmoreLab Kamael: pb+0x120 → DLL/code space, не масив об'єктів.
+    // readMobsRegionScan() сканує 0x3F0000-0x440000 по 64KB чанках.
+    m_mobs  = m_reader.readMobsRegionScan(playerBase, 1500.f);
+    m_items = m_reader.readItemsRegionScan(playerBase, 500.f);
 
     // Kill detection: порівнюємо кількість живих мобів з попереднім тіком
     int alive = 0;

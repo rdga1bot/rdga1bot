@@ -24,6 +24,16 @@ public:
         float playerX, float playerY,
         float maxRange = 1200.f) const;
 
+    // ── Region scan (Kamael ElmoreLab) ────────────────────────────────────────
+    // Читає плоский масив об'єктів напряму зі сканом пам'яті замість KnownList ptr.
+    // Метод для клієнтів де pb+0x120 НЕ є масивом вказівників на об'єкти.
+    // Читає увесь регіон одним readBytes(), сканує на XYZ triplets у L2 bounds,
+    // фільтрує за відстанню від гравця та типом (Mob/Item).
+    std::vector<L2Character> readMobsRegionScan(uintptr_t playerBase,
+                                                float maxRange = 1500.f) const;
+    std::vector<L2Object>    readItemsRegionScan(uintptr_t playerBase,
+                                                 float maxRange = 500.f) const;
+
     // Діагностика типів: логує offsets +0x14..+0x20 для перших 10 об'єктів.
     // Допомагає знайти правильний objTypeOff якщо readMobs() порожній.
     void diagnoseTypes(uintptr_t playerBase) const;
@@ -42,6 +52,7 @@ private:
     }
 
     static bool isValidPtr(uintptr_t v) {
-        return v > 0x10000 && v < 0x7FFF0000;
+        // Wine 32-bit user space reaches 0xBFFFFFFF, not 0x7FFFFFFF
+        return v > 0x10000 && v < 0xBFFF0000;
     }
 };

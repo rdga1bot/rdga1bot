@@ -128,10 +128,11 @@ TARGETING → ATTACKING → LOOTING → TARGETING (цикл)
 
 **BUFFING:**
 - Тригер: в IDLE/TARGETING + `SecsSince(last_buff) >= buff_interval` + `SecsSince(last_kill_time) >= 2.0s`.
-  - 2с достатньо щоб LOOTING (~300мс) завершився і ми були в TARGETING
-  - На активному споті (kills кожні 3-5с): через 2с після kill ми вже в TARGETING → баф спрацьовує
-  - При старті: `m_last_kill_time = Now()-1год` → умова одразу true
-  - HandleBuffing() також скасовує якщо kill < 2с (edge case) і перепланує через 30с
+  - 2с достатньо щоб LOOTING (~300мс) завершився і ми були в TARGETING → входимо в BUFFING
+  - В BUFFING Stage 0: чекаємо `SecsSince(last_kill_time) >= 15.0с` (L2 combat/peace state скидається ~15с після атаки). До цього ALT+B не відкриє вікно ком'юніті!
+  - При старті: `m_last_kill_time = Now()-1год` → 15с умова одразу true → баф одразу
+  - На активному споті: вхід в BUFFING через 2с, але Stage 0 чекає ще 13с → загалом ~15с без атаки
+  - HandleBuffing() скасовує якщо kill < 2с (edge case) і перепланує через 30с
 - `buff_use_altb=true`: ALT+B → 1500мс → знайти "Баффер" (template або координати) → 800мс → знайти "tty" → 1с → ALT+B (закриває вікно)
   - **Template matching**: `buff_tab.png` + `buff_profile.png` в папці бота — якщо є, використовуються автоматично
   - **Fallback**: `BuffTabX/Y` + `BuffProfileX/Y` якщо шаблони не знайдено або не збіглися (threshold 0.75)
