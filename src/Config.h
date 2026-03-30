@@ -146,6 +146,17 @@ public:
     bool mem_use_for_kill_detect = false; // isDead з пам'яті (instant, без 800мс debounce)
     bool mem_fallback_to_opencv  = true;  // при збої memory → fallback до OpenCV
 
+    // [Navigation] — memory-based навігація до моба
+    struct NavigationFeatures {
+        bool  enabled         = false;  // вимкнено поки heading не відкалібровано
+        float attack_range    = 150.f;  // дальність атаки в L2-юнітах (Dagger ~150)
+        float angle_tolerance = 0.17f;  // допуск кута (рад) ~10°
+        bool  use_heading     = false;  // використовувати heading (false = тільки рух)
+    } navigation;
+
+    // Нові offsets для MemReader
+    uintptr_t mem_heading_off = 0;  // heading offset в PlayerObject
+
     // [MemReader] — читання пам'яті L2 процесу (Wine, /proc/PID/mem)
     // Всі значення = 0 → вимкнено (використовується OpenCV детекція)
     bool     mem_enabled     = false;

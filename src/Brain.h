@@ -34,6 +34,11 @@ public:
     // Hot-reload конфігурації без перезапуску
     void ReloadConfig(const Config& new_cfg);
 
+    // Навігація до моба через memory (heading + координати).
+    // Викликається з HandleTargeting якщо navigation.enabled=true.
+    // Повертає true якщо виконано поворот або рух.
+    bool NavigateToMob(const L2Character& mob);
+
     // Memory Reading: оновлення стану гравця з пам'яті (викликається з main loop)
     void SetMemPlayerState(const MemReader::PlayerState& s) { m_mem_player = s; }
     const MemReader::PlayerState& GetMemPlayerState() const { return m_mem_player; }
@@ -160,6 +165,15 @@ private:
     // KnownList memory read: чи HP/isDead цілі береться з пам'яті (для діагностики)
     bool m_mem_target_hp_valid = false;
 
+    // Memory-based навігація
+    struct NavigationState {
+        float targetX    = 0.f, targetY    = 0.f, targetZ    = 0.f;
+        float playerX    = 0.f, playerY    = 0.f;
+        float playerHeading = 0.f;
+        float distance   = 0.f;
+        float angleDiff  = 0.f;
+    } m_nav_state;
+
     // KnownList: WorldState (null якщо KnownList вимкнено)
     std::unique_ptr<WorldState> m_world;
     uintptr_t m_player_base = 0;
@@ -181,6 +195,8 @@ private:
 
     bool HasTarget() const { return m_target.has_value() && m_target->hp > 0; }
     bool InRespawnGrace() const { return Clock::now() < m_respawn_until; }
+
+    static float NormalizeAngle(float angle);  // нормалізує до [-pi..pi]
 
     static double SecsSince(TP t) {
         return std::chrono::duration<double>(Clock::now() - t).count();

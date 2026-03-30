@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <optional>
+#include <string>
 #include <sys/types.h>
 #include "l2_objects.h"
 #include "offset_scanner.h"
@@ -23,6 +24,19 @@ public:
         const std::vector<L2Character>& mobs,
         float playerX, float playerY,
         float maxRange = 1200.f) const;
+
+    // Читання назви об'єкту з пам'яті.
+    // Спочатку UTF-8 (char[64] @ nameOff), потім UTF-16 (wchar_t[32] @ nameOff+4).
+    // Повертає порожній рядок якщо не знайдено або назва непринтована.
+    std::string readName(uintptr_t objPtr) const;
+
+    // Пошук моба за назвою (точний або частковий збіг, case-insensitive).
+    // Повертає найближчого моба з відповідною назвою в радіусі maxRange.
+    std::optional<L2Character> findMobByName(
+        const std::vector<L2Character>& mobs,
+        const std::string& name,
+        float playerX, float playerY,
+        float maxRange = 1500.f) const;
 
     // ── Region scan (Kamael ElmoreLab) ────────────────────────────────────────
     // Читає плоский масив об'єктів напряму зі сканом пам'яті замість KnownList ptr.

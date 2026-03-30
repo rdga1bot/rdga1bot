@@ -7,6 +7,8 @@
 #include <cmath>       // isfinite
 #include <cstdio>      // snprintf, fopen
 #include <ctime>       // time_t
+#include <cctype>      // isprint, tolower
+#include <cwchar>      // wchar_t
 #include <unordered_set>
 
 KnownListReader::KnownListReader(pid_t pid, const OffsetScanner& offsets)
@@ -302,6 +304,23 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                 ch.hp     = rpm<float>  (objBase + m_off.charHpOff);
                 ch.hpMax  = rpm<float>  (objBase + m_off.charHpMaxOff);
                 ch.isDead = rpm<int32_t>(objBase + m_off.charIsDeadOff) != 0;
+
+                // Читаємо назву якщо OFF_OBJ_NAME відкалібровано
+                if (OFF_OBJ_NAME != 0) {
+                    ch.name = readName(objBase);
+                }
+                // Читаємо level і MP (якщо offsets відкалібровані)
+                if (OFF_CHAR_LEVEL != 0) {
+                    ch.level = rpm<int32_t>(objBase + OFF_CHAR_LEVEL);
+                    if (ch.level < 1 || ch.level > 85) ch.level = 0;
+                }
+                if (OFF_CHAR_MP != 0 && OFF_CHAR_MP_MAX != 0) {
+                    ch.mp    = rpm<float>(objBase + OFF_CHAR_MP);
+                    ch.mpMax = rpm<float>(objBase + OFF_CHAR_MP_MAX);
+                    if (!std::isfinite(ch.mp)    || ch.mp    < 0.f) ch.mp    = 0.f;
+                    if (!std::isfinite(ch.mpMax) || ch.mpMax < 0.f) ch.mpMax = 0.f;
+                }
+
                 result.push_back(ch);
             }
         }
@@ -377,6 +396,81 @@ std::optional<L2Character> KnownListReader::findNearestMob(
 
     for (const auto& mob : mobs) {
         if (mob.isDead || mob.hp <= 0.f) continue;
+        float d = mob.distanceTo(playerX, playerY);
+        if (d < bestDist) {
+            bestDist = d;
+            best = mob;
+        }
+    }
+    return best;
+}
+
+// ── Читання назви об'єкту з пам'яті ──────────────────────────────────────────
+std::string KnownListReader::readName(uintptr_t objPtr) const {
+    if (!objPtr) return "";
+
+    // Спроба 1: char[64] UTF-8 @ OFF_OBJ_NAME
+    char buf8[64] = {};
+    if (readBytes(objPtr + OFF_OBJ_NAME, buf8, sizeof(buf8))) {
+        buf8[63] = '\0';
+        bool ok = false;
+        for (int i = 0; i < 63 && buf8[i]; ++i) {
+            if (std::isprint((unsigned char)buf8[i])) { ok = true; break; }
+        }
+        if (ok) return std::string(buf8);
+    }
+
+    // Спроба 2: wchar_t[32] UTF-16LE @ OFF_OBJ_NAME + 4
+    wchar_t buf16[32] = {};
+    if (readBytes(objPtr + OFF_OBJ_NAME + 4, buf16, sizeof(buf16))) {
+        buf16[31] = L'\0';
+        if (buf16[0] > 0x1F && buf16[0] < 0x8000) {
+            std::string result;
+            result.reserve(32);
+            for (int i = 0; i < 32 && buf16[i]; ++i) {
+                wchar_t wc = buf16[i];
+                if (wc < 0x80) {
+                    result += (char)wc;
+                } else if (wc < 0x800) {
+                    result += (char)(0xC0 | (wc >> 6));
+                    result += (char)(0x80 | (wc & 0x3F));
+                } else {
+                    result += (char)(0xE0 | (wc >> 12));
+                    result += (char)(0x80 | ((wc >> 6) & 0x3F));
+                    result += (char)(0x80 | (wc & 0x3F));
+                }
+            }
+            if (!result.empty()) return result;
+        }
+    }
+    return "";
+}
+
+// ── Пошук моба за назвою ──────────────────────────────────────────────────────
+std::optional<L2Character> KnownListReader::findMobByName(
+        const std::vector<L2Character>& mobs,
+        const std::string& name,
+        float playerX, float playerY,
+        float maxRange) const {
+    if (name.empty()) return std::nullopt;
+
+    std::string needle = name;
+    std::transform(needle.begin(), needle.end(), needle.begin(),
+                   [](unsigned char c){ return (char)std::tolower(c); });
+
+    std::optional<L2Character> best;
+    float bestDist = maxRange;
+
+    for (const auto& mob : mobs) {
+        if (mob.isDead || mob.hp <= 0.f) continue;
+        if (mob.name.empty()) continue;
+
+        std::string haystack = mob.name;
+        std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+                       [](unsigned char c){ return (char)std::tolower(c); });
+
+        if (haystack.find(needle) == std::string::npos) continue;
+
         float d = mob.distanceTo(playerX, playerY);
         if (d < bestDist) {
             bestDist = d;

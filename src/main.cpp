@@ -98,6 +98,7 @@ static void ApplyConfig(const Config& cfg, Hands& hands, Eyes& eyes, Brain& brai
         off.pos_x_off    = cfg.mem_pos_x_off;
         off.pos_y_off    = cfg.mem_pos_y_off;
         off.pos_z_off    = cfg.mem_pos_z_off;
+        off.heading_off  = cfg.mem_heading_off;
         mem->SetOffsets(off);
         if (!mem->IsOpen())
             mem->Open(cfg.mem_proc_name);
@@ -764,6 +765,30 @@ int main(int argc, char* argv[]) {
                   << (int)scanner.rpm_pub<float>(playerBase + 0x2C) << "\n";
         std::cerr << "[CAL] Знайди offset де значення ≈ XYZ гравця або мобів поряд.\n"
                   << "[CAL] Перевір int32 значення поряд з XYZ для typeID (0=mob,1=player,2=item).\n";
+
+        // --- Name scan (якщо передано --name "NpcName") ---
+        std::string cal_name;
+        for (int i = 2; i < argc - 1; ++i) {
+            if (std::string(argv[i]) == "--name") {
+                cal_name = argv[i + 1];
+                break;
+            }
+        }
+        if (!cal_name.empty()) {
+            std::cerr << "\n[CAL] === Name offset scan для \"" << cal_name << "\" ===\n";
+            uintptr_t nameOff = scanner.findNameOffset(playerBase, cal_name);
+            if (nameOff)
+                std::cerr << "[CAL] OFF_OBJ_NAME = 0x" << std::hex << nameOff
+                          << std::dec << " → оновити offsets_config.h\n";
+        } else {
+            std::cerr << "\n[CAL] Для пошуку назви: --calibrate --name \"Ім'я моба\"\n";
+        }
+
+        // --- Heading calibration ---
+        std::cerr << "\n[CAL] === Heading scan ===\n";
+        scanner.calibrateHeadingOffset(playerBase);
+        std::cerr << "[CAL] Usage: --calibrate [--name \"MobName\"]\n";
+
         return 0;
     }
 

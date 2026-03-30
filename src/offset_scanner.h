@@ -58,8 +58,14 @@ public:
 
     bool isValidPtr_pub(uintptr_t v) const { return isValidPtr(v); }
 
-    // Heading калібровка: стій нерухомо → запусти → повернись → запусти знову → порівняй.
-    // Виводить в cerr playerBase+[0x28..0x80] на float у[-pi..pi] або [0..360].
+    // Автоматичний пошук offset назви через порівняння з відомою назвою моба.
+    // Викликати: стояти поряд з мобом, передати його точну назву.
+    // Сканує KnownList об'єкти поблизу на char[64] @ offsets 0x60..0x80.
+    uintptr_t findNameOffset(uintptr_t playerBase,
+                             const std::string& expectedName);
+
+    // Виводить значення +0x28..0x80 від PlayerBase як float/int для діагностики heading.
+    // Запускати двічі: до і після повороту на 90°. Порівнювати вивід.
     void calibrateHeadingOffset(uintptr_t playerBase) const;
 
     // Runtime-значення offsets (перевизначаються findKnownListOffset або loadOffsets)

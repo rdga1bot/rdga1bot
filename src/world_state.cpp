@@ -172,3 +172,18 @@ void WorldState::clearTarget() {
     m_target   = std::nullopt;
 }
 
+std::optional<L2Character> WorldState::findNearestMob(
+        const std::vector<L2Character>& mobs,
+        float playerX, float playerY,
+        float maxRange) const {
+    return m_reader.findNearestMob(mobs, playerX, playerY, maxRange);
+}
+
+std::optional<L2Character> WorldState::findMobByName(
+        const std::vector<L2Character>& mobs,
+        const std::string& name,
+        float playerX, float playerY,
+        float maxRange) const {
+    return m_reader.findMobByName(mobs, name, playerX, playerY, maxRange);
+}
+

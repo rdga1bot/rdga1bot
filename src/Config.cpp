@@ -305,6 +305,12 @@ bool Config::Load(const std::string& path) {
     mem_use_for_kill_detect = GetBool("Memory", "UseForKillDetect", mem_use_for_kill_detect);
     mem_fallback_to_opencv  = GetBool("Memory", "FallbackToOpenCV", mem_fallback_to_opencv);
 
+    // [Navigation] — memory-based навігація
+    navigation.enabled         = GetBool  ("Navigation", "Enabled",        navigation.enabled);
+    navigation.attack_range    = (float)GetDouble("Navigation", "AttackRange",   navigation.attack_range);
+    navigation.angle_tolerance = (float)GetDouble("Navigation", "AngleTolerance",navigation.angle_tolerance);
+    navigation.use_heading     = GetBool  ("Navigation", "UseHeading",      navigation.use_heading);
+
     // [KnownList]
     knownlist_enabled      = GetBool  ("KnownList", "Enabled",      knownlist_enabled);
     knownlist_autoscan     = GetBool  ("KnownList", "AutoScan",     knownlist_autoscan);
@@ -321,9 +327,10 @@ bool Config::Load(const std::string& path) {
     mem_max_mp_off  = (uintptr_t)std::stoul(Get("MemReader", "MaxMP_Offset","0"), nullptr, 16);
     mem_cp_off      = (uintptr_t)std::stoul(Get("MemReader", "CP_Offset",  "0"), nullptr, 16);
     mem_max_cp_off  = (uintptr_t)std::stoul(Get("MemReader", "MaxCP_Offset","0"), nullptr, 16);
-    mem_pos_x_off   = (uintptr_t)std::stoul(Get("MemReader", "PosX_Offset","0"), nullptr, 16);
-    mem_pos_y_off   = (uintptr_t)std::stoul(Get("MemReader", "PosY_Offset","0"), nullptr, 16);
-    mem_pos_z_off   = (uintptr_t)std::stoul(Get("MemReader", "PosZ_Offset","0"), nullptr, 16);
+    mem_pos_x_off   = (uintptr_t)std::stoul(Get("MemReader", "PosX_Offset",    "0"), nullptr, 16);
+    mem_pos_y_off   = (uintptr_t)std::stoul(Get("MemReader", "PosY_Offset",    "0"), nullptr, 16);
+    mem_pos_z_off   = (uintptr_t)std::stoul(Get("MemReader", "PosZ_Offset",    "0"), nullptr, 16);
+    mem_heading_off = (uintptr_t)std::stoul(Get("MemReader", "Heading_Offset", "0"), nullptr, 16);
     {
         // PtrChain = 0x10,0x44,0x0C  (pointer chain offsets hex)
         const std::string raw = Get("MemReader", "PtrChain", "");
@@ -506,6 +513,13 @@ bool Config::Save(const std::string& path) const {
     f << "Back        = " << KeyName(move_back)     << "\n";
     f << "RotateLeft  = " << KeyName(rotate_left)   << "\n";
     f << "RotateRight = " << KeyName(rotate_right)  << "\n";
+    f << "\n";
+    f << "[Navigation]\n";
+    f << "# Memory-based навігація. Вмикати тільки після калібровки heading.\n";
+    f << "Enabled        = " << (navigation.enabled      ? "true" : "false") << "\n";
+    f << "AttackRange    = " << navigation.attack_range    << "\n";
+    f << "AngleTolerance = " << navigation.angle_tolerance << "\n";
+    f << "UseHeading     = " << (navigation.use_heading   ? "true" : "false") << "\n";
     f << "\n";
     f << "[Vision]\n";
     f << "UseRobustBarDetection = " << (use_robust_bar ? "true" : "false") << "\n";

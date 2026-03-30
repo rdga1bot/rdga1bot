@@ -163,6 +163,13 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
     if (m_off.pos_y_off)  rf(m_off.pos_y_off,  state.y);
     if (m_off.pos_z_off)  rf(m_off.pos_z_off,  state.z);
 
+    // Heading (якщо offset задано)
+    if (m_off.heading_off) {
+        float hval = 0.f;
+        if (ReadBytes(obj_addr + m_off.heading_off, &hval, sizeof(hval)))
+            state.heading = hval;
+    }
+
     state.valid = (state.hp >= 0 && state.max_hp > 0);
     return state;
 }

@@ -292,6 +292,49 @@ bool OffsetScanner::loadOffsets(const std::string& path) {
     return true;
 }
 
+// ── Пошук offset назви ────────────────────────────────────────────────────────
+uintptr_t OffsetScanner::findNameOffset(uintptr_t playerBase,
+                                         const std::string& expectedName) {
+    if (!playerBase || expectedName.empty()) return 0;
+    uintptr_t klPtr = rpm<uint32_t>(playerBase + knownListOff);
+    if (!isValidPtr(klPtr)) return 0;
+
+    float px = rpm<float>(playerBase + OFF_PLAYER_X);
+    float py = rpm<float>(playerBase + OFF_PLAYER_Y);
+
+    std::cerr << "[NameScan] Шукаємо \"" << expectedName << "\"...\n";
+
+    int null_streak = 0;
+    for (int i = 0; i < 200; ++i) {
+        uintptr_t objPtr = rpm<uint32_t>(klPtr + (uintptr_t)i * 4);
+        if (!isValidPtr(objPtr)) {
+            if (++null_streak >= 8) break;
+            continue;
+        }
+        null_streak = 0;
+
+        float ox = rpm<float>(objPtr + objXOff);
+        float oy = rpm<float>(objPtr + objYOff);
+        if (!std::isfinite(ox) || !std::isfinite(oy)) continue;
+        float d2 = (ox-px)*(ox-px) + (oy-py)*(oy-py);
+        if (d2 > 500.f*500.f) continue; // тільки поблизу
+
+        for (uintptr_t off = 0x60; off <= 0x80; off += 4) {
+            char buf[64] = {};
+            if (!readBytes(objPtr + off, buf, sizeof(buf))) continue;
+            buf[63] = '\0';
+            std::string found(buf);
+            if (found.find(expectedName) != std::string::npos) {
+                std::cerr << "[NameScan] Знайдено \"" << found
+                          << "\" @ +0x" << std::hex << off << std::dec << "\n";
+                return off;
+            }
+        }
+    }
+    std::cerr << "[NameScan] \"" << expectedName << "\" не знайдено.\n";
+    return 0;
+}
+
 // ── Heading калібровка ─────────────────────────────────────────────────────────
 // Виводить playerBase+[0x28..0x80] floats що схожі на кут ([-pi..pi] або [0..360]).
 // Запускати двічі: стоячи і після повороту на 90° → offset що змінився = heading.

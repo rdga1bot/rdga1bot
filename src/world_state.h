@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <optional>
+#include <string>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -51,6 +52,19 @@ public:
     // Встановити таргет за objectID (викликати з Brain після таргетингу)
     void setTarget(int objectID);
     void clearTarget();
+
+    // Знайти найближчого живого моба (proxy до KnownListReader)
+    std::optional<L2Character> findNearestMob(
+        const std::vector<L2Character>& mobs,
+        float playerX, float playerY,
+        float maxRange = 1200.f) const;
+
+    // Proxy до KnownListReader::findMobByName
+    std::optional<L2Character> findMobByName(
+        const std::vector<L2Character>& mobs,
+        const std::string& name,
+        float playerX = 0.f, float playerY = 0.f,
+        float maxRange = 1500.f) const;
 
     // Координати гравця (заповнюються якщо playerBase відомий)
     float playerX = 0.f, playerY = 0.f, playerZ = 0.f;

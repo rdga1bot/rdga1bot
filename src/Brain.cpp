@@ -1,6 +1,7 @@
 #include "Brain.h"
 #include <iostream>
 #include <ctime>
+#include <cmath>
 #include <opencv2/opencv.hpp>
 
 using namespace std::chrono_literals;
@@ -542,6 +543,29 @@ void Brain::HandleTargeting() {
                     m_nav_stuck_recoveries = 0;
                     if (flow > 0) Log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4),
                                       LogLevel::Debug);
+                }
+            }
+        }
+    }
+
+    // ── Memory навігація (пріоритет над мінімапою якщо увімкнено) ────────────
+    if (m_cfg.navigation.enabled && m_world && m_player_base) {
+        const auto& kl_mobs = m_world->mobs();
+        if (!kl_mobs.empty()) {
+            auto nearest = m_world->findNearestMob(
+                kl_mobs, m_mem_player.x, m_mem_player.y, 1200.f);
+            if (nearest.has_value()) {
+                bool navigated = NavigateToMob(*nearest);
+                if (navigated) {
+                    std::string who = nearest->name.empty()
+                        ? ("ID=" + std::to_string(nearest->objectID))
+                        : nearest->name;
+                    Log("[NAV-MEM] → " + who +
+                        " dist=" + std::to_string((int)m_nav_state.distance) +
+                        " hp=" + std::to_string((int)nearest->hpPercent()) + "%",
+                        LogLevel::Debug);
+                    m_hands.Send(150);
+                    return;
                 }
             }
         }
@@ -1136,4 +1160,78 @@ void Brain::CheckPotions(const Eyes::Me& me) {
         m_hands.Send(50);
         m_last_cp_pot = Now();
     }
+}
+
+// ── NormalizeAngle ────────────────────────────────────────────────────────────
+float Brain::NormalizeAngle(float angle) {
+    while (angle >  (float)M_PI) angle -= 2.f * (float)M_PI;
+    while (angle < -(float)M_PI) angle += 2.f * (float)M_PI;
+    return angle;
+}
+
+// ── NavigateToMob ─────────────────────────────────────────────────────────────
+bool Brain::NavigateToMob(const L2Character& mob) {
+    if (!m_mem_player.valid) return false;
+
+    m_nav_state.playerX       = m_mem_player.x;
+    m_nav_state.playerY       = m_mem_player.y;
+    m_nav_state.playerHeading = m_mem_player.heading;
+    m_nav_state.targetX       = mob.x;
+    m_nav_state.targetY       = mob.y;
+    m_nav_state.targetZ       = mob.z;
+
+    float dx = mob.x - m_mem_player.x;
+    float dy = mob.y - m_mem_player.y;
+    m_nav_state.distance = std::sqrt(dx*dx + dy*dy);
+
+    // Якщо heading не відкалібровано або navigation.use_heading=false →
+    // тільки рух вперед без обчислення кута
+    if (!m_cfg.navigation.use_heading || m_mem_player.heading == 0.f) {
+        if (m_nav_state.distance > m_cfg.navigation.attack_range) {
+            int walk_ms = std::min((int)(m_nav_state.distance * 10.f), 800);
+            m_hands.WalkForward(walk_ms);
+            Log("[NAV-MEM] WalkForward dist=" +
+                std::to_string((int)m_nav_state.distance) +
+                " ms=" + std::to_string(walk_ms), LogLevel::Debug);
+            return true;
+        }
+        return false;
+    }
+
+    // Повний режим: heading відомий → обчислюємо кут і повертаємось
+    // L2: X=East, Y=North. targetAngle = atan2(dx, dy) (не atan2(dy,dx) як у math)
+    float targetAngle = std::atan2(dx, dy);
+    m_nav_state.angleDiff = NormalizeAngle(targetAngle - m_nav_state.playerHeading);
+
+    const float tol = m_cfg.navigation.angle_tolerance;
+
+    if (std::fabsf(m_nav_state.angleDiff) > tol) {
+        int rot_ms = (int)(std::fabsf(m_nav_state.angleDiff) / 0.175f * 100.f);
+        rot_ms = std::min(rot_ms, 500);
+        rot_ms = std::max(rot_ms, 80);
+
+        if (m_nav_state.angleDiff > 0) {
+            m_hands.RotateRight(rot_ms);
+            Log("[NAV-MEM] RotateRight " +
+                std::to_string((int)(m_nav_state.angleDiff * 57.3f)) + "° ms=" +
+                std::to_string(rot_ms), LogLevel::Debug);
+        } else {
+            m_hands.RotateLeft(rot_ms);
+            Log("[NAV-MEM] RotateLeft " +
+                std::to_string((int)(-m_nav_state.angleDiff * 57.3f)) + "° ms=" +
+                std::to_string(rot_ms), LogLevel::Debug);
+        }
+        return true;
+    }
+
+    // Правильно повернуті → рухаємось
+    if (m_nav_state.distance > m_cfg.navigation.attack_range) {
+        int walk_ms = std::min((int)(m_nav_state.distance * 10.f), 800);
+        m_hands.WalkForward(walk_ms);
+        Log("[NAV-MEM] WalkForward dist=" +
+            std::to_string((int)m_nav_state.distance) +
+            " ms=" + std::to_string(walk_ms), LogLevel::Debug);
+        return true;
+    }
+    return false;
 }

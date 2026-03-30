@@ -30,6 +30,7 @@ public:
         int mp = -1, max_mp = -1;
         int cp = -1, max_cp = -1;
         float x = 0, y = 0, z = 0; // world coordinates
+        float heading = 0.f;        // кут повороту [рад] або raw int (залежить від клієнту)
         bool valid = false;
     };
 
@@ -56,6 +57,7 @@ public:
         uintptr_t pos_x_off    = 0;  // float
         uintptr_t pos_y_off    = 0;
         uintptr_t pos_z_off    = 0;
+        uintptr_t heading_off  = 0;  // offset heading від початку PlayerObject
         bool enabled = false;
     };
     void SetOffsets(const Offsets& off) { m_off = off; }
