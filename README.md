@@ -1,118 +1,170 @@
-# rdga1bot — ElmoreLab Farm Bot
+# rdga1bot
 
-C++ бот для автоматизації фарму в Lineage II на ElmoreLab (Arch Linux, Wine/Lutris).
+C++ бот для автоматизації фарму в Lineage II.
+Протестовано: ElmoreLab Kamael/Lionna, Arch Linux, Wine/Lutris (GE-Proton), X11.
 
 ## Можливості
 
-- **Таргетинг через макроси `/target`** — надійніше за піксельну детекцію імен мобів
-- **Ротація атак** — кілька скілів по черзі
-- **Spoil/Sweep** для Spoiler класу (автоматично за Class=Spoiler)
-- **Self-buff таймер** — автоматичний ребаф через заданий інтервал
-- **HP/MP/CP моніторинг** — автоматичне вживання зілль з кулдауном 5с
-- **Auto-approach** — крок вперед якщо HP цілі не падає >6с (out-of-range)
-- **Прогресивний пошук** — чим довше немає мобів, тим далі ходить
-- **Dead detection** — Enter → чекати 20с → grace period 30с після respawn
-- **Telegram сповіщення** — смерть, статистика (через curl, без libcurl)
-- **Інтерактивне TUI** — кольорове меню при першому запуску
-- **INI конфігурація** — все без перекомпіляції
-- **30-60 FPS** — нативний C++, XShm screen capture, evdev/UInput input
+**Бойовий цикл**
+- Автоматичний пошук і атака мобів через `/nexttarget` (F2) і `/target МобНейм` макроси
+- Детекція смерті моба: OpenCV HP bar + KnownList memory read (instant, без debounce)
+- Watchdog таймаут — перехід до лутингу якщо kill не детектується
+- Споіл/sweep для класу Spoiler (SpoilKey + SweepKey)
+- Pokemon sweep: `/target Pokemon` + `/useshortcut` після кожного kill
+
+**Навігація**
+- Мінімапа Rotating Radar: детекція червоних/фіолетових точок мобів, ротація до цілі
+- WalkForward по мінімапі (dy-based) + прогресивна ротація при застряганні
+- Optical flow (Lucas-Kanade) на мінімапі — flow-stuck detection
+- Патруль PatrolPath (`F2000,R500,...`) при порожній мінімапі
+- Memory-based навігація: координати XYZ + heading (опціонально, `[Navigation] Enabled=true`)
+
+**Детекція**
+- OpenCV XShm screen capture (lazy HSV конвертація, ~30-60 FPS)
+- HP/MP/CP бари персонажа і HP бар цілі (HSV, конфігуровані в INI)
+- Auto-calibration TargetStatusWnd: автовизначення posX при першому таргеті
+- F12 → `calibrate_*.png` + HSV auto-suggest в лозі
+
+**Memory reading (KnownList)**
+- `process_vm_readv` — без root, без Cheat Engine, без Windows API
+- `blindScan()` — автономний пошук PlayerBase без відомих offsets
+- Region scan heap: XYZ triplet scan → тип/HP/isDead/ім'я/level
+- Fallback `readAllAsChars()` якщо `objTypeOff` не відкалібровано
+- Thread-safe WorldState (snapshot copy під mutex, bgLoop scan кожну 1с)
+- `--dump-objects` / `--calibrate [--name "X"]` — калібровка без Cheat Engine
+
+**Буфінг**
+- ALT+B → template matching (`buff_tab.png`, `buff_profile.png`) → click профілю
+- Fallback на координати якщо шаблон не збігся; retry через 120с
+- Чекання виходу з combat state (~15с) перед відкриттям BBS
+
+**Автоматика**
+- Авто-зілля HP/MP/CP з кулдауном 5с (опціонально, гра auto-potion пріоритетніша)
+- Dead detection: Enter → 20с → grace 30с → відновлення фарму
+- Telegram сповіщення: смерть + статистика (через fork+curl)
+- Авто-збереження stats кожні N kills
+
+**TUI Dashboard (ncurses)**
+- HP/MP/CP бари персонажа, HP цілі, kills/deaths, K/D ratio
+- Лог до 200 рядків з підсвіткою переходів стану
+- Пауза (P), скидання барів (R/Space), налаштування (S), calibrate (F12)
+- Глобальна зупинка: ScrollLock (XQueryKeymap, незалежно від фокусу)
+
+## Результати тестів
+
+| Тест | Kills | Deaths | Kill/хв |
+|------|-------|--------|---------|
+| 40 хв | 127 | 0 | 4.3 |
+| 100 хв | 1511 | 0 | 15.1 |
+| 3 год | 1940 | 0 | 11.0 |
 
 ## Швидкий старт
 
 ```bash
-# 1. Зібрати
-./build.sh
+# Залежності (Arch Linux)
+sudo pacman -S opencv gcc libx11 libxtst libxext curl ncurses
 
-# 2. Підготувати гру:
-#    - Відкрити Lineage II (windowed mode)
-#    - Створити макроси /target МобНейм1, /target МобНейм2 в грі
-#    - Повісити макроси на хотбар: слоти 2,3,4,5,6
-#    - Повісити: атаку F1, лут F5, HP зілля F6, MP F7, CP F8
+# Зібрати
+cd ~/l2bot/rdga1bot
+bash build.sh
 
-# 3. Запустити (перший раз — інтерактивне налаштування)
+# Перший запуск (TUI налаштувань)
 ./launch.sh
 
-# 4. Наступні рази (швидкий старт з rdga1bot.ini)
+# Звичайний запуск (з rdga1bot.ini)
 ./rdga1bot --quick
-# або
-./launch.sh   # автоматично --quick якщо rdga1bot.ini існує
+
+# Тривалий фарм з логом
+./farm.sh
 ```
 
-## Конфігурація (rdga1bot.ini)
+## Конфігурація
 
-Створюється автоматично через TUI при першому запуску.
-Можна редагувати вручну текстовим редактором.
+Копіювати `rdga1bot.example.ini` → `rdga1bot.ini`, відредагувати під себе.
+`rdga1bot.ini` не комітується в git (містить Telegram токен).
 
 ```ini
 [General]
 WindowTitle = Lineage II
-Debug = true
+LogLevel = INFO            # DEBUG / INFO / WARNING / ERROR / NONE
 
 [Character]
-Class = Spoiler  # Mage, Archer, Spoiler
+Class = Treasure Hunter    # Mage, Archer, Spoiler, Treasure Hunter, ...
 
 [Targeting]
-MacroKeys = 2,3,4,5,6  # хотбар-слоти макросів /target
+NextTargetKey = F2         # /nexttarget (основний)
+MacroKeys = F7,F8,F9,F10,F11  # /target МобНейм резерв (F-keys!)
+NearbyYThreshold = 0       # Screen-Y фільтр (0=вимк, 200=підземелля, 450=пустеля)
 
 [Attack]
 AttackKeys = F1
 AttackWait = 0.5
+AttackWatchdog = 20
 
-[Loot]
-LootKey = F5
-LootCount = 10
+[Buffs]
+BuffEnabled = true
+BuffUseAltB = true
+BuffInterval = 600
 
-[Potions]
-HP_Key = F6
-HP_Threshold = 70
-MP_Key = F7
-MP_Threshold = 40
+[KnownList]
+Enabled = true             # memory scan мобів без root
+AutoScan = true            # blindScan() при старті
 
-[Telegram]
-BotToken =
-ChatID =
+[Navigation]
+Enabled = false            # memory-based навігація (потребує калібровки heading)
 ```
 
-## Клавіші під час роботи
+Повний список параметрів: [`rdga1bot.example.ini`](rdga1bot.example.ini)
+
+## Клавіші
 
 | Клавіша | Дія |
 |---------|-----|
-| ESC | Зупинити бот |
-| PrintScreen | Зберегти скріншот (`shot.png`) |
-| Space | Скинути позиції HP/MP/CP барів |
-| F12 | Зберегти калібрувальні зображення (`calibrate_*.png`) |
+| ScrollLock | Зупинити бот (глобально) |
+| P | Пауза / продовження |
+| S | Налаштування (hot-reload) |
+| R / Space | Скинути детекцію HP/MP/CP барів |
+| F12 | Зберегти calibrate_*.png + HSV auto-suggest |
+| PrintScreen | shot.png |
 
-## Стейт-машина
-
-```
-IDLE → TARGETING → ATTACKING → LOOTING → IDLE
-                      ↓
-                    DEAD → (Enter → 20s wait → respawn grace) → IDLE
-                      ↓
-                  BUFFING → IDLE
-```
-
-## Залежності
+## Калібровка KnownList (memory offsets)
 
 ```bash
-sudo pacman -S opencv gcc x11 libxtst libxext curl
+# Повний дамп об'єктів для визначення offsets
+./rdga1bot --dump-objects
+
+# Heading + name offset scan
+./rdga1bot --calibrate
+./rdga1bot --calibrate --name "Назва моба"
 ```
 
-- `opencv` — screen analysis
-- `x11`, `libxtst`, `libxext` — X11, XTest, XShm
-- `/dev/uinput` — kernel-level keyboard input (evdev)
-- `curl` — Telegram сповіщення (опціонально)
+Докладно: [`CALIBRATION.md`](CALIBRATION.md)
 
 ## Архітектура
 
-| Файл | Роль |
-|------|------|
-| `Brain.cpp` | Стейт-машина (IDLE/TARGETING/ATTACKING/LOOTING/DEAD/BUFFING) |
-| `Eyes.cpp` | OpenCV детекція HP/MP/CP барів, target HP |
-| `Hands.h` | Дії: макроси, атака, баф, рух, зілля |
-| `Config.cpp` | INI парсер + інтерактивний TUI |
-| `Capture_Linux.cpp` | XShm screen capture (~30fps) |
-| `Intercept_Linux.cpp` | evdev UInput keyboard, XTest mouse |
-| `Window_Linux.cpp` | X11 window finding |
-| `Notify.cpp` | Telegram через fork+curl |
-| `Stats.cpp` | Статистика сесії, JSON лог |
+```
+Brain.cpp/.h        — FSM: IDLE/TARGETING/ATTACKING/LOOTING/DEAD/BUFFING
+Eyes.cpp/.h         — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа, NPC
+Hands.h             — дії: XTest keyboard/mouse, рух стрілками
+Config.cpp/.h       — INI парсер + валідація + interactive TUI
+Dashboard.cpp/.h    — ncurses TUI dashboard
+Capture_Linux.cpp   — XShm screen capture
+Intercept_Linux.cpp — XTest backend (XTestFakeKeyEvent)
+Window_Linux.cpp    — X11 window finding (кешований)
+MemReader.cpp/.h    — читання HP/MP/CP/XYZ гравця з пам'яті Wine
+OffsetScanner       — blindScan(), calibrateHeadingOffset(), findNameOffset()
+KnownListReader     — region scan мобів, readName(), findMobByName()
+WorldState          — thread-safe агрегатор KnownList для Brain
+Notify.cpp/.h       — Telegram через fork+curl
+Stats.cpp/.h        — статистика сесії, JSON лог
+```
+
+## Вимоги
+
+- Linux, X11 (не Wayland)
+- Wine (протестовано: GE-Proton через Flatpak Lutris)
+- g++ з підтримкою C++17
+- OpenCV 4.x
+- ncurses
+- libx11, libxtst (XTest), libxext (XShm)
+- curl (для Telegram, опціонально)
