@@ -785,12 +785,25 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **offsets_config.h відкалібровано (2026-03-30)**: `OFF_OBJ_X=0x90`, `OFF_OBJ_Y=0x94`, `OFF_OBJ_Z=0x98`, `OFF_OBJ_TYPE=0x5C` (stride 0x5C0 між об'єктами). Scan region: `OFF_REGION_SCAN_BASE=0x3F0000`, `OFF_REGION_SCAN_END=0x440000`. ✓
 - **KnownList kill detection ПІДТВЕРДЖЕНО (2026-03-30)**: `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` — спрацювало 2 рази в тесті після `blindScan() PlayerBase=0x4061d8`. `offsets.json` оновлено: `OFF_OBJ_X=144(0x90)`, `OFF_OBJ_TYPE=92(0x5C)`. ✓
 - **Buff rebuff FIX #2 (2026-03-30)**: Stage 0 чекає `SecsSince(last_kill_time) >= 15с` перед ALT+B. L2 combat/peace state = ~15с після останньої атаки. ESC (Stage 0 попереднього фіксу) знімав таргет але НЕ скидав combat state → ALT+B не відкривав вікно ком'юніті. Тепер: бот входить BUFFING через 2с, але Stage 0 блокується до повного виходу з combat state. ✓
+- **Kamael HP offsets відкалібровано (2026-03-31)**: `--hp-calibrate` mode + ручний аналіз пам'яті. `offsets.json` оновлено: `OFF_CHAR_HP=664(0x298)`, `OFF_CHAR_HP_MAX=480(0x1e0)`, `OFF_CHAR_IS_DEAD=440(0x1b8)`. Раніше були HF defaults (0x1F4/0x1F8/0x210). `[KnownList] alive=N` тепер показує реальну кількість живих мобів. ✓
+- **UseForKillDetect баг виявлено і вимкнено (2026-03-31)**: перевіряв `hp<=0` у ВСІХ мобах KnownList → завжди є мертві моби у списку → ATTACKING одразу → fake kills (22 kills/min). `UseForKillDetect = false` назавжди. Kill detection: `anyMobDiedThisTick()` + OpenCV `hp<=2%`. ✓
+- **UseForTargetHP фікс: min HP% (2026-03-31)**: раніше брав першого живого моба → читав HP чужої цілі → HP завжди 100%. Тепер: моб з мінімальним HP% = той що атакується. `UseForTargetHP = true` в .ini. ✓
+- **Approach re-target вимкнено (2026-03-31)**: `false &&` в `approach_possible`. Причина: для товстих мобів де 1 удар < 20% → ретаргет кожну секунду → кидав живих мобів. ✓
+- **RunTick вимкнено (2026-03-31)**: `should_run = false`. Акумулював кут повороту від RotateRight → персонаж дрейфував у протилежну від мобів сторону. В підземеллях: ротація + F2 достатньо; моби з aggro підходять самі. ✓
+- **Мінімапа dx=25 підтверджено РЕАЛЬНИЙ моб (2026-03-31)**: python аналіз ROI: 182 контури (рамка мінімапи = gold/orange), 2 реальні моби всередині кола (dx=24 dy=-68 dist=72, dx=-30 dy=-66 dist=72). Рамка дає шум але не впливає на вибір найближчого моба. ✓
+- **WorldState::aliveCount() (2026-03-31)**: додано метод — повертає `m_prev_alive_count` під mutex. Використовується для перевірки живих мобів поблизу. ✓
+- **DEAD detection фікс (2026-03-31)**: debounce 3→**10 тіків** (1с) + `m_state != State::Buffing` — не тригерить DEAD під час бафу. Причина: OpenCV false positive (текстура підземелля → hp=0 на 1-3 тіки) давав хибні "смерті" в stats. Реальних смертей не було. ✓
+- **BuffInterval 300→900с (2026-03-31)**: в `.ini` — ребаф став дорогим, тепер кожні 15 хв. ✓
+- **Buff + server shutdown (2026-03-31)**: при вимкненні сервера о 03:59 — score 99%→34%, бот застряг у targeting loop 3+ год. Причина: disconnect screen замість BBS → fallback click на неправильний елемент → BBS в неправильному стані. НЕ проблема шаблонів або координат — просто зовнішня подія. ✓
 
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
-- **KnownList HP offsets**: `charHpOff=0x1F4`, `charHpMaxOff=0x1F8`, `charIsDeadOff=0x210` — дефолти з HF client, ще не відкалібровані для Kamael. Kill detection (`isDead || hp<=0`) спрацьовує, але значення HP мобів можуть бути неточними.
-- **Buff template score=41%**: `buff_stage1_check*.png` зберігається в `tmp/` — перевірити чи ALT+B відкрилось. Можливо потрібно перезняти `template/buff_tab.png`. Поточні fallback координати: `BuffTabX=908, BuffTabY=287`.
-- **Мінімапа dx=25 константно**: перевірити чи це реальний моб або artifact детекції.
+- **RunTick вимкнено (2026-03-31)**: рух під час TARGETING акумулював кут повороту → персонаж тікав від мобів. `should_run = false`. В підземеллях достатньо ротації + F2; моби приходять самі через aggro.
+- **UseForTargetHP = min HP% (2026-03-31)**: раніше брав першого живого моба зі списку → читав HP чужого моба. Тепер: моб з мінімальним HP% (той що атакується). `UseForTargetHP = true` в .ini.
+- **UseForKillDetect = false (2026-03-31)**: ⚠ НАЗАВЖДИ вимкнути. Баг: перевіряв hp<=0 у ВСІХ мобах KnownList → завжди є мертві моби → instant fake LOOTING. Kill detection через `anyMobDiedThisTick()` + OpenCV `hp<=2%`.
+- **Approach re-target вимкнено (2026-03-31)**: `false &&` в Brain.cpp. Причина: для товстих мобів де 1 удар < 20% → ретаргет спрацьовував кожну секунду → бот кидав моба.
+- **Buff при вимкненні сервера**: score 99%→34%, targeting loop після reconnect. При плановому maintenance → зупинити бота (`BuffEnabled = false` або ScrollLock) до рестарту сервера.
+- **dx=25 targeting loop**: після бафу (особливо fallback) бот іноді застрягає в 200+ спроб TARGETING. Мінімапа показує dx=25, 4 ротації → ліміт, F2 не знаходить моба. KnownList `alive=2-5` але моби за межами F2 range (~1200 L2u). Потребує дослідження.
 
 ## ПОТОЧНИЙ СТАН КЛАВІШ
 
@@ -808,20 +821,13 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-### Пріоритет 1: Виправити buff template (score=41%)
-Подивитись `tmp/buff_stage1_check0.png` — чи ALT+B відкрилось? Якщо ні:
-- Перезняти `template/buff_tab.png` з нового скріншоту F12 в GIMP
-- Або скоригувати `BuffTabX/Y` в .ini якщо вікно переїхало
-Якщо так — але шаблон не збігається → перезняти шаблон.
+### Пріоритет 1: Тест стабільності (2026-03-31)
+`./farm.sh` 1+ год. В логах шукати:
+- **Відсутність** `[STATE] BUFFING -> DEAD` або `[STATE] TARGETING -> DEAD` при реальному HP > 0 → DEAD false positive виправлено ✓
+- `[Buffs] Завершено, наступний баф через 900с` — ребаф кожні 15 хв
+- Якщо buff score < 50% → перевірити чи не було disconnect під час бафу
 
-### Пріоритет 2: Відкалібрувати HP offsets мобів
-Kill detection працює (`isDead || hp<=0`) — але `charHpOff=0x1F4` HF дефолт. Для точного HP%:
-- Вбити моба → поки він ще живий знайти його в пам'яті через `--calibrate`
-- Або: `[KnownList] mobs=N alive=M` — порівняти M з реальністю
-
-### Пріоритет 3: Тривалий фарм + перевірка rebuff
-`./farm.sh` 30+ хвилин. Моніторити:
-- `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` — основний kill detector працює ✓
-- `[Buffs] Чекаємо скидання бойового стану ще Xс...` → `[Buffs] ESC + ALT+B...` через 15с
-- `[Buffs] Завершено` кожні 600с без "2 кліків поряд"
-- `[KnownList] mobs=N alive=N` — N > 0 підтверджено
+### Пріоритет 2: dx=25 targeting loop
+Якщо в логах `[TARGETING] Спроба 50+` після бафу — мінімапа показує dx=25 але F2 не знаходить моба. Варіанти:
+- Перевірити чи відкривається/закривається BBS коректно (debug screenshot в `tmp/`)
+- Після fallback buff: додати ESC щоб закрити будь-яке відкрите вікно перед IDLE

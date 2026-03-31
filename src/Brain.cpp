@@ -201,11 +201,13 @@ void Brain::Process(bool debug) {
 
     const auto& me = m_me.value();
 
-    // Перевірка смерті (HP = 0 протягом 3 тіків поспіль)
-    if (m_state != State::Dead) {
+    // Перевірка смерті (HP = 0 протягом 10 тіків поспіль = 1с)
+    // Debounce 10 тіків: справжня смерть тримає HP=0 нескінченно; false positive (текстура/флікер) — 1-3 тіки.
+    // Не тригеримо в BUFFING: під час бафу персонаж стоїть без атак → HP bar може тимчасово не детектуватись.
+    if (m_state != State::Dead && m_state != State::Buffing) {
         if (me.hp == 0 && !InRespawnGrace()) {
             m_hp_zero_count++;
-            if (m_hp_zero_count >= 3) {
+            if (m_hp_zero_count >= 10) {
                 EnterState(State::Dead);
                 return;
             }
@@ -575,9 +577,9 @@ void Brain::HandleTargeting() {
     // RunTick() = HoldKeyboardKey(UP, 150мс) — персонаж біжить один тік.
     // Наступний тік знову RunTick() → безперервний рух без стану.
     // Ротація LEFT/RIGHT можлива одночасно з UP (L2 підтримує).
-    const bool kl_has_mobs = m_world && !m_world->mobs().empty();
-    const bool should_run  = (!minimap_dots.empty() || kl_has_mobs)
-                             && !m_nav_prev_was_walk;
+    // Рух вимкнено: RotateRight + RunTick накопичує кут → персонаж тікає від мобів.
+    // В підземеллях достатньо ротації + F2; моби з aggro самі підходять після першого удару.
+    const bool should_run  = false;
 
     if (should_run) {
         if (!m_running_to_mob) {
@@ -701,13 +703,19 @@ void Brain::HandleAttacking() {
         }
 
         // HP моба з пам'яті (якщо увімкнено) → оновлюємо m_target->hp для OpenCV pipeline
+        // UseForTargetHP: беремо моба з МІНІМАЛЬНИМ HP% (той що атакується = найслабший)
+        // Перший живий — хибний, бо KnownList не впорядкований за таргетом.
         if (m_cfg.mem_use_for_target_hp && !mem_mobs.empty() && m_target.has_value()) {
+            float min_pct = 101.f;
             for (const auto& mob : mem_mobs) {
                 if (!mob.isDead && mob.hp > 0.f && mob.hpMax > 0.f) {
-                    m_mem_target_hp_valid = true;
-                    m_target->hp = (int)mob.hpPercent();
-                    break;
+                    float pct = mob.hpPercent();
+                    if (pct < min_pct) min_pct = pct;
                 }
+            }
+            if (min_pct <= 100.f) {
+                m_mem_target_hp_valid = true;
+                m_target->hp = (int)min_pct;
             }
         }
     }
@@ -786,10 +794,10 @@ void Brain::HandleAttacking() {
     // Без цієї перевірки ESC+F2 в порожній зоні = втрата таргету → фейкове вбивство.
     // Opt: DetectMinimap() (~2-5мс) тільки якщо всі дешеві умови виконані.
     {
-        const bool approach_possible = (m_approach_retarget_count < 3 &&
+        const bool approach_possible = (false && m_approach_retarget_count < 3 &&
             !m_first_attack &&
             m_approach_entry_hp >= 90 &&
-            m_target.has_value() && m_target->hp >= m_approach_entry_hp - 5 &&
+            m_target.has_value() && m_target->hp >= m_approach_entry_hp - 20 &&
             SecsSince(m_combat_watchdog_start) < 2.0 &&
             SecsSince(m_approach_last_retarget) >= 1.0);
         auto approach_dots = approach_possible ? m_eyes.DetectMinimap()

@@ -57,6 +57,12 @@ public:
         return m_mob_died_this_tick.load(std::memory_order_relaxed);
     }
 
+    // Кількість живих мобів поблизу (за останнім скануванням bg thread)
+    int aliveCount() const {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        return m_prev_alive_count < 0 ? 0 : m_prev_alive_count;
+    }
+
     // Чи є предмети для збору в радіусі range L2-юнітів від (px,py)?
     bool hasLootNearby(float px, float py, float range = 300.f) const;
 
