@@ -173,6 +173,27 @@ public:
     uintptr_t mem_pos_y_off   = 0;
     uintptr_t mem_pos_z_off   = 0;
 
+    // [Delays] — варіативні затримки для антидетекту (нормальний розподіл)
+    struct DelayConfig {
+        float attack_mean_ms  = 500.f,  attack_std_ms  = 75.f;  // між атаками
+        float rotate_mean_ms  = 350.f,  rotate_std_ms  = 50.f;  // RotateLeft/Right
+        float walk_mean_ms    = 800.f,  walk_std_ms    = 120.f; // WalkForward
+        float potion_mean_ms  = 50.f,   potion_std_ms  = 15.f;  // потіони
+    } delays;
+
+    // [Geodata] — геодата L2J формату для навігації
+    bool        geodata_enabled  = false;
+    std::string geodata_path     = "./geodata/";
+    bool        geodata_use_jps  = true;
+
+    // [Targeting] — ваги для вибору цілі (weighted scoring)
+    struct TargetWeights {
+        float distance  = 0.4f;  // вага відстані (ближче = краще)
+        float low_hp    = 0.3f;  // вага низького HP (добивання)
+        float aggro     = 0.2f;  // вага агресора (mob вже атакує гравця)
+        float attacked  = 0.1f;  // вага моба що вже атакується
+    } target_weights;
+
     // [Colors_*]
     ColorConfig colors;
 

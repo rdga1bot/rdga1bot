@@ -25,6 +25,11 @@ set(SOURCES
     src/Window.cpp
     src/Window_Linux.cpp
     src/Dashboard.cpp
+    src/MemReader.cpp
+    src/offset_scanner.cpp
+    src/knownlist_reader.cpp
+    src/world_state.cpp
+    src/Geodata.cpp
 )
 
 add_executable(rdga1bot ${SOURCES})

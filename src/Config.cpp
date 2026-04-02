@@ -344,6 +344,27 @@ bool Config::Load(const std::string& path) {
         }
     }
 
+    // [Delays] — варіативні затримки
+    delays.attack_mean_ms = (float)GetDouble("Delays", "AttackMeanMs",  (double)delays.attack_mean_ms);
+    delays.attack_std_ms  = (float)GetDouble("Delays", "AttackStdMs",   (double)delays.attack_std_ms);
+    delays.rotate_mean_ms = (float)GetDouble("Delays", "RotateMeanMs",  (double)delays.rotate_mean_ms);
+    delays.rotate_std_ms  = (float)GetDouble("Delays", "RotateStdMs",   (double)delays.rotate_std_ms);
+    delays.walk_mean_ms   = (float)GetDouble("Delays", "WalkMeanMs",    (double)delays.walk_mean_ms);
+    delays.walk_std_ms    = (float)GetDouble("Delays", "WalkStdMs",     (double)delays.walk_std_ms);
+    delays.potion_mean_ms = (float)GetDouble("Delays", "PotionMeanMs",  (double)delays.potion_mean_ms);
+    delays.potion_std_ms  = (float)GetDouble("Delays", "PotionStdMs",   (double)delays.potion_std_ms);
+
+    // [Geodata]
+    geodata_enabled = GetBool  ("Geodata", "Enabled",  geodata_enabled);
+    geodata_path    = Get      ("Geodata", "GeoPath",   geodata_path);
+    geodata_use_jps = GetBool  ("Geodata", "UseJPS",    geodata_use_jps);
+
+    // [Targeting] — ваги
+    target_weights.distance  = (float)GetDouble("Targeting", "WeightDistance",  (double)target_weights.distance);
+    target_weights.low_hp    = (float)GetDouble("Targeting", "WeightLowHP",     (double)target_weights.low_hp);
+    target_weights.aggro     = (float)GetDouble("Targeting", "WeightAggro",     (double)target_weights.aggro);
+    target_weights.attacked  = (float)GetDouble("Targeting", "WeightAttacked",  (double)target_weights.attacked);
+
     // [Colors_MyBars]
     colors.my_hp_from_hsv = GetScalar("Colors_MyBars", "HPFromHSV",  colors.my_hp_from_hsv);
     colors.my_hp_to_hsv   = GetScalar("Colors_MyBars", "HPToHSV",    colors.my_hp_to_hsv);

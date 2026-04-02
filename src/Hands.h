@@ -2,6 +2,8 @@
 
 #include <vector>
 #include "Input.h"
+#include "RandomDelay.h"
+#include "Config.h"
 
 class Hands : public Input
 {
@@ -85,6 +87,33 @@ public:
     // L2 читає key-repeat, тому серія HoldKeyboardKey(up, 200) без паузи = безперервний рух.
     void RunTick(int ms = 150) { HoldKeyboardKey(m_move_forward, ms); }
 
+    // ── Варіативні затримки (антидетект) ─────────────────────────────────────
+    // Оновити RandomDelay параметри з конфігурації (викликається з ApplyConfig)
+    void SetDelays(const Config::DelayConfig& d) {
+        m_delay_attack.SetParams(d.attack_mean_ms,  d.attack_std_ms);
+        m_delay_rotate.SetParams(d.rotate_mean_ms,  d.rotate_std_ms);
+        m_delay_walk.SetParams  (d.walk_mean_ms,     d.walk_std_ms);
+        m_delay_potion.SetParams(d.potion_mean_ms,   d.potion_std_ms);
+    }
+
+    // AttackSkill + варіативна затримка після атаки (антидетект версія)
+    void AttackSkillRand(int idx) {
+        AttackSkill(idx);
+        Delay(m_delay_attack.Get());
+    }
+
+    // RotateLeft/Right з варіативною тривалістю
+    void RotateLeftRand()  { HoldKeyboardKey(m_rotate_left,  m_delay_rotate.Get()); }
+    void RotateRightRand() { HoldKeyboardKey(m_rotate_right, m_delay_rotate.Get()); }
+
+    // WalkForward з варіативною тривалістю
+    void WalkForwardRand() { HoldKeyboardKey(m_move_forward, m_delay_walk.Get()); }
+
+    // RestoreHP/MP/CP з варіативною затримкою
+    void RestoreHPRand() { PressKeyboardKey(m_restore_hp_key); Delay(m_delay_potion.Get()); }
+    void RestoreMPRand() { PressKeyboardKey(m_restore_mp_key); Delay(m_delay_potion.Get()); }
+    void RestoreCPRand() { PressKeyboardKey(m_restore_cp_key); Delay(m_delay_potion.Get()); }
+
     void LookAround()
     {
         const auto center = WindowCenter();
@@ -96,6 +125,12 @@ public:
 
 private:
     Rect m_window_rect;
+
+    // RandomDelay екземпляри (налаштовуються через SetDelays)
+    RandomDelay m_delay_attack{500.f, 75.f};
+    RandomDelay m_delay_rotate{350.f, 50.f};
+    RandomDelay m_delay_walk  {800.f, 120.f};
+    RandomDelay m_delay_potion{ 50.f, 15.f};
 
     Point WindowPoint(const Point &point) const { return {m_window_rect.x + point.x, m_window_rect.y + point.y}; }
 

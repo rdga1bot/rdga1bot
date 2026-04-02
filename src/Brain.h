@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include <memory>
+#include <vector>
 #include "Eyes.h"
 #include "Hands.h"
 #include "Config.h"
@@ -11,6 +12,7 @@
 #include "Notify.h"
 #include "MemReader.h"
 #include "world_state.h"
+#include "Geodata.h"
 
 class Brain {
 public:
@@ -49,6 +51,15 @@ public:
     uintptr_t GetPlayerBase() const { return m_player_base; }
     bool HasPlayerBase() const { return m_player_base != 0; }
     WorldState* GetWorldState() const { return m_world.get(); }
+
+    // Geodata: навігація по геодаті (необов'язково — якщо null, стандартна навігація)
+    void SetGeodata(std::shared_ptr<Geodata> geo) { m_geodata = std::move(geo); }
+    Geodata* GetGeodata() const { return m_geodata.get(); }
+
+    // Blacklist: занести моба в чорний список на seconds секунд
+    // (викликається автоматично при HP-stable; доступно ззовні для тестів)
+    void BlacklistMob(int objectID, float seconds = 60.f);
+    bool IsBlacklisted(int objectID) const;
 
     // Рівень логування
     void SetLogLevel(LogLevel level) { m_min_log_level = level; }
@@ -177,6 +188,17 @@ private:
     // KnownList: WorldState (null якщо KnownList вимкнено)
     std::unique_ptr<WorldState> m_world;
     uintptr_t m_player_base = 0;
+
+    // Geodata (null = вимкнено)
+    std::shared_ptr<Geodata> m_geodata;
+
+    // ── Blacklist — недосяжні моби (HP-stable → blacklist на 60с) ────────────
+    struct BlacklistedMob {
+        int  objectID = 0;
+        TP   until{};   // час закінчення блокування
+    };
+    std::vector<BlacklistedMob> m_blacklist;
+    void CleanBlacklist(); // видалити прострочені записи
 
     // Лог з рівнем (рівень за замовчуванням — Info)
     void Log(const std::string& msg, LogLevel level = LogLevel::Info);

@@ -553,6 +553,11 @@ void Brain::HandleTargeting() {
     // ── Memory навігація (пріоритет над мінімапою якщо увімкнено) ────────────
     if (m_cfg.navigation.enabled && m_world && m_player_base) {
         auto kl_mobs = m_world->mobs(); // snapshot copy (thread-safe)
+        // Фільтрація blacklisted мобів
+        CleanBlacklist();
+        kl_mobs.erase(std::remove_if(kl_mobs.begin(), kl_mobs.end(),
+            [this](const L2Character& mob){ return IsBlacklisted(mob.objectID); }),
+            kl_mobs.end());
         if (!kl_mobs.empty()) {
             auto nearest = m_world->findNearestMob(
                 kl_mobs, m_mem_player.x, m_mem_player.y, 1200.f);
@@ -834,6 +839,22 @@ void Brain::HandleAttacking() {
             if (!m_cfg.target_macro_keys.empty())
                 m_macro_idx = (m_macro_idx + 1) % (int)m_cfg.target_macro_keys.size();
             m_attack_was_unreachable = true; // наступний TARGETING дасть більше часу навігації
+            // Blacklist: знаходимо objectID недосяжного моба через KnownList (моб з мін HP%)
+            if (m_world) {
+                auto bl_mobs = m_world->mobs();
+                if (!bl_mobs.empty()) {
+                    // Беремо живого моба з мінімальним HP% (той що атакується)
+                    int   bl_id  = 0;
+                    float bl_pct = 101.f;
+                    for (const auto& mob : bl_mobs) {
+                        if (!mob.isDead && mob.hp > 0.f && mob.hpMax > 0.f) {
+                            float pct = mob.hpPercent();
+                            if (pct < bl_pct) { bl_pct = pct; bl_id = mob.objectID; }
+                        }
+                    }
+                    if (bl_id != 0) BlacklistMob(bl_id, 60.f);
+                }
+            }
             EnterState(State::Targeting);
             return;
         }
@@ -1177,6 +1198,44 @@ float Brain::NormalizeAngle(float angle) {
     while (angle >  (float)M_PI) angle -= 2.f * (float)M_PI;
     while (angle < -(float)M_PI) angle += 2.f * (float)M_PI;
     return angle;
+}
+
+// ── Blacklist ─────────────────────────────────────────────────────────────────
+
+void Brain::CleanBlacklist() {
+    TP now = Now();
+    m_blacklist.erase(
+        std::remove_if(m_blacklist.begin(), m_blacklist.end(),
+            [&now](const BlacklistedMob& b){ return now >= b.until; }),
+        m_blacklist.end());
+}
+
+void Brain::BlacklistMob(int objectID, float seconds) {
+    if (objectID == 0) return;
+    CleanBlacklist();
+    // Оновлюємо якщо вже є
+    for (auto& b : m_blacklist) {
+        if (b.objectID == objectID) {
+            b.until = FutureBy(seconds);
+            return;
+        }
+    }
+    BlacklistedMob entry;
+    entry.objectID = objectID;
+    entry.until    = FutureBy(seconds);
+    m_blacklist.push_back(entry);
+    Log("[BLACKLIST] Моб ID=" + std::to_string(objectID) +
+        " заблокований на " + std::to_string((int)seconds) + "с", LogLevel::Warning);
+}
+
+bool Brain::IsBlacklisted(int objectID) const {
+    if (objectID == 0) return false;
+    TP now = Now();
+    for (const auto& b : m_blacklist) {
+        if (b.objectID == objectID && now < b.until)
+            return true;
+    }
+    return false;
 }
 
 // ── NavigateToMob ─────────────────────────────────────────────────────────────

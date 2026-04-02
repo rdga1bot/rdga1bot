@@ -26,6 +26,7 @@
 #include "MemReader.h"
 #include "offset_scanner.h"
 #include "world_state.h"
+#include "Geodata.h"
 
 // ─── Signal handling (збереження stats при Ctrl+C / kill) ──────────────────
 static std::function<void()> g_cleanup;
@@ -82,6 +83,9 @@ static void ApplyConfig(const Config& cfg, Hands& hands, Eyes& eyes, Brain& brai
     eyes.SetTargetWnd(cfg.target_wnd_x, cfg.target_wnd_y, cfg.target_wnd_w, cfg.target_wnd_h);
 
     brain.SetLogLevel(static_cast<Brain::LogLevel>(cfg.log_level));
+
+    // RandomDelay: оновлюємо параметри варіативних затримок
+    hands.SetDelays(cfg.delays);
 
     // MemReader: оновлюємо offsets якщо передано
     if (mem && cfg.mem_enabled) {
@@ -646,7 +650,8 @@ int main(int argc, char* argv[]) {
     // Аргументи командного рядка
     bool quick   = false;
     bool no_tui  = false;
-    bool dump_objects = false;
+    bool dump_objects  = false;
+    bool hp_calibrate  = false;
     std::string config_path = "rdga1bot.ini";
 
     bool calibrate = false;
@@ -654,8 +659,9 @@ int main(int argc, char* argv[]) {
         std::string a = argv[i];
         if (a == "--quick")        quick  = true;
         if (a == "--no-tui")       no_tui = true;
-        if (a == "--dump-objects") dump_objects = true;
-        if (a == "--calibrate")    calibrate = true;
+        if (a == "--dump-objects")  dump_objects  = true;
+        if (a == "--calibrate")     calibrate     = true;
+        if (a == "--hp-calibrate")  hp_calibrate  = true;
         if (a == "--config" && i + 1 < argc) config_path = argv[++i];
     }
 
@@ -792,6 +798,76 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // ─── --hp-calibrate: знаходить HP/isDead offsets через region scan ──────────
+    // Запускати двічі: до і після атаки моба. Float що зменшився = HP offset.
+    if (hp_calibrate) {
+        pid_t pid = findL2Pid();
+        if (!pid) { std::cerr << "[HP-CAL] l2.exe не знайдено\n"; return 1; }
+
+        OffsetScanner scanner(pid);
+        scanner.loadOffsets("offsets.json");
+
+        std::cerr << "[HP-CAL] blindScan()...\n";
+        uintptr_t playerBase = scanner.blindScan();
+        if (!playerBase) { std::cerr << "[HP-CAL] PlayerBase не знайдено\n"; return 1; }
+
+        float px = scanner.rpm_pub<float>(playerBase + 0x24);
+        float py = scanner.rpm_pub<float>(playerBase + 0x28);
+        float pz = scanner.rpm_pub<float>(playerBase + 0x2C);
+        std::cerr << "[HP-CAL] PlayerBase=0x" << std::hex << playerBase << std::dec
+                  << " XYZ=(" << (int)px << "," << (int)py << "," << (int)pz << ")\n\n";
+
+        KnownListReader reader(pid, scanner);
+        auto mobs = reader.readMobsRegionScan(playerBase, 2000.f);
+
+        // Сортуємо за відстанню
+        std::sort(mobs.begin(), mobs.end(), [px, py](const L2Character& a, const L2Character& b){
+            return a.distanceTo(px, py) < b.distanceTo(px, py);
+        });
+
+        std::cerr << "[HP-CAL] Знайдено " << mobs.size() << " об'єктів. Показую 3 найближчих:\n";
+
+        int shown = 0;
+        for (auto& mob : mobs) {
+            if (!mob.memPtr || shown >= 3) break;
+            float dist = mob.distanceTo(px, py);
+            std::cerr << "\n── addr=0x" << std::hex << mob.memPtr << std::dec
+                      << "  dist=" << (int)dist
+                      << "  XYZ=(" << (int)mob.x << "," << (int)mob.y << "," << (int)mob.z << ")\n";
+            // Широкий скан 0x100..0x3C0 — HP може бути поза стандартним 0x1F4
+            std::cerr << "  Off  | int32       | float           | Примітка\n";
+            std::cerr << "  -----|-------------|-----------------|-------------------\n";
+            for (uintptr_t off = 0x100; off <= 0x3C0; off += 4) {
+                uint32_t raw = scanner.rpm_pub<uint32_t>(mob.memPtr + off);
+                int32_t  as_i = (int32_t)raw;
+                float    as_f; std::memcpy(&as_f, &raw, 4);
+                std::string note;
+                // HP зазвичай: велике додатне ціле або float 10..200000
+                if (std::isfinite(as_f) && as_f >= 10.f && as_f <= 500000.f) note = "HP/MP?";
+                if (as_i == 0 || as_i == 1)                                   note = "FLAG?";
+                if (!note.empty()) {
+                    std::cerr << "  0x" << std::hex << std::setw(3) << std::setfill('0') << off
+                              << " | " << std::dec << std::setw(11) << std::setfill(' ') << as_i
+                              << " | " << std::setw(15) << std::fixed << std::setprecision(2) << as_f
+                              << " | " << note << "\n";
+                }
+            }
+            ++shown;
+        }
+
+        if (mobs.empty())
+            std::cerr << "[HP-CAL] Об'єктів не знайдено — запусти поряд з мобами.\n";
+
+        std::cerr << "\n[HP-CAL] Інструкція:\n"
+                  << "  1. Запусти --hp-calibrate (моб на ПОВНОМУ HP) — запиши значення\n"
+                  << "  2. Атакуй моба один раз\n"
+                  << "  3. Запусти --hp-calibrate знову — порівняй\n"
+                  << "  Float що ЗМЕНШИВСЯ = OFF_CHAR_HP\n"
+                  << "  Float що НЕ ЗМІНИВСЯ (більший) = OFF_CHAR_HP_MAX\n"
+                  << "  int32 що став 1 після смерті = OFF_CHAR_IS_DEAD\n";
+        return 0;
+    }
+
     Config cfg;
     cfg.Load(config_path);
     cfg.Validate();
@@ -859,6 +935,18 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 std::cerr << "[KnownList] l2.exe не знайдено → KnownList вимкнено\n";
+            }
+        }
+
+        // Geodata: завантаження L2J геодати (якщо увімкнено)
+        if (cfg.geodata_enabled) {
+            auto geo = std::make_shared<Geodata>();
+            int n = geo->Load(cfg.geodata_path, cfg.geodata_use_jps);
+            if (n > 0) {
+                brain.SetGeodata(geo);
+                std::cerr << "[GEODATA] Завантажено " << n << " регіонів з " << cfg.geodata_path << "\n";
+            } else {
+                std::cerr << "[GEODATA] Не знайдено .geo файлів в " << cfg.geodata_path << "\n";
             }
         }
 

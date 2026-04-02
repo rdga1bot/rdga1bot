@@ -146,7 +146,7 @@ void Dashboard::Update(const Brain& brain, double fps) {
     mvhline(1, 0, ACS_HLINE, m_cols);
     attroff(COLOR_PAIR(COLOR_DIM));
 
-    DrawStatus(me, tgt, brain.GetStats());
+    DrawStatus(brain, me, tgt, brain.GetStats());
 
     // Роздільник після status
     attron(COLOR_PAIR(COLOR_DIM));
@@ -237,39 +237,101 @@ void Dashboard::DrawBar(WINDOW* win, int y, int x, int bar_width,
 
 // ─── DrawStatus ────────────────────────────────────────────────────────────
 
-void Dashboard::DrawStatus(const Eyes::Me& me, const Eyes::Target& tgt, const Stats& stats) {
+void Dashboard::DrawStatus(const Brain& brain, const Eyes::Me& me,
+                           const Eyes::Target& tgt, const Stats& stats) {
     if (!m_win_status) return;
     werase(m_win_status);
 
-    // Ширина бару: половина екрану мінус мітки та числа
-    int bar_w = std::max(10, m_cols / 2 - 16);
+    // Ширина бару: ~1/3 екрану мінус мітки та числа
+    int bar_w = std::max(10, m_cols / 3 - 14);
 
     DrawBar(m_win_status, 0, 1, bar_w, me.cp, COLOR_CP_BAR, "CP");
     DrawBar(m_win_status, 1, 1, bar_w, me.hp, COLOR_HP_BAR, "HP");
     DrawBar(m_win_status, 2, 1, bar_w, me.mp, COLOR_MP_BAR, "MP");
 
-    // Права колонка: статистика і target HP
-    int rx = m_cols / 2 + 2;
+    // Центральна колонка: Target HP + K/D
+    int mid = m_cols / 3 + 4;
+    int bar_w2 = std::max(8, m_cols / 3 - 14);
     if (tgt.hp > 0) {
-        DrawBar(m_win_status, 0, rx, bar_w, tgt.hp, COLOR_HP_BAR, "Target");
+        DrawBar(m_win_status, 0, mid, bar_w2, tgt.hp, COLOR_HP_BAR, "Mob");
     } else {
         wattron(m_win_status, COLOR_PAIR(COLOR_DIM));
-        mvwprintw(m_win_status, 0, rx, "Target: ---");
+        mvwprintw(m_win_status, 0, mid, "Mob: ---");
         wattroff(m_win_status, COLOR_PAIR(COLOR_DIM));
     }
 
     wattron(m_win_status, COLOR_PAIR(COLOR_NORMAL));
-    mvwprintw(m_win_status, 1, rx, "Kills:%-4d Deaths:%-3d",
-              stats.kills, stats.deaths);
-    // K/D ratio і potions
+    mvwprintw(m_win_status, 1, mid, "K:%-4d D:%-3d", stats.kills, stats.deaths);
     char kd_buf[32];
     if (stats.deaths > 0)
         snprintf(kd_buf, sizeof(kd_buf), "%.1f", (double)stats.kills / stats.deaths);
     else
         snprintf(kd_buf, sizeof(kd_buf), "%d", stats.kills);
-    mvwprintw(m_win_status, 2, rx, "K/D:%-6s Pots:%d",
+    mvwprintw(m_win_status, 2, mid, "K/D:%-6s P:%d",
               kd_buf, stats.hp_potions + stats.mp_potions);
     wattroff(m_win_status, COLOR_PAIR(COLOR_NORMAL));
+
+    // Права колонка: memory дані (координати, мобів, режим)
+    int rx = m_cols * 2 / 3 + 2;
+    if (rx + 20 < m_cols) {
+        const auto& mp = brain.GetMemPlayerState();
+        WorldState* ws = brain.GetWorldState();
+
+        // Режим роботи: MEM / OPENCV / HYBRID
+        const char* mode_str;
+        int mode_color;
+        if (mp.valid && ws) {
+            mode_str  = "[HYBRID]";
+            mode_color = COLOR_ATTACK;  // зелений
+        } else if (mp.valid) {
+            mode_str  = "[MEM]";
+            mode_color = COLOR_TARGET;  // жовтий
+        } else {
+            mode_str  = "[OPENCV]";
+            mode_color = COLOR_DIM;
+        }
+        wattron(m_win_status, COLOR_PAIR(mode_color) | A_BOLD);
+        mvwprintw(m_win_status, 0, rx, "%s", mode_str);
+        wattroff(m_win_status, COLOR_PAIR(mode_color) | A_BOLD);
+
+        // Координати гравця
+        if (mp.valid) {
+            wattron(m_win_status, COLOR_PAIR(COLOR_NORMAL));
+            mvwprintw(m_win_status, 1, rx, "X:%-7d Y:%-7d",
+                      (int)mp.x, (int)mp.y);
+            wattroff(m_win_status, COLOR_PAIR(COLOR_NORMAL));
+        } else {
+            wattron(m_win_status, COLOR_PAIR(COLOR_DIM));
+            mvwprintw(m_win_status, 1, rx, "X:---     Y:---");
+            wattroff(m_win_status, COLOR_PAIR(COLOR_DIM));
+        }
+
+        // Кількість мобів в пам'яті + дистанція до цілі
+        if (ws) {
+            int alive = ws->aliveCount();
+            wattron(m_win_status, COLOR_PAIR(alive > 0 ? COLOR_NORMAL : COLOR_DIM));
+            if (mp.valid && alive > 0) {
+                // Дистанція до найближчого
+                auto mobs = ws->mobs();
+                float min_dist = 9999.f;
+                for (const auto& mob : mobs) {
+                    if (!mob.isDead) {
+                        float d = mob.distanceTo(mp.x, mp.y);
+                        if (d < min_dist) min_dist = d;
+                    }
+                }
+                mvwprintw(m_win_status, 2, rx, "Mobs:%-2d Dist:%-5d",
+                          alive, (int)min_dist);
+            } else {
+                mvwprintw(m_win_status, 2, rx, "Mobs:%-2d", alive);
+            }
+            wattroff(m_win_status, COLOR_PAIR(alive > 0 ? COLOR_NORMAL : COLOR_DIM));
+        } else {
+            wattron(m_win_status, COLOR_PAIR(COLOR_DIM));
+            mvwprintw(m_win_status, 2, rx, "KL:---");
+            wattroff(m_win_status, COLOR_PAIR(COLOR_DIM));
+        }
+    }
 }
 
 // ─── DrawLog ───────────────────────────────────────────────────────────────

@@ -80,7 +80,7 @@ private:
     // ─── Малювання ───────────────────────────────────────────────
     void RecreateWindows();
     void DrawHeader(Brain::State state, double fps, bool paused);
-    void DrawStatus(const Eyes::Me& me, const Eyes::Target& tgt, const Stats& stats);
+    void DrawStatus(const Brain& brain, const Eyes::Me& me, const Eyes::Target& tgt, const Stats& stats);
     void DrawLog();
     void DrawFooter();
 
