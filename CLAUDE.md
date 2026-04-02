@@ -825,6 +825,13 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **Dashboard memory info (2026-04-02)**: `DrawStatus` тепер приймає `const Brain&`. Права колонка: індикатор режиму `[OPENCV]`/`[MEM]`/`[HYBRID]` (кольоровий), координати гравця `X:XXXXXX Y:XXXXXX` (з MemReader), `Mobs:N Dist:XXXX` (з KnownList aliveCount + відстань до найближчого). ✓
 - **Config нові секції (2026-04-02)**: `[Delays]` (AttackMeanMs/StdMs, RotateMeanMs/StdMs, WalkMeanMs/StdMs, PotionMeanMs/StdMs), `[Geodata]` (Enabled, GeoPath, UseJPS), `target_weights` struct (WeightDistance/LowHP/Aggro/Attacked — зарезервовано). ✓
 
+- **Виправлення після merge (2026-04-02 MR7)**:
+  1. `Brain.cpp HandleTargeting`: `should_run = false` — свідоме рішення (RunTick рухав у напрям камери замість моба). Залишено як є. ✓
+  2. `Config.h DelayConfig`: додано `enabled=false` прапор. ✓
+  3. `Brain.h/cpp`: RandomDelay інтегровано (m_rd_attack/rotate/walk, InitRandomDelays(), RandMs()). Rotate calls та attack delay у HandleTargeting/HandleAttacking тепер через RandMs(). ✓
+  4. `Config.h/cpp`: TargetWeights → WeightedTargetConfig (прибрано aggro/attacked без даних, додано w_freshness/max_range, секція [WeightedTargeting]). ✓
+  5. `Brain.cpp`: SelectWeightedTarget() реалізовано і інтегровано в HandleTargeting() memory nav блок. ✓
+
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
 - **RunTick вимкнено (2026-03-31)**: рух під час TARGETING акумулював кут повороту → персонаж тікав від мобів. `should_run = false`. В підземеллях достатньо ротації + F2; моби приходять самі через aggro.

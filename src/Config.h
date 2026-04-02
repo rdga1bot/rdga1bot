@@ -175,6 +175,7 @@ public:
 
     // [Delays] — варіативні затримки для антидетекту (нормальний розподіл)
     struct DelayConfig {
+        bool  enabled         = false;  // false = фіксовані затримки як раніше
         float attack_mean_ms  = 500.f,  attack_std_ms  = 75.f;  // між атаками
         float rotate_mean_ms  = 350.f,  rotate_std_ms  = 50.f;  // RotateLeft/Right
         float walk_mean_ms    = 800.f,  walk_std_ms    = 120.f; // WalkForward
@@ -186,13 +187,14 @@ public:
     std::string geodata_path     = "./geodata/";
     bool        geodata_use_jps  = true;
 
-    // [Targeting] — ваги для вибору цілі (weighted scoring)
-    struct TargetWeights {
-        float distance  = 0.4f;  // вага відстані (ближче = краще)
-        float low_hp    = 0.3f;  // вага низького HP (добивання)
-        float aggro     = 0.2f;  // вага агресора (mob вже атакує гравця)
-        float attacked  = 0.1f;  // вага моба що вже атакується
-    } target_weights;
+    // [WeightedTargeting] — зважений вибір цілі
+    struct WeightedTargetConfig {
+        bool  enabled     = false;   // false = findNearestMob як раніше
+        float w_distance  = 0.5f;   // вага відстані (ближче = краще)
+        float w_low_hp    = 0.3f;   // вага низького HP
+        float w_freshness = 0.2f;   // вага наявності name (region scan знайшов)
+        float max_range   = 1200.f;
+    } weighted_target;
 
     // [Colors_*]
     ColorConfig colors;

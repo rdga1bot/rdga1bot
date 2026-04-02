@@ -135,8 +135,8 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
     }
 
     // Fast re-read: перечитуємо hp/isDead поточного таргету між скануваннями
+    m_mob_died_this_tick.store(false, std::memory_order_relaxed); // atomic — не потребує mutex
     std::lock_guard<std::mutex> lk(m_mutex);
-    m_mob_died_this_tick.store(false, std::memory_order_relaxed);
     if (m_target.has_value() && m_target->memPtr) {
         float hp = 0.f;
         int32_t dead = 0;

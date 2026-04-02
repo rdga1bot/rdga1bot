@@ -13,6 +13,7 @@
 #include "MemReader.h"
 #include "world_state.h"
 #include "Geodata.h"
+#include "RandomDelay.h"
 
 class Brain {
 public:
@@ -60,6 +61,12 @@ public:
     // (викликається автоматично при HP-stable; доступно ззовні для тестів)
     void BlacklistMob(int objectID, float seconds = 60.f);
     bool IsBlacklisted(int objectID) const;
+
+    // RandomDelay helper: повертає затримку з RandomDelay якщо enabled, інакше fixed_ms
+    int RandMs(std::unique_ptr<RandomDelay>& rd, int fixed_ms) {
+        if (m_cfg.delays.enabled && rd) return rd->Get();
+        return fixed_ms;
+    }
 
     // Рівень логування
     void SetLogLevel(LogLevel level) { m_min_log_level = level; }
@@ -176,6 +183,11 @@ private:
     // KnownList memory read: чи HP/isDead цілі береться з пам'яті (для діагностики)
     bool m_mem_target_hp_valid = false;
 
+    // RandomDelay генератори — ініціалізуються з Config.delays
+    std::unique_ptr<RandomDelay> m_rd_attack;
+    std::unique_ptr<RandomDelay> m_rd_rotate;
+    std::unique_ptr<RandomDelay> m_rd_walk;
+
     // Memory-based навігація
     struct NavigationState {
         float targetX    = 0.f, targetY    = 0.f, targetZ    = 0.f;
@@ -199,6 +211,10 @@ private:
     };
     std::vector<BlacklistedMob> m_blacklist;
     void CleanBlacklist(); // видалити прострочені записи
+    void InitRandomDelays(); // ініціалізувати/скинути RandomDelay генератори з cfg.delays
+    std::optional<L2Character> SelectWeightedTarget(
+        const std::vector<L2Character>& mobs,
+        float playerX, float playerY);
 
     // Лог з рівнем (рівень за замовчуванням — Info)
     void Log(const std::string& msg, LogLevel level = LogLevel::Info);

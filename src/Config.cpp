@@ -345,6 +345,7 @@ bool Config::Load(const std::string& path) {
     }
 
     // [Delays] — варіативні затримки
+    delays.enabled        = GetBool  ("Delays", "Enabled",       delays.enabled);
     delays.attack_mean_ms = (float)GetDouble("Delays", "AttackMeanMs",  (double)delays.attack_mean_ms);
     delays.attack_std_ms  = (float)GetDouble("Delays", "AttackStdMs",   (double)delays.attack_std_ms);
     delays.rotate_mean_ms = (float)GetDouble("Delays", "RotateMeanMs",  (double)delays.rotate_mean_ms);
@@ -359,11 +360,12 @@ bool Config::Load(const std::string& path) {
     geodata_path    = Get      ("Geodata", "GeoPath",   geodata_path);
     geodata_use_jps = GetBool  ("Geodata", "UseJPS",    geodata_use_jps);
 
-    // [Targeting] — ваги
-    target_weights.distance  = (float)GetDouble("Targeting", "WeightDistance",  (double)target_weights.distance);
-    target_weights.low_hp    = (float)GetDouble("Targeting", "WeightLowHP",     (double)target_weights.low_hp);
-    target_weights.aggro     = (float)GetDouble("Targeting", "WeightAggro",     (double)target_weights.aggro);
-    target_weights.attacked  = (float)GetDouble("Targeting", "WeightAttacked",  (double)target_weights.attacked);
+    // [WeightedTargeting]
+    weighted_target.enabled    = GetBool  ("WeightedTargeting", "Enabled",        weighted_target.enabled);
+    weighted_target.w_distance = (float)GetDouble("WeightedTargeting", "WeightDistance",  (double)weighted_target.w_distance);
+    weighted_target.w_low_hp   = (float)GetDouble("WeightedTargeting", "WeightLowHP",     (double)weighted_target.w_low_hp);
+    weighted_target.w_freshness= (float)GetDouble("WeightedTargeting", "WeightFreshness", (double)weighted_target.w_freshness);
+    weighted_target.max_range  = (float)GetDouble("WeightedTargeting", "MaxRange",        (double)weighted_target.max_range);
 
     // [Colors_MyBars]
     colors.my_hp_from_hsv = GetScalar("Colors_MyBars", "HPFromHSV",  colors.my_hp_from_hsv);
@@ -541,6 +543,24 @@ bool Config::Save(const std::string& path) const {
     f << "AttackRange    = " << navigation.attack_range    << "\n";
     f << "AngleTolerance = " << navigation.angle_tolerance << "\n";
     f << "UseHeading     = " << (navigation.use_heading   ? "true" : "false") << "\n";
+    f << "\n";
+    f << "[Delays]\n";
+    f << "Enabled      = " << (delays.enabled ? "true" : "false") << "\n";
+    f << "AttackMeanMs = " << delays.attack_mean_ms  << "\n";
+    f << "AttackStdMs  = " << delays.attack_std_ms   << "\n";
+    f << "RotateMeanMs = " << delays.rotate_mean_ms  << "\n";
+    f << "RotateStdMs  = " << delays.rotate_std_ms   << "\n";
+    f << "WalkMeanMs   = " << delays.walk_mean_ms    << "\n";
+    f << "WalkStdMs    = " << delays.walk_std_ms     << "\n";
+    f << "PotionMeanMs = " << delays.potion_mean_ms  << "\n";
+    f << "PotionStdMs  = " << delays.potion_std_ms   << "\n";
+    f << "\n";
+    f << "[WeightedTargeting]\n";
+    f << "Enabled        = " << (weighted_target.enabled ? "true" : "false") << "\n";
+    f << "WeightDistance = " << weighted_target.w_distance  << "\n";
+    f << "WeightLowHP    = " << weighted_target.w_low_hp    << "\n";
+    f << "WeightFreshness= " << weighted_target.w_freshness << "\n";
+    f << "MaxRange       = " << weighted_target.max_range   << "\n";
     f << "\n";
     f << "[Vision]\n";
     f << "UseRobustBarDetection = " << (use_robust_bar ? "true" : "false") << "\n";

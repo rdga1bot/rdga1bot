@@ -34,6 +34,9 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
     m_session_start = Now();
     m_last_kill_time = Now() - std::chrono::hours(1); // далеке минуле → cooldown вже пройшов
 
+    // Ініціалізуємо RandomDelay генератори
+    InitRandomDelays();
+
     // Завантажуємо шаблони кнопок ALT+B (один раз при старті)
     m_buff_tab_templ     = cv::imread("template/buff_tab.png");
     m_buff_profile_templ = cv::imread("template/buff_profile.png");
@@ -47,6 +50,7 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
 
 void Brain::ReloadConfig(const Config& new_cfg) {
     m_cfg = new_cfg;
+    InitRandomDelays();
     Log("[CONFIG] Конфігурацію перезавантажено");
 }
 
@@ -411,13 +415,13 @@ void Brain::HandleTargeting() {
         const int dy = map_ref->dy;
         const char* who = map_ref_selected ? "Вибраний" : "Найближчий";
         if (dx < -kMinimapDxThreshold) {
-            m_hands.RotateLeft(120);
+            m_hands.RotateLeft(RandMs(m_rd_rotate, 120));
             m_minimap_rotate_count++;
             Log(std::string("[MAP] ") + who + " моб ліворуч (dx=" + std::to_string(dx) +
                 ", rot=" + std::to_string(m_minimap_rotate_count) + ") → RotateLeft",
                 LogLevel::Debug);
         } else if (dx > kMinimapDxThreshold) {
-            m_hands.RotateRight(120);
+            m_hands.RotateRight(RandMs(m_rd_rotate, 120));
             m_minimap_rotate_count++;
             Log(std::string("[MAP] ") + who + " моб праворуч (dx=" + std::to_string(dx) +
                 ", rot=" + std::to_string(m_minimap_rotate_count) + ") → RotateRight",
@@ -427,7 +431,7 @@ void Brain::HandleTargeting() {
             m_minimap_rotate_count = 0;
             // Якщо моб позаду (dy > 30) — розворот на 180°
             if (dy > 30) {
-                m_hands.RotateRight(700);
+                m_hands.RotateRight(RandMs(m_rd_rotate, 700));
                 Log(std::string("[MAP] ") + who + " моб позаду (dy=" + std::to_string(dy) +
                     ") → розворот 180°", LogLevel::Debug);
             }
@@ -559,8 +563,10 @@ void Brain::HandleTargeting() {
             [this](const L2Character& mob){ return IsBlacklisted(mob.objectID); }),
             kl_mobs.end());
         if (!kl_mobs.empty()) {
-            auto nearest = m_world->findNearestMob(
-                kl_mobs, m_mem_player.x, m_mem_player.y, 1200.f);
+            auto nearest = m_cfg.weighted_target.enabled
+                ? SelectWeightedTarget(kl_mobs, m_mem_player.x, m_mem_player.y)
+                : m_world->findNearestMob(kl_mobs, m_mem_player.x, m_mem_player.y,
+                                          m_cfg.weighted_target.max_range);
             if (nearest.has_value()) {
                 bool navigated = NavigateToMob(*nearest);
                 if (navigated) {
@@ -648,9 +654,9 @@ void Brain::HandleTargeting() {
         } else {
             // Звичайна fallback ротація: чергуємо ліво/право
             if ((m_macro_attempts / 5) % 2 == 0)
-                m_hands.RotateRight(350);
+                m_hands.RotateRight(RandMs(m_rd_rotate, 350));
             else
-                m_hands.RotateLeft(350);
+                m_hands.RotateLeft(RandMs(m_rd_rotate, 350));
             // Розвідка вперед кожні 15 спроб коли немає мобів і не patrol
             if (!patrol_ready && m_macro_attempts % 15 == 0
                 && !m_nav_prev_was_walk && m_eyes.IsGroundAhead()) {
@@ -868,7 +874,10 @@ void Brain::HandleAttacking() {
     }
 
     // Атака з кулдауном (per-skill delay або загальний attack_wait)
-    if (SecsSince(m_last_attack) >= m_cfg.GetAttackDelay(m_attack_idx)) {
+    double eff_delay = (m_cfg.delays.enabled && m_rd_attack)
+        ? (double)m_rd_attack->Get() / 1000.0
+        : m_cfg.GetAttackDelay(m_attack_idx);
+    if (SecsSince(m_last_attack) >= eff_delay) {
         // Перша атака: Spoil для Spoiler класу
         if (m_first_attack && m_cfg.IsSpoiler()) {
             m_hands.PressKeyboardKey(m_cfg.spoil_key);
@@ -1303,4 +1312,55 @@ bool Brain::NavigateToMob(const L2Character& mob) {
         return true;
     }
     return false;
+}
+
+void Brain::InitRandomDelays() {
+    if (!m_cfg.delays.enabled) {
+        m_rd_attack.reset();
+        m_rd_rotate.reset();
+        m_rd_walk.reset();
+        return;
+    }
+    m_rd_attack = std::make_unique<RandomDelay>(
+        m_cfg.delays.attack_mean_ms, m_cfg.delays.attack_std_ms);
+    m_rd_rotate = std::make_unique<RandomDelay>(
+        m_cfg.delays.rotate_mean_ms, m_cfg.delays.rotate_std_ms);
+    m_rd_walk   = std::make_unique<RandomDelay>(
+        m_cfg.delays.walk_mean_ms, m_cfg.delays.walk_std_ms);
+}
+
+std::optional<L2Character> Brain::SelectWeightedTarget(
+        const std::vector<L2Character>& mobs,
+        float playerX, float playerY) {
+    if (!m_cfg.weighted_target.enabled || mobs.empty()) return std::nullopt;
+
+    const float maxRange = m_cfg.weighted_target.max_range;
+    std::optional<L2Character> best;
+    float bestScore = -1.f;
+
+    for (const auto& mob : mobs) {
+        if (mob.isDead || mob.hp <= 0.f) continue;
+        if (IsBlacklisted(mob.objectID)) continue;
+
+        float dist = mob.distanceTo(playerX, playerY);
+        if (dist > maxRange) continue;
+
+        float s_dist  = 1.f - std::min(dist / maxRange, 1.f);
+        float hpPct   = mob.hpMax > 0.f ? mob.hp / mob.hpMax : 1.f;
+        float s_hp    = 1.f - std::min(hpPct, 1.f);
+        float s_fresh = mob.name.empty() ? 0.5f : 1.f;
+
+        float score = m_cfg.weighted_target.w_distance  * s_dist
+                    + m_cfg.weighted_target.w_low_hp     * s_hp
+                    + m_cfg.weighted_target.w_freshness  * s_fresh;
+
+        if (score > bestScore) { bestScore = score; best = mob; }
+    }
+    if (best.has_value())
+        Log("[WEIGHT] → " +
+            (best->name.empty() ? "ID=" + std::to_string(best->objectID) : best->name) +
+            " dist=" + std::to_string((int)best->distanceTo(playerX, playerY)) +
+            " hp=" + std::to_string((int)best->hpPercent()) + "%",
+            LogLevel::Debug);
+    return best;
 }
