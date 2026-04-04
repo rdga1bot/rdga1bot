@@ -879,22 +879,15 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - VisionWorker на Core 2 активний (`[VIS-W] Started on Core 2`) ✓
 - Pokemon sweep, 180° ротація, blindScan PlayerBase — все працює ✓
 
-### Пріоритет 2: VisionWorker тест
-`[Threading] Enabled=true, VisionThread=true, VisionCore=2`
-Перевірити htop: Core 2 має показувати 15-25%.
+### ✅ MR11: Objectives Architecture (2026-04-04) — РЕАЛІЗОВАНО
+- `game_state.h`: GameState — знімок стану + references Eyes/Hands/Config/Stats. `Brain::updateGameState()` заповнює кожен тік. ✓
+- `objective.h`: Objective (canRun/onEnter/execute/onExit), ObjectiveResult (Running/Done/Failed/Switch). ✓
+- `objective_manager.h/.cpp`: Sequential з Switch, порядок = пріоритет. ✓
+- Brain: `m_obj_manager`, `updateGameState()`, `GetCurrentObjective()`. `tick()` після FSM диспетчу — noop поки порожній. ✓
+- Існуючий FSM Handle* незмінний. ✓
 
-### Пріоритет 3: RandomDelay активація
-`[Delays] Enabled=true` — реалізовано, не увімкнено.
+### Пріоритет 1: MR12 — Перенос Handle* → Objective підкласи
+`farm_objectives.h`: TargetObjective, AttackObjective, LootObjective, BuffObjective, DeadObjective. Реєстрація в Brain конструкторі. Видалення Handle* після верифікації.
 
-### Пріоритет 4: Heading калібровка
-```bash
-./rdga1bot --calibrate > /tmp/h1.txt && echo "Повернись на 90° і натисни Enter" && read && ./rdga1bot --calibrate > /tmp/h2.txt && diff /tmp/h1.txt /tmp/h2.txt
-```
-Знайти offset де float змінився на ~1.57 (π/2 рад).
-`[MemReader] Heading_Offset=0xXX` → `[Navigation] UseHeading=true`.
-
-### Пріоритет 5: Geodata файли
-1. Знайти `XX_YY.geo` для підземелля
-2. Покласти в `rdga1bot/geodata/`
-3. `[Geodata] Enabled=true` + `[Navigation] Enabled=true`
-4. Логи: `[GEO] → waypoint N dist=XXX`
+### Пріоритет 2: Тест фарму після MR11
+`./farm.sh` 30+ хв. `[OBJ]` рядки не повинні з'являтись (manager порожній).

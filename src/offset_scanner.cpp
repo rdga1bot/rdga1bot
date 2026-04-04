@@ -1,12 +1,15 @@
 #include "offset_scanner.h"
 #include "ProcessMemory.h"
 #include <fstream>
-#include <sstream>
 #include <iostream>
 #include <iomanip>
 #include <cstring>
 #include <cmath>
 #include <cstdio>
+#include <thread>
+#include <chrono>
+#include <vector>
+#include <csignal>
 
 static constexpr size_t MAX_REGION_SIZE = 64 * 1024 * 1024; // 64 MB
 
@@ -332,25 +335,122 @@ uintptr_t OffsetScanner::findNameOffset(uintptr_t playerBase,
 }
 
 // ── Heading калібровка ─────────────────────────────────────────────────────────
-// Виводить playerBase+[0x28..0x80] floats що схожі на кут ([-pi..pi] або [0..360]).
-// Запускати двічі: стоячи і після повороту на 90° → offset що змінився = heading.
+// Дампає playerBase+[0x00..0x200] — ВСІ значення без фільтра.
+// Запускати ДВІЧІ: до і після повороту на 90° → diff покаже змінений offset.
+// L2 heading: float рад (~1.57 зміна) | float deg (~90) | int32 (~16384 зміна)
 void OffsetScanner::calibrateHeadingOffset(uintptr_t playerBase) const {
-    std::cerr << "[HeadingCal] PlayerBase+0x28..0x80:\n";
-    std::cerr << "  offset | float_val  | deg(if_rad) | note\n";
-    std::cerr << "  -------|------------|-------------|-----\n";
-    for (uintptr_t off = 0x28; off <= 0x80; off += 4) {
-        float v = rpm<float>(playerBase + off);
-        if (!std::isfinite(v)) continue;
-        // Якщо в [-pi, pi] → може бути heading в радіанах
-        bool maybe_rad = (v >= -3.15f && v <= 3.15f);
-        // Якщо в [0, 360] → може бути heading в градусах
-        bool maybe_deg = (v >= 0.f && v <= 360.f);
-        if (!maybe_rad && !maybe_deg) continue;
-        float deg_from_rad = maybe_rad ? (v * 180.f / 3.14159f) : v;
-        std::cerr << "  0x" << std::hex << std::setw(4) << off << std::dec
-                  << " | " << std::setw(10) << v
-                  << " | " << std::setw(11) << (int)deg_from_rad
-                  << " | " << (maybe_rad ? "rad?" : "deg?") << "\n";
+    std::cerr << "[HeadingCal] PlayerBase=0x" << std::hex << playerBase << std::dec << "\n";
+    std::cerr << "[HeadingCal] Full dump 0x00..0x200 (порівняти diff до/після повороту):\n";
+
+    for (uintptr_t off = 0x00; off <= 0x200; off += 4) {
+        uint32_t raw = rpm<uint32_t>(playerBase + off);
+        int32_t  as_i = (int32_t)raw;
+        float    as_f = 0.f;
+        std::memcpy(&as_f, &raw, 4);
+        std::cerr << "H 0x" << std::hex << std::setw(3) << off
+                  << " " << std::setw(10) << raw << std::dec
+                  << " i=" << std::setw(10) << as_i
+                  << " f=" << as_f << "\n";
     }
-    std::cerr << "[HeadingCal] Повернись на 90° і запусти знову → знайди змінений offset.\n";
+    std::cerr << "[HeadingCal] Повернись на 90° праворуч і запусти знову, потім: diff h1.txt h2.txt\n"
+              << "[HeadingCal] float рад: ~1.57 | float deg: ~90 | int32: ~16384\n";
+}
+
+// ── Heading live monitor ───────────────────────────────────────────────────────
+static volatile bool g_hmon_stop = false;
+
+struct HMonRegion {
+    std::string  label;
+    uintptr_t    base;
+    uintptr_t    range;
+    std::vector<uint32_t> baseline;
+};
+
+static void hmon_print_change(const std::string& label, uintptr_t off,
+                               uint32_t bv, uint32_t cv) {
+    int32_t di = (int32_t)cv - (int32_t)bv;
+    float   cf = 0.f, bf = 0.f;
+    std::memcpy(&cf, &cv, 4);
+    std::memcpy(&bf, &bv, 4);
+    float df = cf - bf;
+
+    std::cerr << "  [" << label << "+0x" << std::hex << std::setw(3) << off << std::dec << "]"
+              << "  base=" << std::setw(10) << (int32_t)bv
+              << "  cur="  << std::setw(10) << (int32_t)cv
+              << "  di="   << std::setw(8)  << di
+              << "  df="   << df;
+
+    bool rad_like = std::isfinite(df) && std::fabsf(df) > 0.3f && std::fabsf(df) < 7.f;
+    bool deg_like = std::isfinite(df) && std::fabsf(df) > 10.f && std::fabsf(df) < 360.f;
+    bool int_like = std::abs(di) > 500 && std::abs(di) < 65536;
+    if (rad_like) std::cerr << " ← RAD heading?";
+    if (deg_like) std::cerr << " ← DEG heading?";
+    if (int_like) std::cerr << " ← INT heading?";
+    std::cerr << "\n";
+}
+
+void OffsetScanner::headingMonitor(uintptr_t playerBase) const {
+    std::signal(SIGINT, [](int){ g_hmon_stop = true; });
+
+    // Регіон 1: playerBase+0x00..0x600 (розширено з 0x200)
+    std::vector<HMonRegion> regions;
+    regions.push_back({"PB", playerBase, 0x600, {}});
+
+    // Регіон 2+: слідуємо ptr-подібним значенням з перших 0x60 байт playerBase
+    // Типові ptr в Linux user space: 0x0800_0000 .. 0xBFFF_FFFF
+    std::cerr << "[HeadingMon] Шукаю ptr в playerBase+0x00..0x60:\n";
+    for (uintptr_t off = 0; off <= 0x60; off += 4) {
+        uint32_t v = rpm<uint32_t>(playerBase + off);
+        if (v < 0x08000000u || v > 0xBFFF0000u) continue;
+        if (v == (uint32_t)playerBase) continue;  // self-ref
+        // Перевіряємо що ptr читабельний
+        uint32_t test = rpm<uint32_t>((uintptr_t)v);
+        if (!test && rpm<uint32_t>((uintptr_t)v + 4) == 0) continue;
+        char lbl[32];
+        std::snprintf(lbl, sizeof(lbl), "ptr@%02x", (int)off);
+        std::cerr << "  " << lbl << " → 0x" << std::hex << v << std::dec << "\n";
+        regions.push_back({lbl, (uintptr_t)v, 0x200, {}});
+    }
+
+    // Знімаємо baseline для всіх регіонів
+    for (auto& r : regions) {
+        r.baseline.resize(r.range / 4 + 1);
+        for (uintptr_t off = 0; off <= r.range; off += 4)
+            r.baseline[off / 4] = rpm<uint32_t>(r.base + off);
+    }
+
+    std::cerr << "[HeadingMon] Baseline знято (" << regions.size() << " регіонів). "
+              << "Крутись у грі — побачиш зміни.\n"
+              << "[HeadingMon] Ctrl+C для зупинки. "
+              << "0x14/0x1c = timer (ігноруємо).\n\n";
+
+    int tick = 0;
+    while (!g_hmon_stop) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        ++tick;
+
+        bool any = false;
+        for (auto& r : regions) {
+            for (uintptr_t off = 0; off <= r.range; off += 4) {
+                // Ігноруємо відомі timer offsets в playerBase
+                if (r.label == "PB" && (off == 0x14 || off == 0x1c)) continue;
+                // Ігноруємо XYZ playerBase (вони теж змінюються від руху)
+                if (r.label == "PB" && off >= 0x24 && off <= 0x2c) continue;
+
+                uint32_t cv = rpm<uint32_t>(r.base + off);
+                uint32_t bv = r.baseline[off / 4];
+                if (cv == bv) continue;
+
+                if (!any) { std::cerr << "[t=" << tick << "] Зміни:\n"; any = true; }
+                hmon_print_change(r.label, off, bv, cv);
+            }
+        }
+        if (any) {
+            // Оновлюємо baseline після кожної зміни
+            for (auto& r : regions)
+                for (uintptr_t off = 0; off <= r.range; off += 4)
+                    r.baseline[off / 4] = rpm<uint32_t>(r.base + off);
+        }
+    }
+    std::cerr << "\n[HeadingMon] Зупинено.\n";
 }

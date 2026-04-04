@@ -68,6 +68,10 @@ public:
     // Запускати двічі: до і після повороту на 90°. Порівнювати вивід.
     void calibrateHeadingOffset(uintptr_t playerBase) const;
 
+    // Live monitor: записує baseline, потім виводить тільки змінені offsets.
+    // Зупинити Ctrl+C. Крутись у грі — побачиш heading offset одразу.
+    void headingMonitor(uintptr_t playerBase) const;
+
     // Runtime-значення offsets (перевизначаються findKnownListOffset або loadOffsets)
     uintptr_t knownListOff   = OFF_KNOWN_LIST;
     uintptr_t knownCountOff  = OFF_KNOWN_COUNT;

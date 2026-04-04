@@ -674,13 +674,15 @@ int main(int argc, char* argv[]) {
     std::string config_path = "rdga1bot.ini";
 
     bool calibrate = false;
+    bool heading_monitor = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
-        if (a == "--quick")        quick  = true;
-        if (a == "--no-tui")       no_tui = true;
-        if (a == "--dump-objects")  dump_objects  = true;
-        if (a == "--calibrate")     calibrate     = true;
-        if (a == "--hp-calibrate")  hp_calibrate  = true;
+        if (a == "--quick")           quick          = true;
+        if (a == "--no-tui")          no_tui         = true;
+        if (a == "--dump-objects")    dump_objects   = true;
+        if (a == "--calibrate")       calibrate      = true;
+        if (a == "--hp-calibrate")    hp_calibrate   = true;
+        if (a == "--heading-monitor") heading_monitor = true;
         if (a == "--config" && i + 1 < argc) config_path = argv[++i];
     }
 
@@ -814,6 +816,20 @@ int main(int argc, char* argv[]) {
         scanner.calibrateHeadingOffset(playerBase);
         std::cerr << "[CAL] Usage: --calibrate [--name \"MobName\"]\n";
 
+        return 0;
+    }
+
+    // ─── --heading-monitor: live monitor змін у playerBase struct ────────────────
+    if (heading_monitor) {
+        pid_t pid = findL2Pid();
+        if (!pid) { std::cerr << "[HeadingMon] l2.exe не знайдено\n"; return 1; }
+        OffsetScanner scanner(pid);
+        scanner.loadOffsets("offsets.json");
+        std::cerr << "[HeadingMon] blindScan()...\n";
+        uintptr_t playerBase = scanner.blindScan();
+        if (!playerBase) { std::cerr << "[HeadingMon] PlayerBase не знайдено\n"; return 1; }
+        std::cerr << "[HeadingMon] PlayerBase=0x" << std::hex << playerBase << std::dec << "\n";
+        scanner.headingMonitor(playerBase);
         return 0;
     }
 

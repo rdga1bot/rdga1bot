@@ -37,6 +37,12 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
     // Ініціалізуємо RandomDelay генератори
     InitRandomDelays();
 
+    // Objectives: логування через Brain::Log
+    m_obj_manager.setLogCallback([this](const std::string& msg) {
+        Log(msg, LogLevel::Debug);
+    });
+    // Objectives реєструються в MR12. Зараз manager порожній — tick() = noop.
+
     // Завантажуємо шаблони кнопок ALT+B (один раз при старті)
     m_buff_tab_templ     = cv::imread("template/buff_tab.png");
     m_buff_profile_templ = cv::imread("template/buff_profile.png");
@@ -285,6 +291,13 @@ void Brain::Process(bool debug) {
 
     // Скидаємо async vision флаг — результат вже використано (або не прийшов)
     m_has_async_vision = false;
+
+    // Objectives tick (MR11: паралельно з FSM — noop поки порожній)
+    // MR12: Handle* видаляться, Objectives повністю замінять FSM диспетч
+    GameState gs{ m_eyes, m_hands, m_cfg, m_stats };
+    gs.log_fn = [this](const std::string& msg) { Log(msg, LogLevel::Debug); };
+    updateGameState(gs);
+    m_obj_manager.tick(gs);
 }
 
 void Brain::HandleIdle() {
@@ -1443,4 +1456,40 @@ std::optional<PathRequest> Brain::GetPendingPathRequest() {
     auto req = std::move(m_pending_path_req);
     m_pending_path_req = std::nullopt;
     return req;
+}
+
+void Brain::updateGameState(GameState& gs) {
+    if (m_me.has_value()) {
+        gs.hp = m_me->hp; gs.mp = m_me->mp; gs.cp = m_me->cp;
+        gs.hp_valid = true;
+    } else {
+        gs.hp_valid = false;
+    }
+    gs.player_x = m_mem_player.x;
+    gs.player_y = m_mem_player.y;
+    gs.player_z = m_mem_player.z;
+    gs.coords_valid = m_mem_player.valid;
+
+    gs.target     = m_target;
+    gs.has_target = HasTarget();
+    gs.target_hp  = m_target.has_value() ? m_target->hp : 0;
+
+    if (m_has_async_vision && m_async_minimap.has_value())
+        gs.minimap_dots = *m_async_minimap;
+    else
+        gs.minimap_dots = m_eyes.DetectMinimap();
+
+    if (m_world) {
+        gs.kl_mobs        = m_world->mobs();
+        gs.kl_alive_count = m_world->aliveCount();
+        gs.kl_mob_died    = m_world->anyMobDiedThisTick();
+    } else {
+        gs.kl_mobs.clear();
+        gs.kl_alive_count = 0;
+        gs.kl_mob_died    = false;
+    }
+    gs.secs_since_last_buff = SecsSince(m_last_buff);
+    gs.is_dead     = (m_state == State::Dead);
+    gs.in_grace    = InRespawnGrace();
+    gs.hands_ready = m_hands.IsReady();
 }

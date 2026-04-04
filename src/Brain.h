@@ -16,6 +16,8 @@
 #include "RandomDelay.h"
 #include "vision_worker.h"
 #include "geodata_worker.h"
+#include "game_state.h"
+#include "objective_manager.h"
 
 class Brain {
 public:
@@ -90,6 +92,11 @@ public:
     // Встановити callback для логу (викликається з кожного Log())
     void SetLogCallback(std::function<void(const std::string&)> cb) {
         m_log_callback = std::move(cb);
+    }
+
+    // Objectives: ім'я активної цілі (для Dashboard і логу)
+    std::string GetCurrentObjective() const {
+        return m_obj_manager.currentName();
     }
 
 private:
@@ -239,6 +246,10 @@ private:
     std::vector<BlacklistedMob> m_blacklist;
     void CleanBlacklist(); // видалити прострочені записи
     void InitRandomDelays(); // ініціалізувати/скинути RandomDelay генератори з cfg.delays
+
+    // ── Objectives ────────────────────────────────────────────────────────────
+    ObjectiveManager m_obj_manager;
+    void updateGameState(GameState& gs);
     std::optional<L2Character> SelectWeightedTarget(
         const std::vector<L2Character>& mobs,
         float playerX, float playerY);

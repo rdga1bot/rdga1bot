@@ -49,6 +49,7 @@ SRCS="
   $SRC/Geodata.cpp
   $SRC/vision_worker.cpp
   $SRC/geodata_worker.cpp
+  $SRC/objective_manager.cpp
 "
 
 echo "[1/2] Компіляція..."
