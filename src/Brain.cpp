@@ -282,6 +282,9 @@ void Brain::Process(bool debug) {
     if (tick_ms > 50.0) {
         Log("[PERF] Повільний тік: " + std::to_string((int)tick_ms) + "мс", LogLevel::Warning);
     }
+
+    // Скидаємо async vision флаг — результат вже використано (або не прийшов)
+    m_has_async_vision = false;
 }
 
 void Brain::HandleIdle() {
@@ -317,7 +320,12 @@ void Brain::HandleTargeting() {
 
         if (kNearbyYThreshold > 0 && !m_cfg.target_macro_keys.empty()
             && m_far_target_rejects < kMaxFarRejects) {
-            auto npcs = m_eyes.DetectNPCs();
+            std::vector<Eyes::NPC> npcs;
+            if (m_has_async_vision && m_async_npcs.has_value()) {
+                npcs = *m_async_npcs;
+            } else {
+                npcs = m_eyes.DetectNPCs();
+            }
             for (const auto& npc : npcs) {
                 if (npc.Selected() && npc.center.y < kNearbyYThreshold) {
                     Log("[TARGETING] Моб далеко (cy=" + std::to_string(npc.center.y)
@@ -400,7 +408,14 @@ void Brain::HandleTargeting() {
     static constexpr int kMinimapDxThreshold = 20;
     static constexpr int kMinimapRotateLimit = 4;
 
-    auto minimap_dots = m_eyes.DetectMinimap();
+    // Якщо є async результат від VisionWorker — використовуємо його,
+    // інакше sync DetectMinimap() (fallback)
+    std::vector<Eyes::MinimapDot> minimap_dots;
+    if (m_has_async_vision && m_async_minimap.has_value()) {
+        minimap_dots = *m_async_minimap;
+    } else {
+        minimap_dots = m_eyes.DetectMinimap();
+    }
 
     // Якщо є вибраний моб (фіолетовий ореол) — ротуємось до нього; інакше до найближчого.
     const Eyes::MinimapDot* map_ref = nullptr;
@@ -861,6 +876,9 @@ void Brain::HandleAttacking() {
                     if (bl_id != 0) BlacklistMob(bl_id, 60.f);
                 }
             }
+            m_target = std::nullopt; // скидаємо щоб HandleTargeting не бачив старий таргет
+            m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+            m_hands.Send(200);
             EnterState(State::Targeting);
             return;
         }
@@ -1363,4 +1381,31 @@ std::optional<L2Character> Brain::SelectWeightedTarget(
             " hp=" + std::to_string((int)best->hpPercent()) + "%",
             LogLevel::Debug);
     return best;
+}
+
+
+void Brain::SetAsyncNPCs(const std::vector<Eyes::NPC>& npcs,
+                          const std::vector<Eyes::MinimapDot>& minimap) {
+    m_async_npcs    = npcs;
+    m_async_minimap = minimap;
+    m_has_async_vision = true;
+}
+
+void Brain::SetGeoPath(const std::vector<std::pair<float,float>>& path,
+                        uint64_t path_id) {
+    if (path_id <= m_geo_path_id) return; // застарілий результат
+    m_geo_path       = path;
+    m_geo_path_idx   = 0;
+    m_geo_path_id    = path_id;
+    m_geo_path_ready = !path.empty();
+    if (m_geo_path_ready)
+        Log("[GEO-W] Шлях отримано: " +
+            std::to_string(path.size()) + " точок", LogLevel::Debug);
+}
+
+std::optional<PathRequest> Brain::GetPendingPathRequest() {
+    if (!m_pending_path_req.has_value()) return std::nullopt;
+    auto req = std::move(m_pending_path_req);
+    m_pending_path_req = std::nullopt;
+    return req;
 }

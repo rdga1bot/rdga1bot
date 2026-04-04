@@ -14,6 +14,8 @@
 #include "world_state.h"
 #include "Geodata.h"
 #include "RandomDelay.h"
+#include "vision_worker.h"
+#include "geodata_worker.h"
 
 class Brain {
 public:
@@ -56,6 +58,20 @@ public:
     // Geodata: навігація по геодаті (необов'язково — якщо null, стандартна навігація)
     void SetGeodata(std::shared_ptr<Geodata> geo) { m_geodata = std::move(geo); }
     Geodata* GetGeodata() const { return m_geodata.get(); }
+
+    // VisionWorker інтеграція:
+    // Встановити async результат DetectNPCs (викликає main.cpp)
+    // При наступному тіку Brain використає ці NPCs замість sync DetectNPCs
+    void SetAsyncNPCs(const std::vector<Eyes::NPC>& npcs,
+                      const std::vector<Eyes::MinimapDot>& minimap);
+
+    // GeodataWorker інтеграція:
+    // Встановити знайдений шлях (викликає main.cpp)
+    void SetGeoPath(const std::vector<std::pair<float,float>>& path,
+                    uint64_t path_id);
+
+    // Повернути pending path request або nullopt якщо не потрібен
+    std::optional<PathRequest> GetPendingPathRequest();
 
     // Blacklist: занести моба в чорний список на seconds секунд
     // (викликається автоматично при HP-stable; доступно ззовні для тестів)
@@ -203,6 +219,21 @@ private:
 
     // Geodata (null = вимкнено)
     std::shared_ptr<Geodata> m_geodata;
+
+    // Async vision результат (від VisionWorker)
+    std::optional<std::vector<Eyes::NPC>>         m_async_npcs;
+    std::optional<std::vector<Eyes::MinimapDot>>  m_async_minimap;
+    bool m_has_async_vision = false;
+
+    // Geo path (від GeodataWorker)
+    std::vector<std::pair<float,float>> m_geo_path;
+    size_t   m_geo_path_idx  = 0;
+    uint64_t m_geo_path_id   = 0;
+    bool     m_geo_path_ready = false;
+
+    // Path request для GeodataWorker
+    std::optional<PathRequest> m_pending_path_req;
+    uint64_t m_path_req_id = 0;
 
     // ── Blacklist — недосяжні моби (HP-stable → blacklist на 60с) ────────────
     struct BlacklistedMob {

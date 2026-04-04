@@ -47,6 +47,8 @@ SRCS="
   $SRC/knownlist_reader.cpp
   $SRC/world_state.cpp
   $SRC/Geodata.cpp
+  $SRC/vision_worker.cpp
+  $SRC/geodata_worker.cpp
 "
 
 echo "[1/2] Компіляція..."

@@ -52,6 +52,8 @@ rdga1bot/
 │   ├── world_state.h/.cpp  — WorldState: tick aggregator для Brain
 │   ├── Geodata.h/.cpp      — L2J геодата: завантаження .geo файлів, A* pathfinding
 │   ├── RandomDelay.h       — варіативні затримки (нормальний розподіл, антидетект)
+│   ├── vision_worker.h/.cpp — VisionWorker: async DetectNPCs+DetectMinimap у окремому потоці
+│   ├── geodata_worker.h/.cpp — GeodataWorker: async A* FindPath у окремому потоці
 │   └── FPS.h               — FPS counter
 ├── build.sh                — g++ пряма компіляція (cmake не потрібен)
 ├── launch.sh               — запуск з перевіркою /dev/uinput
@@ -808,7 +810,7 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **offsets_config.h відкалібровано (2026-03-30)**: `OFF_OBJ_X=0x90`, `OFF_OBJ_Y=0x94`, `OFF_OBJ_Z=0x98`, `OFF_OBJ_TYPE=0x5C` (stride 0x5C0 між об'єктами). Scan region: `OFF_REGION_SCAN_BASE=0x3F0000`, `OFF_REGION_SCAN_END=0x440000`. ✓
 - **KnownList kill detection ПІДТВЕРДЖЕНО (2026-03-30)**: `[ATTACKING] [KnownList] Таргет мертвий → LOOTING` — спрацювало 2 рази в тесті після `blindScan() PlayerBase=0x4061d8`. `offsets.json` оновлено: `OFF_OBJ_X=144(0x90)`, `OFF_OBJ_TYPE=92(0x5C)`. ✓
 - **Buff rebuff FIX #2 (2026-03-30)**: Stage 0 чекає `SecsSince(last_kill_time) >= 15с` перед ALT+B. L2 combat/peace state = ~15с після останньої атаки. ESC (Stage 0 попереднього фіксу) знімав таргет але НЕ скидав combat state → ALT+B не відкривав вікно ком'юніті. Тепер: бот входить BUFFING через 2с, але Stage 0 блокується до повного виходу з combat state. ✓
-- **Kamael HP offsets відкалібровано (2026-03-31)**: `--hp-calibrate` mode + ручний аналіз пам'яті. `offsets.json` оновлено: `OFF_CHAR_HP=664(0x298)`, `OFF_CHAR_HP_MAX=480(0x1e0)`, `OFF_CHAR_IS_DEAD=440(0x1b8)`. Раніше були HF defaults (0x1F4/0x1F8/0x210). `[KnownList] alive=N` тепер показує реальну кількість живих мобів. ✓
+- **Kamael HP offsets відкалібровано (2026-04-02)**: `--hp-calibrate` multi-pass scans. `offsets.json` оновлено: `OFF_CHAR_HP=256(0x100)` (87.22→0.00 після kill ✓), `OFF_CHAR_IS_DEAD=384(0x180)` (0→1 після kill ✓). `OFF_CHAR_HP_MAX=480` — L2 клієнт ElmoreLab **не зберігає MaxHP** в KnownList об'єкті (0x100-0x3C0 range = 0 для всіх alive мобів); `hpPercent()` повертає 0 безпечно (guard `hpMax>0`). Попередні значення 664(0x298)/440(0x1b8) неправильні → alive=0 завжди. З новими: `alive=N > 0` працює. ✓
 - **UseForKillDetect баг виявлено і вимкнено (2026-03-31)**: перевіряв `hp<=0` у ВСІХ мобах KnownList → завжди є мертві моби у списку → ATTACKING одразу → fake kills (22 kills/min). `UseForKillDetect = false` назавжди. Kill detection: `anyMobDiedThisTick()` + OpenCV `hp<=2%`. ✓
 - **UseForTargetHP фікс: min HP% (2026-03-31)**: раніше брав першого живого моба → читав HP чужої цілі → HP завжди 100%. Тепер: моб з мінімальним HP% = той що атакується. `UseForTargetHP = true` в .ini. ✓
 - **Approach re-target вимкнено (2026-03-31)**: `false &&` в `approach_possible`. Причина: для товстих мобів де 1 удар < 20% → ретаргет кожну секунду → кидав живих мобів. ✓
@@ -831,6 +833,10 @@ printf "status\n" | ./rdga1bot --no-tui --quick
   3. `Brain.h/cpp`: RandomDelay інтегровано (m_rd_attack/rotate/walk, InitRandomDelays(), RandMs()). Rotate calls та attack delay у HandleTargeting/HandleAttacking тепер через RandMs(). ✓
   4. `Config.h/cpp`: TargetWeights → WeightedTargetConfig (прибрано aggro/attacked без даних, додано w_freshness/max_range, секція [WeightedTargeting]). ✓
   5. `Brain.cpp`: SelectWeightedTarget() реалізовано і інтегровано в HandleTargeting() memory nav блок. ✓
+
+- **VisionWorker (2026-04-04 MR8)**: `vision_worker.h/cpp` — async DetectNPCs і DetectMinimap у окремому потоці. Eyes залишається в main thread (стан між кадрами). Brain: `SetAsyncNPCs()` встановлює результат; `HandleTargeting()` використовує його якщо є, інакше sync fallback. `m_has_async_vision = false` наприкінці `Process()`. Feature flag: `[Threading] VisionThread=false` за замовчуванням. ✓
+- **GeodataWorker (2026-04-04 MR8)**: `geodata_worker.h/cpp` — async FindPath() у окремому потоці. Geodata stateless для FindPath() → thread-safe. Brain: `SetGeoPath()` + `GetPendingPathRequest()`. Feature flag: `[Threading] GeodataThread=false` за замовчуванням. ✓
+- **Config ThreadingConfig (2026-04-04 MR8)**: `[Threading]` секція в INI — `Enabled`, `CPUAffinity`, `MainCore`, `VisionThread`, `VisionCore`, `GeodataThread`, `GeodataCore`. `SetThreadAffinity()` в main.cpp. Всі дефолти `false` — зворотна сумісність збережена. ✓
 
 ### Потребує уваги:
 - **dead_target ×1..6**: нормально — гра re-selects труп після ESC, 5-6 циклів до despawn (5-10с)
@@ -857,18 +863,23 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-### Пріоритет 1: Тест стабільності (2026-04-02)
+### Пріоритет 1: Тест VisionWorker (2026-04-04)
+В `.ini` встановити `[Threading] Enabled=true, VisionThread=true, VisionCore=2`.
+В stderr очікується `[VIS-W] Started on Core 2`.
+Перевірити що FPS не падає і мінімапа/NPC детекція коректна.
+Якщо проблеми — вимкнути (fallback до sync автоматичний).
+
+### Пріоритет 2: Тест стабільності фарму
 `./farm.sh` 1+ год. В логах шукати:
-- **Відсутність** `[STATE] BUFFING -> DEAD` або `[STATE] TARGETING -> DEAD` при реальному HP > 0 → DEAD false positive виправлено ✓
-- `[Buffs] Завершено, наступний баф через 900с` — ребаф кожні 15 хв
+- `[Buffs] Завершено, наступний баф через 900с`
 - `[BLACKLIST] Моб ID=X заблокований на 60с` — при HP-stable (очікується рідко)
 
-### Пріоритет 2: dx=25 targeting loop
+### Пріоритет 3: dx=25 targeting loop
 Якщо в логах `[TARGETING] Спроба 50+` після бафу — мінімапа показує dx=25 але F2 не знаходить моба. Варіанти:
 - Перевірити чи відкривається/закривається BBS коректно (debug screenshot в `tmp/`)
 - Після fallback buff: додати ESC щоб закрити будь-яке відкрите вікно перед IDLE
 
-### Пріоритет 3: Geodata (якщо потрібна навігація по карті)
+### Пріоритет 4: Geodata (якщо потрібна навігація по карті)
 1. Знайти `.geo` файли для підземелля (ElmoreLab L2J геодата)
 2. Покласти в `rdga1bot/geodata/` як `XX_YY.geo`
 3. В `.ini`: `[Geodata] Enabled=true` + `[Navigation] Enabled=true`

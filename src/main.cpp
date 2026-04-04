@@ -27,6 +27,12 @@
 #include "offset_scanner.h"
 #include "world_state.h"
 #include "Geodata.h"
+#include "vision_worker.h"
+#include "geodata_worker.h"
+#ifdef __linux__
+#include <sched.h>
+#include <pthread.h>
+#endif
 
 // ─── Signal handling (збереження stats при Ctrl+C / kill) ──────────────────
 static std::function<void()> g_cleanup;
@@ -643,6 +649,19 @@ static void dumpKnownListObjects(const std::string& offsets_file) {
     std::cout << "\n[dump] Гравець: X=" << (int)px << " Y=" << (int)py << " Z=" << (int)pz << "\n";
 }
 
+static bool SetThreadAffinity(int core) {
+#ifdef __linux__
+    if (core < 0) return false;
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET((size_t)core, &cpuset);
+    return pthread_setaffinity_np(pthread_self(),
+                                  sizeof(cpu_set_t), &cpuset) == 0;
+#else
+    return false;
+#endif
+}
+
 int main(int argc, char* argv[]) {
     // Завжди рядковий буфер stdout (важливо коли не TTY)
     setlinebuf(stdout);
@@ -895,6 +914,29 @@ int main(int argc, char* argv[]) {
 
         ApplyConfig(cfg, hands, eyes, brain, &mem_reader);
 
+        // ── Threading: CPU affinity + workers ──────────────────────────────────
+        VisionWorker  vision_worker;
+        GeodataWorker geodata_worker;
+
+        if (cfg.threading.enabled) {
+            // Main thread affinity
+            if (cfg.threading.cpu_affinity) {
+                if (SetThreadAffinity(cfg.threading.main_core))
+                    std::cerr << "[CPU] Main → Core " << cfg.threading.main_core << "\n";
+                else
+                    std::cerr << "[CPU] WARNING: affinity failed\n";
+            }
+            // GeodataWorker (тільки якщо Geodata завантажена)
+            if (cfg.threading.geodata_thread && brain.GetGeodata()) {
+                geodata_worker.Start(brain.GetGeodata(),
+                                     cfg.threading.geodata_core);
+            }
+            // VisionWorker
+            if (cfg.threading.vision_thread) {
+                vision_worker.Start(cfg.threading.vision_core);
+            }
+        }
+
         // KnownList: OffsetScanner + WorldState (незалежно від [MemReader])
         // blindScan() не потребує координат — знаходить PlayerBase структурно.
         std::unique_ptr<OffsetScanner> kl_scanner;
@@ -1109,6 +1151,14 @@ int main(int argc, char* argv[]) {
             // ─── Обробка ───────────────────────────────────────────────
             hands.SetWindowRect({cached_rect.x, cached_rect.y, cached_rect.width, cached_rect.height});
             eyes.Open(image.value());
+
+            // ── VisionWorker: відправляємо кадр async (якщо увімкнено) ──────────
+            static uint64_t vision_frame_id = 0;
+            if (cfg.threading.enabled && cfg.threading.vision_thread
+                && vision_worker.IsRunning()) {
+                vision_worker.SubmitFrame(image.value(), ++vision_frame_id, eyes);
+            }
+
             // Memory Reading: оновлюємо стан гравця з пам'яті (якщо увімкнено)
             if (cfg.mem_enabled && mem_reader.IsOpen()) {
                 brain.SetMemPlayerState(mem_reader.ReadPlayer());
@@ -1175,6 +1225,24 @@ int main(int argc, char* argv[]) {
                         result_ptr->store(base);
                         running_ptr->store(false);
                     }).detach();
+                }
+            }
+
+            // ── VisionWorker: отримуємо результат DetectNPCs (якщо готовий) ─────
+            if (cfg.threading.enabled && cfg.threading.vision_thread) {
+                if (auto vr = vision_worker.TryGetResult()) {
+                    brain.SetAsyncNPCs(vr->npcs, vr->minimap);
+                }
+            }
+
+            // ── GeodataWorker: отримуємо результат FindPath (якщо готовий) ──────
+            if (cfg.threading.enabled && cfg.threading.geodata_thread) {
+                if (auto gr = geodata_worker.TryGetResult()) {
+                    brain.SetGeoPath(gr->path, gr->id);
+                }
+                // Відправляємо новий запит якщо Brain потребує шляху
+                if (auto req = brain.GetPendingPathRequest()) {
+                    geodata_worker.RequestPath(*req);
                 }
             }
 

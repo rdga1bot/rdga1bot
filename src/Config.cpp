@@ -367,6 +367,15 @@ bool Config::Load(const std::string& path) {
     weighted_target.w_freshness= (float)GetDouble("WeightedTargeting", "WeightFreshness", (double)weighted_target.w_freshness);
     weighted_target.max_range  = (float)GetDouble("WeightedTargeting", "MaxRange",        (double)weighted_target.max_range);
 
+    // [Threading]
+    threading.enabled        = GetBool("Threading","Enabled",       threading.enabled);
+    threading.cpu_affinity   = GetBool("Threading","CPUAffinity",   threading.cpu_affinity);
+    threading.main_core      = GetInt ("Threading","MainCore",       threading.main_core);
+    threading.vision_thread  = GetBool("Threading","VisionThread",  threading.vision_thread);
+    threading.vision_core    = GetInt ("Threading","VisionCore",    threading.vision_core);
+    threading.geodata_thread = GetBool("Threading","GeodataThread", threading.geodata_thread);
+    threading.geodata_core   = GetInt ("Threading","GeodataCore",   threading.geodata_core);
+
     // [Colors_MyBars]
     colors.my_hp_from_hsv = GetScalar("Colors_MyBars", "HPFromHSV",  colors.my_hp_from_hsv);
     colors.my_hp_to_hsv   = GetScalar("Colors_MyBars", "HPToHSV",    colors.my_hp_to_hsv);
@@ -561,6 +570,19 @@ bool Config::Save(const std::string& path) const {
     f << "WeightLowHP    = " << weighted_target.w_low_hp    << "\n";
     f << "WeightFreshness= " << weighted_target.w_freshness << "\n";
     f << "MaxRange       = " << weighted_target.max_range   << "\n";
+    f << "\n";
+    f << "[Threading]\n";
+    f << "# Мультипоточність. Enabled=false → все в одному потоці (як раніше).\n";
+    f << "# VisionThread: DetectNPCs async на Core VisionCore.\n";
+    f << "# GeodataThread: FindPath async на Core GeodataCore.\n";
+    f << "# Рекомендовано: перевір htop перед увімкненням.\n";
+    f << "Enabled       = " << (threading.enabled        ? "true":"false") << "\n";
+    f << "CPUAffinity   = " << (threading.cpu_affinity   ? "true":"false") << "\n";
+    f << "MainCore      = " << threading.main_core      << "\n";
+    f << "VisionThread  = " << (threading.vision_thread  ? "true":"false") << "\n";
+    f << "VisionCore    = " << threading.vision_core    << "\n";
+    f << "GeodataThread = " << (threading.geodata_thread ? "true":"false") << "\n";
+    f << "GeodataCore   = " << threading.geodata_core   << "\n";
     f << "\n";
     f << "[Vision]\n";
     f << "UseRobustBarDetection = " << (use_robust_bar ? "true" : "false") << "\n";

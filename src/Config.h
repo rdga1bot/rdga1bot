@@ -196,6 +196,16 @@ public:
         float max_range   = 1200.f;
     } weighted_target;
 
+    struct ThreadingConfig {
+        bool enabled        = false; // master switch
+        bool cpu_affinity   = false; // main thread affinity
+        int  main_core      = 1;     // main thread core
+        bool vision_thread  = false; // VisionWorker
+        int  vision_core    = 2;     // VisionWorker core (-1 = no affinity)
+        bool geodata_thread = false; // GeodataWorker
+        int  geodata_core   = 3;     // GeodataWorker core
+    } threading;
+
     // [Colors_*]
     ColorConfig colors;
 
