@@ -873,11 +873,11 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-### Пріоритет 1: Тест фарму після MR9+MR10
-`./farm.sh` 30+ хв. В логах:
-- НЕ повинно бути `[TARGETING] Спроба 100+`
-- Очікується `[MAP] Ліміт ротацій → WalkForward` замість freeze
-- Очікується `[Buffs] Завершено` без подальшого targeting loop
+### ✅ Тест фарму MR9+MR10 (2026-04-04) — ПРОЙДЕНО
+**133 kills / 10:14 хв = 13.0 kill/min, 0 deaths, 2 targeting failures**
+- Жодного `[TARGETING] Спроба 100+` — freeze усунуто ✓
+- VisionWorker на Core 2 активний (`[VIS-W] Started on Core 2`) ✓
+- Pokemon sweep, 180° ротація, blindScan PlayerBase — все працює ✓
 
 ### Пріоритет 2: VisionWorker тест
 `[Threading] Enabled=true, VisionThread=true, VisionCore=2`
