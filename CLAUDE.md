@@ -845,7 +845,11 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **UseForKillDetect = false (2026-03-31)**: ⚠ НАЗАВЖДИ вимкнути. Баг: перевіряв hp<=0 у ВСІХ мобах KnownList → завжди є мертві моби → instant fake LOOTING. Kill detection через `anyMobDiedThisTick()` + OpenCV `hp<=2%`.
 - **Approach re-target вимкнено (2026-03-31)**: `false &&` в Brain.cpp. Причина: для товстих мобів де 1 удар < 20% → ретаргет спрацьовував кожну секунду → бот кидав моба.
 - **Buff при вимкненні сервера**: score 99%→34%, targeting loop після reconnect. При плановому maintenance → зупинити бота (`BuffEnabled = false` або ScrollLock) до рестарту сервера.
-- **dx=25 targeting loop**: після бафу (особливо fallback) бот іноді застрягає в 200+ спроб TARGETING. Мінімапа показує dx=25, 4 ротації → ліміт, F2 не знаходить моба. KnownList `alive=2-5` але моби за межами F2 range (~1200 L2u). Потребує дослідження.
+- **dx=25 targeting loop FIX (2026-04-04 MR9)**: ✓
+  1. Після `kMinimapRotateLimit=4` і dot все ще видно → `m_minimap_rotate_count=0` + `WalkForward(600мс)` замість freeze. Моб далеко (>F2 range) → рухаємось до нього.
+  2. Fallback ротація тепер і при наявному dot: `long_search = attempts>=20 && attempts%10==0` → `minimap_empty || long_search`. Розвідка вперед: при dot — кожні 20 спроб, при порожній — кожні 15.
+  3. Після бафу (ALT+B і buff_keys): `ESC + Delay(300мс) + Send()` перед `EnterState(Idle)`.
+  4. `[TARGETING] Довгий пошук ×N` — WARNING кожні 30 спроб після 30-ї з `dots=N dx=X KL_alive=N rot=N`.
 
 ## ПОТОЧНИЙ СТАН КЛАВІШ
 

@@ -451,6 +451,17 @@ void Brain::HandleTargeting() {
                     ") → розворот 180°", LogLevel::Debug);
             }
         }
+    } else if (map_ref && m_minimap_rotate_count >= kMinimapRotateLimit) {
+        // ── FIX 1: ліміт ротацій досягнуто, але моб все ще видно ──────────────
+        // Ротації не допомогли → скидаємо лічильник і крокуємо вперед.
+        // Моб може бути далеко (за межами F2 range ~1200 L2u) → рухаємось до нього.
+        m_minimap_rotate_count = 0;
+        Log("[MAP] Ліміт ротацій → WalkForward до моба (dx=" +
+            std::to_string(map_ref->dx) + ")", LogLevel::Debug);
+        if (m_eyes.IsGroundAhead()) {
+            m_hands.WalkForward(RandMs(m_rd_walk, 600));
+            m_nav_prev_was_walk = true;
+        }
     } else if (minimap_dots.empty()) {
         m_minimap_rotate_count = 0; // мінімапа порожня — скидаємо
     }
@@ -625,7 +636,12 @@ void Brain::HandleTargeting() {
     }
 
     // ── Fallback ротація / Patrol / Розвідка ─────────────────────────────────
-    if (m_macro_attempts % 5 == 0 && minimap_dots.empty()) {
+    // FIX 2: fallback спрацьовує і коли мінімапа бачить моба але F2 не знаходить.
+    // Умова: або мінімапа порожня, або багато спроб без результату (dot є, але недосяжний).
+    const bool minimap_empty = minimap_dots.empty();
+    const bool long_search   = (m_macro_attempts >= 20)
+                               && (m_macro_attempts % 10 == 0); // кожні 10 спроб після 20-ї
+    if (m_macro_attempts % 5 == 0 && (minimap_empty || long_search)) {
         m_hands.Delay(50);
         m_step_count++;
         m_stats.RecordTargetingFailure();
@@ -672,13 +688,18 @@ void Brain::HandleTargeting() {
                 m_hands.RotateRight(RandMs(m_rd_rotate, 350));
             else
                 m_hands.RotateLeft(RandMs(m_rd_rotate, 350));
-            // Розвідка вперед кожні 15 спроб коли немає мобів і не patrol
-            if (!patrol_ready && m_macro_attempts % 15 == 0
-                && !m_nav_prev_was_walk && m_eyes.IsGroundAhead()) {
+            // Розвідка вперед: при порожній мінімапі кожні 15 спроб,
+            // або при наявному dot (але недосяжному) кожні 20 спроб.
+            const bool explore_trigger = (!patrol_ready && !m_nav_prev_was_walk
+                && m_eyes.IsGroundAhead()
+                && ((minimap_empty && m_macro_attempts % 15 == 0)
+                    || (!minimap_empty && m_macro_attempts % 20 == 0)));
+            if (explore_trigger) {
                 m_hands.WalkForward(1200);
                 m_nav_prev_was_walk = true;
                 Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) +
-                    " — розвідка вперед (мінімапа порожня)");
+                    " — розвідка вперед (" +
+                    (minimap_empty ? "мінімапа порожня" : "dot недосяжний") + ")");
             } else {
                 Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) +
                     " — ротація (мінімапа порожня)");
@@ -687,6 +708,21 @@ void Brain::HandleTargeting() {
     } else if (m_macro_attempts % 5 == 0) {
         m_stats.RecordTargetingFailure();
         Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) + " — шукаємо...");
+    }
+
+    // Попередження при довгому пошуку (кожні 30 спроб після 30-ї)
+    if (m_macro_attempts > 30 && m_macro_attempts % 30 == 0) {
+        std::string dots_info = minimap_dots.empty()
+            ? "мінімапа порожня"
+            : ("dots=" + std::to_string(minimap_dots.size()) +
+               " dx=" + std::to_string(minimap_dots[0].dx));
+        std::string kl_info = (m_world && m_world->aliveCount() > 0)
+            ? " KL_alive=" + std::to_string(m_world->aliveCount())
+            : "";
+        Log("[TARGETING] Довгий пошук ×" + std::to_string(m_macro_attempts) +
+            " — " + dots_info + kl_info +
+            " rot=" + std::to_string(m_minimap_rotate_count),
+            LogLevel::Warning);
     }
 
     m_hands.Send(150); // зменшено 250→150мс (гра відповідає на F2 за ~80мс)
@@ -1046,6 +1082,9 @@ void Brain::HandleBuffing() {
             m_buff_stage = 0;
             m_last_buff = Now();
             Log("[Buffs] Завершено, наступний баф через " + std::to_string(m_cfg.buff_interval) + "с\n");
+            m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+            m_hands.Delay(300);
+            m_hands.Send();
             EnterState(State::Idle);
         }
         return;
@@ -1186,6 +1225,10 @@ void Brain::HandleBuffing() {
             m_last_buff = Now();
             Log("[Buffs] Завершено, наступний баф через " + std::to_string(m_cfg.buff_interval) + "с\n");
         }
+        // ESC щоб закрити будь-яке відкрите вікно (BBS, community) і дати UI оновитись
+        m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+        m_hands.Delay(300);
+        m_hands.Send();
         EnterState(State::Idle);
         break;
     }
