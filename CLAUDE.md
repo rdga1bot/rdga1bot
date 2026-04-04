@@ -850,6 +850,12 @@ printf "status\n" | ./rdga1bot --no-tui --quick
   2. Fallback ротація тепер і при наявному dot: `long_search = attempts>=20 && attempts%10==0` → `minimap_empty || long_search`. Розвідка вперед: при dot — кожні 20 спроб, при порожній — кожні 15.
   3. Після бафу (ALT+B і buff_keys): `ESC + Delay(300мс) + Send()` перед `EnterState(Idle)`.
   4. `[TARGETING] Довгий пошук ×N` — WARNING кожні 30 спроб після 30-ї з `dots=N dx=X KL_alive=N rot=N`.
+- **MR10 Рефакторинг (2026-04-04)**: ✓
+  1. Мертвий код approach_retarget видалено (~45 рядків): поля `m_approach_retarget_count/last_retarget/entry_hp`, обидва блоки в Brain.h/cpp.
+  2. static локальні в main.cpp підняті в зовнішній scope: `kl_scan_running/result/attempts/last_attempt`, `kl_validity_check`, `vision_frame_id`.
+  3. `Config::TargetingTuning` → `[TargetingTuning]` секція .ini: `minimap_dx_threshold`, `minimap_rotate_limit`, `dead_cycles_macro_switch`, `macro_fallback_unreach`, `long_search_warn_at`.
+  4. `ProcessMemory.h`: `Read()/ReadT()/IsValidPtr()` — замінює дубльований `readBytes()/fastRead()` в MemReader/KnownListReader/OffsetScanner/WorldState.
+  5. Geodata waypoint following в `HandleTargeting()`: `PathRequest` генерується при nearest mob (Geodata завантажена), waypoints через `NavigateToMob()`. `EnterState(Targeting)` скидає geo path стан.
 
 ## ПОТОЧНИЙ СТАН КЛАВІШ
 
@@ -867,28 +873,28 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 
 ## НАСТУПНІ КРОКИ
 
-### Пріоритет 1: Тест VisionWorker (2026-04-04)
-В `.ini` встановити `[Threading] Enabled=true, VisionThread=true, VisionCore=2`.
-В stderr очікується `[VIS-W] Started on Core 2`.
-Перевірити що FPS не падає і мінімапа/NPC детекція коректна.
-Якщо проблеми — вимкнути (fallback до sync автоматичний).
+### Пріоритет 1: Тест фарму після MR9+MR10
+`./farm.sh` 30+ хв. В логах:
+- НЕ повинно бути `[TARGETING] Спроба 100+`
+- Очікується `[MAP] Ліміт ротацій → WalkForward` замість freeze
+- Очікується `[Buffs] Завершено` без подальшого targeting loop
 
-### Пріоритет 2: Тест стабільності фарму
-`./farm.sh` 1+ год. В логах шукати:
-- `[Buffs] Завершено, наступний баф через 900с`
-- `[BLACKLIST] Моб ID=X заблокований на 60с` — при HP-stable (очікується рідко)
+### Пріоритет 2: VisionWorker тест
+`[Threading] Enabled=true, VisionThread=true, VisionCore=2`
+Перевірити htop: Core 2 має показувати 15-25%.
 
-### Пріоритет 3: dx=25 targeting loop
-Якщо в логах `[TARGETING] Спроба 50+` після бафу — мінімапа показує dx=25 але F2 не знаходить моба. Варіанти:
-- Перевірити чи відкривається/закривається BBS коректно (debug screenshot в `tmp/`)
-- Після fallback buff: додати ESC щоб закрити будь-яке відкрите вікно перед IDLE
+### Пріоритет 3: RandomDelay активація
+`[Delays] Enabled=true` — реалізовано, не увімкнено.
 
-### Пріоритет 4: Geodata (якщо потрібна навігація по карті)
-1. Знайти `.geo` файли для підземелля (ElmoreLab L2J геодата)
-2. Покласти в `rdga1bot/geodata/` як `XX_YY.geo`
-3. В `.ini`: `[Geodata] Enabled=true` + `[Navigation] Enabled=true`
-4. Перевірити що `[NAV-MEM] WalkForward` з'являється в логах
+### Пріоритет 4: Heading калібровка
+```bash
+./rdga1bot --calibrate > /tmp/h1.txt && echo "Повернись на 90° і натисни Enter" && read && ./rdga1bot --calibrate > /tmp/h2.txt && diff /tmp/h1.txt /tmp/h2.txt
+```
+Знайти offset де float змінився на ~1.57 (π/2 рад).
+`[MemReader] Heading_Offset=0xXX` → `[Navigation] UseHeading=true`.
 
-### Пріоритет 4: RandomDelay (антидетект)
-Після тривалого фарму — перевірити чи немає підозрілих патернів у затримках.
-В `.ini` вже є дефолти `[Delays]`. Якщо потрібна більша варіативність — збільшити `*StdMs`.
+### Пріоритет 5: Geodata файли
+1. Знайти `XX_YY.geo` для підземелля
+2. Покласти в `rdga1bot/geodata/`
+3. `[Geodata] Enabled=true` + `[Navigation] Enabled=true`
+4. Логи: `[GEO] → waypoint N dist=XXX`

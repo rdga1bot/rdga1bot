@@ -1,10 +1,10 @@
 #include "MemReader.h"
+#include "ProcessMemory.h"
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <cstring>
 #include <dirent.h>
-#include <sys/uio.h>   // process_vm_readv
 #include <sys/types.h>
 #include <unistd.h>
 #include <cerrno>
@@ -111,12 +111,7 @@ void MemReader::Close() {
 
 // ── ReadBytes через process_vm_readv ─────────────────────────────────────────
 bool MemReader::ReadBytes(uintptr_t abs_addr, void* buf, size_t len) const {
-    if (!m_pid || !abs_addr || !buf || !len) return false;
-
-    struct iovec local  = { buf,                  len };
-    struct iovec remote = { (void*)abs_addr,      len };
-    ssize_t n = process_vm_readv(m_pid, &local, 1, &remote, 1, 0);
-    return n == (ssize_t)len;
+    return ProcessMemory::Read(m_pid, abs_addr, buf, len);
 }
 
 // ── ResolveChain ─────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 #include "offset_scanner.h"
+#include "ProcessMemory.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -6,7 +7,6 @@
 #include <cstring>
 #include <cmath>
 #include <cstdio>
-#include <sys/uio.h>   // process_vm_readv
 
 static constexpr size_t MAX_REGION_SIZE = 64 * 1024 * 1024; // 64 MB
 
@@ -46,11 +46,7 @@ std::vector<OffsetScanner::MemRegion> OffsetScanner::getReadableRegions() const 
 
 // ── ReadBytes через process_vm_readv ─────────────────────────────────────────
 bool OffsetScanner::readBytes(uintptr_t addr, void* buf, size_t len) const {
-    if (!m_pid || !addr || !buf || !len) return false;
-    struct iovec local  = { buf,          len };
-    struct iovec remote = { (void*)addr,  len };
-    ssize_t n = process_vm_readv(m_pid, &local, 1, &remote, 1, 0);
-    return n == (ssize_t)len;
+    return ProcessMemory::Read(m_pid, addr, buf, len);
 }
 
 // ── Перевірка що float є валідною L2-координатою ─────────────────────────────

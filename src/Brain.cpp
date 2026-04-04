@@ -99,6 +99,9 @@ void Brain::EnterState(State s) {
             m_minimap_flow_stuck = false;
             m_running_to_mob = false;
             m_run_started = TP{};
+            m_geo_path_ready   = false;
+            m_geo_path_idx     = 0;
+            m_pending_path_req = std::nullopt;
             // m_attack_was_unreachable НЕ скидаємо тут — скидається в HandleTargeting()
             // тільки коли мінімапа реально показала мобів (знайшли вихід з кімнати)
             break;
@@ -116,9 +119,6 @@ void Brain::EnterState(State s) {
                 std::chrono::duration<double>(m_cfg.attack_wait + 0.1));
             m_attack_last_target_hp = -1;
             m_attack_hp_stable_since = Now();
-            m_approach_retarget_count = 0;
-            m_approach_last_retarget = Now();
-            m_approach_entry_hp = m_target.has_value() ? m_target->hp : 100;
             break;
 
         case State::Looting:
@@ -379,8 +379,7 @@ void Brain::HandleTargeting() {
         m_dead_cycles_total++;
         // Після 3 fallthrough циклів поспіль: F2 постійно повертає мертвих мобів →
         // одразу переходимо на /target макроси (вони не вибирають мертвих).
-        static constexpr int kDeadCyclesMacroSwitch = 3;
-        if (m_dead_cycles_total >= kDeadCyclesMacroSwitch && !m_cfg.target_macro_keys.empty()) {
+        if (m_dead_cycles_total >= m_cfg.targeting_tuning.dead_cycles_macro_switch && !m_cfg.target_macro_keys.empty()) {
             Log("[TARGETING] Dead-target loop ×" + std::to_string(m_dead_cycles_total) +
                 " → /target макрос", LogLevel::Warning);
             m_macro_attempts++;
@@ -404,9 +403,9 @@ void Brain::HandleTargeting() {
 
     // ── Мінімапа: повернутись до найближчого моба перед F2 ──────────────────
     // Поріг dx=20: потрібно щоб моб був помітно збоку (не плутати з шумом/рамкою)
-    // Ліміт rotate_count=4: якщо після 4 ротацій моб не знайдено → вважаємо точку фейком
-    static constexpr int kMinimapDxThreshold = 20;
-    static constexpr int kMinimapRotateLimit = 4;
+    // Ліміт rotate_count: якщо після N ротацій моб не знайдено → WalkForward fallback
+    const int kMinimapDxThreshold = m_cfg.targeting_tuning.minimap_dx_threshold;
+    const int kMinimapRotateLimit = m_cfg.targeting_tuning.minimap_rotate_limit;
 
     // Якщо є async результат від VisionWorker — використовуємо його,
     // інакше sync DetectMinimap() (fallback)
@@ -486,7 +485,7 @@ void Brain::HandleTargeting() {
     //
     // Unreachable: при m_attack_was_unreachable=true — відкладаємо до attempt 15
     //   (навігація повинна вийти з кімнати перш ніж макроси знову спрацюють).
-    static constexpr int kMacroFallbackAfterUnreach = 15;
+    const int  kMacroFallbackAfterUnreach = m_cfg.targeting_tuning.macro_fallback_unreach;
     const bool macro_at_start = !m_cfg.target_macro_keys.empty()
                                 && !m_attack_was_unreachable
                                 && m_macro_attempts == 1;
@@ -606,7 +605,52 @@ void Brain::HandleTargeting() {
                     m_hands.Send(150);
                     return;
                 }
+                // Запит шляху через GeodataWorker якщо Geodata завантажена і шлях ще не готовий
+                if (!m_geo_path_ready
+                    && !m_pending_path_req.has_value()
+                    && m_geodata && m_geodata->IsLoaded(nearest->x, nearest->y)
+                    && m_mem_player.valid) {
+                    PathRequest req;
+                    req.sx = m_mem_player.x; req.sy = m_mem_player.y; req.sz = m_mem_player.z;
+                    req.ex = nearest->x;     req.ey = nearest->y;     req.ez = nearest->z;
+                    req.maxRange = m_cfg.knownlist_max_range;
+                    req.id = ++m_path_req_id;
+                    m_pending_path_req = req;
+                }
             }
+        }
+    }
+
+    // ── Geodata waypoint following ────────────────────────────────────────────
+    if (m_cfg.navigation.enabled && m_geo_path_ready
+        && m_geo_path_idx < m_geo_path.size()
+        && m_mem_player.valid) {
+
+        auto [wx, wy] = m_geo_path[m_geo_path_idx];
+        float dx_wp = wx - m_mem_player.x;
+        float dy_wp = wy - m_mem_player.y;
+        float dist_wp = std::sqrt(dx_wp * dx_wp + dy_wp * dy_wp);
+
+        if (dist_wp < 300.f) {
+            m_geo_path_idx++;
+            Log("[GEO] Waypoint " + std::to_string(m_geo_path_idx)
+                + "/" + std::to_string(m_geo_path.size())
+                + " досягнуто", LogLevel::Debug);
+        } else {
+            L2Character wp{};
+            wp.x = wx; wp.y = wy; wp.z = m_mem_player.z;
+            wp.hp = 100.f; wp.hpMax = 100.f;
+            if (NavigateToMob(wp)) {
+                Log("[GEO] → waypoint " + std::to_string(m_geo_path_idx)
+                    + " dist=" + std::to_string((int)dist_wp), LogLevel::Debug);
+                m_hands.Send(150);
+                return;
+            }
+        }
+
+        if (m_geo_path_idx >= m_geo_path.size()) {
+            m_geo_path_ready = false;
+            Log("[GEO] Шлях пройдено", LogLevel::Debug);
         }
     }
 
@@ -710,8 +754,9 @@ void Brain::HandleTargeting() {
         Log("[TARGETING] Спроба " + std::to_string(m_macro_attempts) + " — шукаємо...");
     }
 
-    // Попередження при довгому пошуку (кожні 30 спроб після 30-ї)
-    if (m_macro_attempts > 30 && m_macro_attempts % 30 == 0) {
+    // Попередження при довгому пошуку
+    const int kWarnAt = m_cfg.targeting_tuning.long_search_warn_at;
+    if (kWarnAt > 0 && m_macro_attempts > kWarnAt && m_macro_attempts % kWarnAt == 0) {
         std::string dots_info = minimap_dots.empty()
             ? "мінімапа порожня"
             : ("dots=" + std::to_string(minimap_dots.size()) +
@@ -830,59 +875,6 @@ void Brain::HandleAttacking() {
     // Не робимо return — атака продовжується на тому ж тіку; Eyes перевіряє нову ціль наступного тіку.
     // Підхід до моба: re-target тільки якщо моб ще не отримав шкоди (HP >= 90%).
     // Якщо вже б'ємо — добиваємо до кінця, не перемикаємось (інакше в густих зонах
-    // бот крутиться між мобами і ніхто не вмирає).
-    // Ре-таргет тільки якщо HP моба не змінився від початку бою —
-    // тобто удар ще не дійшов (персонаж біжить). Якщо hp вже менший — добиваємо.
-    // Re-target тільки для свіжих мобів (entry_hp >= 90%) і тільки якщо ще не дістали
-    // (поточний hp близько до початкового). Якщо моб вже отримав удари — добиваємо.
-    // Перевірка результату попереднього approach re-target:
-    // якщо новий моб майже мертвий (HP < 15%) — скасовуємо переключення,
-    // ESC і шукаємо кращий таргет. Не рахуємо цей re-target.
-    // 15% (не 30%): на активних спотах моби на 15-29% ще варто атакувати.
-    static constexpr int kMinApproachTargetHP = 15;
-    if (m_approach_retarget_count > 0 &&
-        m_target.has_value() && m_target->hp > 0 && m_target->hp < kMinApproachTargetHP &&
-        SecsSince(m_approach_last_retarget) < 0.5)
-    {
-        Log("[ATTACKING] Підхід: новий таргет hp=" + std::to_string(m_target->hp)
-            + "% < 15% (майже мертвий) → скасовуємо, шукаємо кращий");
-        m_approach_retarget_count--;
-        m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-        m_hands.Send(100);
-        return;
-    }
-
-    // Approach re-target: тільки якщо мінімапа показує інших мобів.
-    // Без цієї перевірки ESC+F2 в порожній зоні = втрата таргету → фейкове вбивство.
-    // Opt: DetectMinimap() (~2-5мс) тільки якщо всі дешеві умови виконані.
-    {
-        const bool approach_possible = (false && m_approach_retarget_count < 3 &&
-            !m_first_attack &&
-            m_approach_entry_hp >= 90 &&
-            m_target.has_value() && m_target->hp >= m_approach_entry_hp - 20 &&
-            SecsSince(m_combat_watchdog_start) < 2.0 &&
-            SecsSince(m_approach_last_retarget) >= 1.0);
-        auto approach_dots = approach_possible ? m_eyes.DetectMinimap()
-                                               : std::vector<Eyes::MinimapDot>{};
-        if (approach_possible &&
-            !approach_dots.empty()) // є куди переключатись
-        {
-            // ESC скидає живу ціль — інакше /nexttarget (F2) може ігноруватись грою
-            m_hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-            m_hands.Delay(100);
-            m_hands.PressKeyboardKey(m_cfg.next_target_key);
-            m_hands.Send(150);
-            m_eyes.ResetTarget(); // примусово перевіряємо нову ціль на наступному тіку
-            m_approach_retarget_count++;
-            m_approach_last_retarget = Now();
-            Log("[ATTACKING] Re-target підхід #" + std::to_string(m_approach_retarget_count)
-                + " (entry_hp=" + std::to_string(m_approach_entry_hp)
-                + "% cur=" + std::to_string(m_target->hp) + "%, map="
-                + std::to_string(approach_dots.size()) + ")");
-            // не return — продовжуємо тік (атака/детекція таргету нижче)
-        }
-    }
-
     // HP-stable detection: якщо HP моба не змінився 5с після першої атаки —
     // моб недосяжний (застряг у текстурі / за стіною / вийшов з радіусу).
     // Залишаємо таргет + просуваємо macro_idx щоб наступний цикл спробував інший макрос.

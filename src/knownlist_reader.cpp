@@ -1,6 +1,6 @@
 #include "knownlist_reader.h"
 #include "offsets_config.h"
-#include <sys/uio.h>   // process_vm_readv
+#include "ProcessMemory.h"
 #include <algorithm>
 #include <iostream>
 #include <cstring>     // memcpy
@@ -15,11 +15,7 @@ KnownListReader::KnownListReader(pid_t pid, const OffsetScanner& offsets)
     : m_pid(pid), m_off(offsets) {}
 
 bool KnownListReader::readBytes(uintptr_t addr, void* buf, size_t len) const {
-    if (!m_pid || !addr || !buf || !len) return false;
-    struct iovec local  = { buf,         len };
-    struct iovec remote = { (void*)addr, len };
-    ssize_t n = process_vm_readv(m_pid, &local, 1, &remote, 1, 0);
-    return n == (ssize_t)len;
+    return ProcessMemory::Read(m_pid, addr, buf, len);
 }
 
 // ── Читання всіх об'єктів KnownList ──────────────────────────────────────────
@@ -238,9 +234,7 @@ namespace {
         if (typeAddr >= chunkAddr && typeAddr + 4 <= chunkAddr + chunkSz) {
             std::memcpy(&v, chunk + (typeAddr - chunkAddr), 4);
         } else {
-            struct iovec loc = { &v, 4 };
-            struct iovec rem = { (void*)typeAddr, 4 };
-            process_vm_readv(pid, &loc, 1, &rem, 1, 0);
+            ProcessMemory::Read(pid, typeAddr, &v, 4);
         }
         return v;
     }

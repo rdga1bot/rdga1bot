@@ -130,10 +130,6 @@ private:
     bool m_first_attack = true;
     TP m_last_attack;
     TP m_combat_watchdog_start;
-    // Підхід до моба: re-target на найближчого поки не атакували
-    int m_approach_retarget_count = 0; // скільки разів перемкнули під час підходу (макс 3)
-    TP  m_approach_last_retarget;      // час останнього re-target під час підходу
-    int m_approach_entry_hp = 100;     // HP моба при вході в ATTACKING (для перевірки чи удар дійшов)
     // Auto-approach: відстеження HP цілі для виявлення out-of-range
     int m_attack_last_target_hp = -1;
     TP m_attack_hp_stable_since;

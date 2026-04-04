@@ -367,6 +367,13 @@ bool Config::Load(const std::string& path) {
     weighted_target.w_freshness= (float)GetDouble("WeightedTargeting", "WeightFreshness", (double)weighted_target.w_freshness);
     weighted_target.max_range  = (float)GetDouble("WeightedTargeting", "MaxRange",        (double)weighted_target.max_range);
 
+    // [TargetingTuning]
+    targeting_tuning.minimap_dx_threshold     = GetInt("TargetingTuning","MinimapDxThreshold",    targeting_tuning.minimap_dx_threshold);
+    targeting_tuning.minimap_rotate_limit     = GetInt("TargetingTuning","MinimapRotateLimit",    targeting_tuning.minimap_rotate_limit);
+    targeting_tuning.dead_cycles_macro_switch = GetInt("TargetingTuning","DeadCyclesMacroSwitch", targeting_tuning.dead_cycles_macro_switch);
+    targeting_tuning.macro_fallback_unreach   = GetInt("TargetingTuning","MacroFallbackUnreach",  targeting_tuning.macro_fallback_unreach);
+    targeting_tuning.long_search_warn_at      = GetInt("TargetingTuning","LongSearchWarnAt",      targeting_tuning.long_search_warn_at);
+
     // [Threading]
     threading.enabled        = GetBool("Threading","Enabled",       threading.enabled);
     threading.cpu_affinity   = GetBool("Threading","CPUAffinity",   threading.cpu_affinity);
@@ -570,6 +577,14 @@ bool Config::Save(const std::string& path) const {
     f << "WeightLowHP    = " << weighted_target.w_low_hp    << "\n";
     f << "WeightFreshness= " << weighted_target.w_freshness << "\n";
     f << "MaxRange       = " << weighted_target.max_range   << "\n";
+    f << "\n";
+    f << "\n[TargetingTuning]\n";
+    f << "# Параметри логіки TARGETING. Дефолти перевірені в підземеллях.\n";
+    f << "MinimapDxThreshold    = " << targeting_tuning.minimap_dx_threshold     << "\n";
+    f << "MinimapRotateLimit    = " << targeting_tuning.minimap_rotate_limit     << "\n";
+    f << "DeadCyclesMacroSwitch = " << targeting_tuning.dead_cycles_macro_switch << "\n";
+    f << "MacroFallbackUnreach  = " << targeting_tuning.macro_fallback_unreach   << "\n";
+    f << "LongSearchWarnAt      = " << targeting_tuning.long_search_warn_at      << "\n";
     f << "\n";
     f << "[Threading]\n";
     f << "# Мультипоточність. Enabled=false → все в одному потоці (як раніше).\n";

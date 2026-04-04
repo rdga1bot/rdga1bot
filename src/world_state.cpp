@@ -1,22 +1,14 @@
 #include "world_state.h"
 #include "offsets_config.h"
+#include "ProcessMemory.h"
 #include <algorithm>
 #include <iostream>
-#include <sys/uio.h>
 
 WorldState::WorldState(pid_t pid, const OffsetScanner& offsets)
     : m_reader(pid, offsets), m_pid(pid), m_off(offsets) {}
 
 WorldState::~WorldState() {
     stopBackground();
-}
-
-// Швидке пряме читання з пам'яті (без KnownListReader)
-static bool fastRead(pid_t pid, uintptr_t addr, void* buf, size_t len) {
-    if (!pid || !addr || !buf) return false;
-    struct iovec loc = { buf, len };
-    struct iovec rem = { (void*)addr, len };
-    return process_vm_readv(pid, &loc, 1, &rem, 1, 0) == (ssize_t)len;
 }
 
 // ── Фоновий потік: сканує кожні kScanIntervalMs мс ───────────────────────────
@@ -140,8 +132,8 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
     if (m_target.has_value() && m_target->memPtr) {
         float hp = 0.f;
         int32_t dead = 0;
-        fastRead(m_pid, m_target->memPtr + m_off.charHpOff,     &hp,   4);
-        fastRead(m_pid, m_target->memPtr + m_off.charIsDeadOff, &dead, 4);
+        ProcessMemory::Read(m_pid,m_target->memPtr + m_off.charHpOff,     &hp,   4);
+        ProcessMemory::Read(m_pid,m_target->memPtr + m_off.charIsDeadOff, &dead, 4);
         m_target->hp     = hp;
         m_target->isDead = (dead != 0);
         if (m_target->isDead || hp <= 0.f) {

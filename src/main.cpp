@@ -1037,6 +1037,16 @@ int main(int argc, char* argv[]) {
         auto last_dashboard_update = std::chrono::steady_clock::now();
         constexpr auto DASHBOARD_INTERVAL = std::chrono::milliseconds(100);
 
+        // ── Змінні стану KnownList та VisionWorker (переживають restart) ──
+        uint64_t vision_frame_id = 0;
+        std::atomic<bool>      kl_scan_running{false};
+        std::atomic<uintptr_t> kl_scan_result{0};
+        int  kl_scan_attempts = 0;
+        auto kl_last_attempt  =
+            std::chrono::steady_clock::now() - std::chrono::seconds(10);
+        auto kl_validity_check =
+            std::chrono::steady_clock::now() - std::chrono::seconds(35);
+
         // ─── Головний цикл з автовідновленням ──────────────────────────
         while (restart_attempts < MAX_RESTART) {
             try {
@@ -1153,7 +1163,6 @@ int main(int argc, char* argv[]) {
             eyes.Open(image.value());
 
             // ── VisionWorker: відправляємо кадр async (якщо увімкнено) ──────────
-            static uint64_t vision_frame_id = 0;
             if (cfg.threading.enabled && cfg.threading.vision_thread
                 && vision_worker.IsRunning()) {
                 vision_worker.SubmitFrame(image.value(), ++vision_frame_id, eyes);
@@ -1169,8 +1178,6 @@ int main(int argc, char* argv[]) {
             if (cfg.knownlist_enabled && kl_scanner && brain.HasPlayerBase()) {
                 // Fix 2: перевірка валідності PlayerBase кожні 30с
                 // (якщо L2 перезапустився або гравець respawn з новою адресою)
-                static auto kl_validity_check =
-                    std::chrono::steady_clock::now() - std::chrono::seconds(35);
                 auto kl_now_v = std::chrono::steady_clock::now();
                 if (kl_now_v - kl_validity_check >= std::chrono::seconds(30)) {
                     kl_validity_check = kl_now_v;
@@ -1185,12 +1192,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
             } else if (cfg.knownlist_enabled && kl_scanner && !brain.HasPlayerBase()) {
-                static std::atomic<bool>     kl_scan_running{false};
-                static std::atomic<uintptr_t> kl_scan_result{0};
-                static int kl_scan_attempts = 0;
-                static auto kl_last_attempt =
-                    std::chrono::steady_clock::now() - std::chrono::seconds(10);
-
                 // Перевіряємо чи фоновий scan завершився
                 if (kl_scan_result.load() != 0) {
                     uintptr_t base = kl_scan_result.exchange(0);
