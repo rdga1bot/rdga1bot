@@ -14,14 +14,18 @@ struct GameState;
 struct ObjectiveResult {
     enum class Type { Running, Done, Failed, Switch };
 
-    Type        type   = Type::Running;
+    Type        type    = Type::Running;
     std::string next;    // для Switch: ім'я наступного Objective
     std::string reason;  // для логу
+    std::string context; // для Switch: опціональний контекст (напр. "unreachable")
 
-    static ObjectiveResult running()                         { return {Type::Running, "", ""}; }
-    static ObjectiveResult done(const std::string& r = "")   { return {Type::Done,    "", r}; }
-    static ObjectiveResult failed(const std::string& r = "") { return {Type::Failed,  "", r}; }
-    static ObjectiveResult switchTo(const std::string& name) { return {Type::Switch, name, ""}; }
+    static ObjectiveResult running()                          { return {Type::Running, "", "", ""}; }
+    static ObjectiveResult done(const std::string& r = "")    { return {Type::Done,    "", r,  ""}; }
+    static ObjectiveResult failed(const std::string& r = "")  { return {Type::Failed,  "", r,  ""}; }
+    static ObjectiveResult switchTo(const std::string& name,
+                                    const std::string& ctx = "") {
+        return {Type::Switch, name, "", ctx};
+    }
 };
 
 // ── Objective ─────────────────────────────────────────────────────────────────
@@ -46,10 +50,16 @@ public:
     virtual ObjectiveResult execute(GameState& gs) = 0;
 
     // Callbacks при активації/деактивації (скидання внутрішнього стану)
-    virtual void onEnter(GameState& gs) { (void)gs; }
+    // context — опціональний рядок з контекстом переходу (напр. "unreachable")
+    virtual void onEnter(GameState& gs, const std::string& context = "") {
+        (void)gs; (void)context;
+    }
     virtual void onExit (GameState& gs) { (void)gs; }
 
-    void activate  (GameState& gs) { m_active = true;  onEnter(gs); }
+    void activate  (GameState& gs, const std::string& context = "") {
+        m_active = true;
+        onEnter(gs, context);
+    }
     void deactivate(GameState& gs) { m_active = false;  onExit(gs); }
 
     // ── Virtual getters — для читання стану через ObjectiveManager ────────────
@@ -70,10 +80,6 @@ public:
         return std::nullopt;
     }
 
-    // ── Attack state virtual setters ──────────────────────────────────────────
-    // Реалізується в TargetObjective. AttackObjective сигналізує через callback.
-    virtual void setAttackWasUnreachable(bool /*v*/) {}
-    virtual void advanceMacroIdx(int /*total*/) {}
 
 protected:
     std::string m_name;

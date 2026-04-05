@@ -49,7 +49,7 @@ public:
         return gs.is_dead;
     }
 
-    void onEnter(GameState& gs) override {
+    void onEnter(GameState& gs, const std::string& /*context*/ = "") override {
         m_phase = 0;
         // RecordDeath і NotifyDeath виконуються в Brain::Process() на переході
         gs.log("[DEAD] Фаза 0: Enter (відродження)\n");
@@ -107,7 +107,7 @@ public:
         return gs.secs_since_last_kill >= 2.0;
     }
 
-    void onEnter(GameState& gs) override {
+    void onEnter(GameState& gs, const std::string& /*context*/ = "") override {
         m_stage          = 0;
         m_open_retries   = 0;
         m_tab_fallback   = false;
@@ -356,7 +356,7 @@ public:
         return false;
     }
 
-    void onEnter(GameState& gs) override {
+    void onEnter(GameState& gs, const std::string& /*context*/ = "") override {
         m_issued = false;
         gs.eyes.ResetTarget(); // скидаємо кеш бару — наступний моб детектується заново
         gs.stats.RecordKill();
@@ -405,7 +405,7 @@ public:
         return !gs.is_dead && gs.has_target;
     }
 
-    void onEnter(GameState& gs) override {
+    void onEnter(GameState& gs, const std::string& /*context*/ = "") override {
         m_first_attack         = true;
         m_attack_idx           = 0;
         m_no_target_count      = 0;
@@ -510,26 +510,24 @@ public:
                 m_attack_last_hp = gs.target->hp;
                 m_hp_stable_since = Now();
             } else if (SecsSince(m_hp_stable_since) > 5.0) {
-                gs.log("[ATTACKING] HP стабільний 5с (моб недосяжний) → TARGETING + інший макрос");
-                // Сигналізуємо TargetObjective через callback (без raw pointers)
-                if (gs.on_mob_unreachable) gs.on_mob_unreachable();
+                gs.log("[ATTACKING] HP стабільний 5с (моб недосяжний) → TARGETING");
                 // Blacklist: моб з мін HP% (той що атакується)
-                if (gs.blacklist_mob) {
+                if (gs.blacklist_mob && !gs.kl_mobs.empty()) {
+                    int   bid  = 0;
+                    float best = 101.f;
                     for (const auto& mob : gs.kl_mobs) {
                         if (!mob.isDead && mob.hp > 0.f && mob.hpMax > 0.f) {
                             float pct = mob.hpPercent();
-                            float best = 101.f;
-                            int   bid  = 0;
                             if (pct < best) { best = pct; bid = mob.objectID; }
-                            if (bid != 0) gs.blacklist_mob(bid, 60.f);
-                            break;
                         }
                     }
+                    if (bid != 0) gs.blacklist_mob(bid, 60.f);
                 }
-                const_cast<GameState&>(gs).target = std::nullopt;
                 gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
                 gs.hands.Send(200);
-                return ObjectiveResult::switchTo("Target");
+                // "unreachable" context → TargetObjective::onEnter() встановить
+                // m_attack_was_unreachable=true і просуне macro_idx
+                return ObjectiveResult::switchTo("Target", "unreachable");
             }
         }
 
@@ -602,15 +600,8 @@ public:
         return req;
     }
 
-    void setAttackWasUnreachable(bool v) override { m_attack_was_unreachable = v; }
-    void advanceMacroIdx(int total) override {
-        if (total > 0) m_macro_idx = (m_macro_idx + 1) % total;
-    }
-
-    void onEnter(GameState& gs) override {
-        (void)gs;
+    void onEnter(GameState& gs, const std::string& context = "") override {
         m_macro_attempts       = 0;
-        // m_macro_idx НЕ скидаємо — зберігається між циклами
         m_step_count           = 0;
         m_minimap_rotate_count = 0;
         m_far_rejects          = 0;
@@ -628,7 +619,19 @@ public:
         m_geo_path_idx         = 0;
         m_pending_path_req     = std::nullopt;
         m_not_ready_count      = 0;
-        // m_attack_was_unreachable НЕ скидаємо — зберігається між Enter/Exit
+        // m_macro_idx НЕ скидаємо — зберігається між циклами
+
+        // Context від попереднього Objective:
+        // "unreachable" → моб недосяжний, даємо більше часу навігації
+        if (context == "unreachable") {
+            m_attack_was_unreachable = true;
+            if (!gs.cfg.target_macro_keys.empty())
+                m_macro_idx = (m_macro_idx + 1) %
+                              (int)gs.cfg.target_macro_keys.size();
+        }
+        // Звичайний перехід: m_attack_was_unreachable зберігається між Enter/Exit
+        // (скидається коли мінімапа показала мобів всередині execute())
+
         // Ініціалізація RandomDelay
         if (gs.cfg.delays.enabled) {
             m_rd_rotate = std::make_unique<RandomDelay>(
@@ -1104,7 +1107,7 @@ public:
         return (low_hp || low_mp) && !gs.has_target;
     }
 
-    void onEnter(GameState& gs) override {
+    void onEnter(GameState& gs, const std::string& /*context*/ = "") override {
         m_rest_start = Now();
         gs.log("[REST] HP=" + std::to_string(gs.hp) +
                "% MP=" + std::to_string(gs.mp) +

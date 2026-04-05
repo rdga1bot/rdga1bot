@@ -65,9 +65,6 @@ struct GameState {
     bool in_grace    = false;
     bool hands_ready = false;
 
-    // ── Callbacks для cross-Objective сигналізації ────────────────────────────
-    std::function<void()> on_mob_unreachable; // AttackObjective → TargetObjective
-
     // ── RandomDelay (owned by Brain, exposed as raw ptrs) ────────────────────
     RandomDelay* rd_attack = nullptr;
     RandomDelay* rd_rotate = nullptr;

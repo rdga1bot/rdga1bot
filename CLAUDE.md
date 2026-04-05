@@ -920,7 +920,19 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 4. **GameState**: `secs_since_last_kill` (read-only snapshot), `on_mob_unreachable` callback. ✓
 5. Build: 0 errors. Запуск: `[OBJ] Enter: Buff` з першого тіку. ✓
 
-### Пріоритет 1: Тест фарму MR12–MR14
+### ✅ MR15: Видалення on_mob_unreachable callback (2026-04-05) — РЕАЛІЗОВАНО
+- `ObjectiveResult::switchTo()` розширено полем `context` (рядок).
+- `Objective::onEnter()` тепер приймає `context` — TargetObjective читає
+  `"unreachable"` і самостійно встановлює `m_attack_was_unreachable=true`
+  та просуває `macro_idx`. ✓
+- `ObjectiveManager::switchTo()` передає `context` в `activate()`. Лог: `Enter: Target [unreachable]`. ✓
+- `on_mob_unreachable` видалено з GameState. ✓
+- `notifyMobUnreachable()` видалено з ObjectiveManager. ✓
+- `setAttackWasUnreachable/advanceMacroIdx` видалено з Objective і TargetObjective. ✓
+- GameState більше не містить coupling між Objectives. ✓
+- Build: 0 errors. Запуск: нормальний. ✓
+
+### Пріоритет 1: Тест фарму MR12–MR15
 `./farm.sh` 30+ хв. В логах мають бути `[OBJ] Enter/Exit` переходи.
 Поведінка ідентична попередньому FSM: знаходить моба, атакує, лутає, бафає.
 

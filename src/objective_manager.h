@@ -50,9 +50,6 @@ public:
     TP   getRespawnUntil()  const;
     bool isInGrace()        const;
 
-    // ── Attack state notification (delegates to TargetObjective) ─────────────
-    void notifyMobUnreachable(int macro_count);
-
 private:
     std::vector<std::unique_ptr<Objective>> m_objectives;
     Objective*                              m_current = nullptr;
@@ -66,5 +63,6 @@ private:
     }
 
     Objective* findNext  (GameState& gs);
-    void       switchTo  (Objective* next, GameState& gs);
+    void       switchTo  (Objective* next, GameState& gs,
+                          const std::string& context = "");
 };

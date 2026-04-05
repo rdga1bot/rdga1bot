@@ -237,11 +237,6 @@ void Brain::updateGameState(GameState& gs) {
     gs.hands_ready = m_hands.IsReady();
     // is_dead буде встановлено в Process() після updateGameState
 
-    // Callback: AttackObjective сигналізує TargetObjective про недосяжного моба
-    gs.on_mob_unreachable = [this]() {
-        m_obj_manager.notifyMobUnreachable((int)m_cfg.target_macro_keys.size());
-    };
-
     // RandomDelay (Brain-owned)
     gs.rd_attack = m_rd_attack.get();
     gs.rd_rotate = m_rd_rotate.get();

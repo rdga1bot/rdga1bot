@@ -27,15 +27,18 @@ Objective* ObjectiveManager::findNext(GameState& gs) {
     return nullptr;
 }
 
-void ObjectiveManager::switchTo(Objective* next, GameState& gs) {
+void ObjectiveManager::switchTo(Objective* next, GameState& gs,
+                                const std::string& context) {
     if (m_current) {
         log("Exit: " + m_current->name());
         m_current->deactivate(gs);
     }
     m_current = next;
     if (m_current) {
-        log("Enter: " + m_current->name());
-        m_current->activate(gs);
+        std::string log_msg = "Enter: " + m_current->name();
+        if (!context.empty()) log_msg += " [" + context + "]";
+        log(log_msg);
+        m_current->activate(gs, context);
     }
 }
 
@@ -80,7 +83,7 @@ std::string ObjectiveManager::tick(GameState& gs) {
             Objective* target = findByName(result.next);
             if (target && target->canRun(gs)) {
                 log(m_current->name() + " Switch→" + result.next);
-                switchTo(target, gs);
+                switchTo(target, gs, result.context);
             } else {
                 log(m_current->name() + " Switch→" + result.next +
                     " FAIL, шукаємо наступний");
@@ -141,11 +144,3 @@ bool ObjectiveManager::isInGrace() const {
     return false;
 }
 
-// ── Attack state notification ─────────────────────────────────────────────────
-
-void ObjectiveManager::notifyMobUnreachable(int macro_count) {
-    for (auto& obj : m_objectives) {
-        obj->setAttackWasUnreachable(true);
-        obj->advanceMacroIdx(macro_count);
-    }
-}
