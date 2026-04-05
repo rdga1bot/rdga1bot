@@ -415,6 +415,7 @@ bool Config::Load(const std::string& path) {
     targeting_tuning.minimap_rotate_limit     = GetInt("TargetingTuning","MinimapRotateLimit",    targeting_tuning.minimap_rotate_limit);
     targeting_tuning.dead_cycles_macro_switch = GetInt("TargetingTuning","DeadCyclesMacroSwitch", targeting_tuning.dead_cycles_macro_switch);
     targeting_tuning.macro_fallback_unreach   = GetInt("TargetingTuning","MacroFallbackUnreach",  targeting_tuning.macro_fallback_unreach);
+    targeting_tuning.macro_fallback_after     = GetInt("TargetingTuning","MacroFallbackAfter",    targeting_tuning.macro_fallback_after);
     targeting_tuning.long_search_warn_at      = GetInt("TargetingTuning","LongSearchWarnAt",      targeting_tuning.long_search_warn_at);
 
     // [Threading]
@@ -665,6 +666,7 @@ bool Config::Save(const std::string& path) const {
     f << "MinimapRotateLimit    = " << targeting_tuning.minimap_rotate_limit     << "\n";
     f << "DeadCyclesMacroSwitch = " << targeting_tuning.dead_cycles_macro_switch << "\n";
     f << "MacroFallbackUnreach  = " << targeting_tuning.macro_fallback_unreach   << "\n";
+    f << "MacroFallbackAfter    = " << targeting_tuning.macro_fallback_after     << "\n";
     f << "LongSearchWarnAt      = " << targeting_tuning.long_search_warn_at      << "\n";
     f << "\n";
     f << "[Threading]\n";

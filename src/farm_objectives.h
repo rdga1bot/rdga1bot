@@ -105,8 +105,9 @@ public:
         if (gs.has_target) return false;  // не бафаємось під час бою
         if (!gs.buff_needed()) return false;
         if (!gs.cfg.buff_use_altb && gs.cfg.buff_keys.empty()) return false;
-        // Cooldown: >= 2с після останнього вбивства
-        return gs.secs_since_last_kill >= 2.0;
+        // Cooldown: >= 15с після останнього вбивства (L2 combat state ~10-15с після атаки)
+        // ALT+B не відкриває вікно ком'юніті поки персонаж у бойовому стані
+        return gs.secs_since_last_kill >= 15.0;
     }
 
     void onEnter(GameState& gs, const std::string& /*context*/ = "") override {
@@ -811,16 +812,15 @@ public:
             gs.log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable flag");
         }
 
-        // /target макроси (F7-F11)
+        // /target макроси (F7-F11): тільки після N невдалих F2 (не на першій спробі!)
         const int  kMacroFallbackAfterUnreach = gs.cfg.targeting_tuning.macro_fallback_unreach;
-        const bool macro_at_start = !gs.cfg.target_macro_keys.empty()
-                                    && !m_attack_was_unreachable
-                                    && m_macro_attempts == 1;
+        const int  kMacroFallbackAfter = gs.cfg.targeting_tuning.macro_fallback_after > 0
+                                         ? gs.cfg.targeting_tuning.macro_fallback_after : 10;
         const bool macro_fallback = !gs.cfg.target_macro_keys.empty()
                                     && m_macro_attempts > (m_attack_was_unreachable
-                                        ? kMacroFallbackAfterUnreach : 2)
+                                        ? kMacroFallbackAfterUnreach : kMacroFallbackAfter)
                                     && m_macro_attempts % 2 == 0;
-        if (macro_at_start || macro_fallback) {
+        if (macro_fallback) {
             gs.hands.Delay(80);
             gs.hands.TargetMacro(m_macro_idx);
             m_macro_idx = (m_macro_idx + 1) % (int)gs.cfg.target_macro_keys.size();

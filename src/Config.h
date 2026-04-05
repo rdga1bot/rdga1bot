@@ -236,6 +236,7 @@ public:
         int minimap_rotate_limit     = 4;  // скільки ротацій → WalkForward fallback
         int dead_cycles_macro_switch = 3;  // ESC-fallthrough цикли → перейти на /target макрос
         int macro_fallback_unreach   = 15; // спроб до першого макросу після HP-stable
+        int macro_fallback_after     = 10; // спроб F2 → перший /target макрос (0 = вимкнено)
         int long_search_warn_at      = 30; // спроб → WARNING лог (і далі кожні 30)
     } targeting_tuning;
 
