@@ -206,141 +206,248 @@ bool Geodata::IsWallBetween(float x1, float y1, float /*z1*/,
     return IsWallBetween2D(x1, y1, x2, y2);
 }
 
-// ─── FindPath (A*) ────────────────────────────────────────────────────────────
-// Використовує блокову сітку. Крок = GEO_BLOCK_SIZE (256 юнітів).
-// Для ближнього руху (< 5000 юнітів) достатньо.
-// Повертає вектор waypoints у world-координатах.
+// ── Спільна утиліта: спрощення collinear точок ───────────────────────────────
+static std::vector<std::pair<float,float>> SimplifyPath(
+        std::vector<std::pair<float,float>> path)
+{
+    if (path.size() <= 2) return path;
+    std::vector<std::pair<float,float>> out;
+    out.push_back(path[0]);
+    for (size_t i = 1; i + 1 < path.size(); i++) {
+        auto [ax, ay] = out.back();
+        auto [bx2, by2] = path[i];
+        auto [cx2, cy2] = path[i+1];
+        float cross = (bx2-ax)*(cy2-ay) - (by2-ay)*(cx2-ax);
+        if (std::fabsf(cross) > 0.01f) out.push_back(path[i]);
+    }
+    out.push_back(path.back());
+    return out;
+}
 
+// ─── FindPath — dispatcher ────────────────────────────────────────────────────
 std::vector<std::pair<float,float>>
 Geodata::FindPath(float sx, float sy, float /*sz*/,
                   float ex, float ey, float /*ez*/,
                   float maxRange) const
 {
-    auto t_start = std::chrono::steady_clock::now();
-
     int sbx = WorldToBlock(sx), sby = WorldToBlock(sy);
     int ebx = WorldToBlock(ex), eby = WorldToBlock(ey);
+    if (sbx == ebx && sby == eby) return {};
 
-    if (sbx == ebx && sby == eby) return {}; // вже в блоці цілі
-
-    // Перевірка maxRange
     float world_dist = std::sqrt((ex-sx)*(ex-sx) + (ey-sy)*(ey-sy));
     if (world_dist > maxRange) return {};
 
-    // Ключ для hash map: упакуємо bx, by у int64
+    auto raw = m_use_jps
+        ? FindPathJPS(sbx, sby, ebx, eby)
+        : FindPathAStar(sbx, sby, ebx, eby);
+
+    return SimplifyPath(std::move(raw));
+}
+
+// ─── FindPathAStar ────────────────────────────────────────────────────────────
+std::vector<std::pair<float,float>>
+Geodata::FindPathAStar(int sbx, int sby, int ebx, int eby) const
+{
+    auto t_start = std::chrono::steady_clock::now();
+
     auto NodeKey = [](int bx, int by) -> int64_t {
         return ((int64_t)(bx + 4096) << 16) | (int64_t)(by + 4096);
     };
-
-    // Манхеттенська евристика (блоки)
     auto Heuristic = [&](int bx, int by) -> float {
         return (float)(std::abs(bx - ebx) + std::abs(by - eby));
     };
 
-    // g-costs та parent map
     std::unordered_map<int64_t, float>   g_cost;
     std::unordered_map<int64_t, int64_t> parent;
-
-    // Priority queue: (f, bx, by)
     using QNode = std::tuple<float, int, int>;
     std::priority_queue<QNode, std::vector<QNode>, std::greater<QNode>> open;
 
     int64_t start_key = NodeKey(sbx, sby);
     g_cost[start_key] = 0.f;
     open.push({Heuristic(sbx, sby), sbx, sby});
-    parent[start_key] = -1; // sentinel
+    parent[start_key] = -1;
 
-    // Напрямки: N, S, W, E → (dbx, dby, dir_bit)
     struct Dir { int dbx, dby; uint16_t bit; };
     static const Dir dirs[4] = {
-        { 0, +1, GEO_N }, // North: Y+
-        { 0, -1, GEO_S }, // South: Y-
-        {-1,  0, GEO_W }, // West:  X-
-        {+1,  0, GEO_E }, // East:  X+
+        { 0, +1, GEO_N }, { 0, -1, GEO_S },
+        {-1,  0, GEO_W }, {+1,  0, GEO_E },
     };
 
     int nodes_explored = 0;
     bool found = false;
 
     while (!open.empty() && nodes_explored < GEO_MAX_NODES) {
-        // Таймаут
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t_start).count();
         if (elapsed > GEO_PATH_TIMEOUT_MS) break;
 
-        auto [f, cx, cy] = open.top();
-        open.pop();
+        auto [f, cx, cy] = open.top(); open.pop();
         nodes_explored++;
-
         int64_t cur_key = NodeKey(cx, cy);
-
         if (cx == ebx && cy == eby) { found = true; break; }
 
         float cur_g = g_cost.count(cur_key) ? g_cost[cur_key] : 1e9f;
-
         for (const auto& d : dirs) {
-            int nx = cx + d.dbx;
-            int ny = cy + d.dby;
-
-            // Перевіряємо NSWE: виходимо з поточного та входимо в сусідній
+            int nx = cx + d.dbx, ny = cy + d.dby;
             if (!CanExit(cx, cy, d.bit)) continue;
-            // Якщо регіон сусіда завантажений — перевіряємо вхід
             {
                 int rx = BlockToRegion(nx), ry = BlockToRegion(ny);
-                if (m_regions.count(MakeKey(rx, ry))) {
-                    if (!CanEnter(nx, ny, d.bit)) continue;
-                }
-                // Якщо регіон не завантажений — пропускаємо без перевірки (assume passable)
+                if (m_regions.count(MakeKey(rx, ry)) && !CanEnter(nx, ny, d.bit)) continue;
             }
-
-            float new_g = cur_g + 1.f; // вартість 1 блок
+            float new_g = cur_g + 1.f;
             int64_t nkey = NodeKey(nx, ny);
-
             if (!g_cost.count(nkey) || new_g < g_cost[nkey]) {
                 g_cost[nkey] = new_g;
                 parent[nkey] = cur_key;
-                float h = Heuristic(nx, ny);
-                open.push({new_g + h, nx, ny});
+                open.push({new_g + Heuristic(nx, ny), nx, ny});
             }
         }
     }
 
     if (!found) return {};
 
-    // Реконструкція шляху від цілі до старту
     std::vector<std::pair<float,float>> path;
     int64_t cur = NodeKey(ebx, eby);
     int64_t sentinel = -1;
-
     while (cur != sentinel && parent.count(cur)) {
-        // Декодуємо ключ назад у bx, by
         int by = (int)(cur & 0xFFFF) - 4096;
         int bx = (int)((cur >> 16) & 0xFFFF) - 4096;
         path.push_back({ BlockToWorld(bx), BlockToWorld(by) });
         int64_t prev = parent[cur];
-        if (prev == cur) break; // захист від петлі
+        if (prev == cur) break;
         cur = prev;
     }
-
-    // Видаляємо стартовий блок (він у кінці після reverse)
     std::reverse(path.begin(), path.end());
-    if (!path.empty()) path.erase(path.begin()); // не повертаємо стартову точку
+    if (!path.empty()) path.erase(path.begin());
+    return path;
+}
 
-    // Опціонально: спрощення шляху (видалення надлишкових collinear точок)
-    if (path.size() > 2) {
-        std::vector<std::pair<float,float>> simplified;
-        simplified.push_back(path[0]);
-        for (size_t i = 1; i + 1 < path.size(); i++) {
-            auto [ax, ay] = simplified.back();
-            auto [bx2, by2] = path[i];
-            auto [cx2, cy2] = path[i+1];
-            // Видаляємо точку якщо вона collinear з попередньою і наступною
-            float cross = (bx2 - ax) * (cy2 - ay) - (by2 - ay) * (cx2 - ax);
-            if (std::fabsf(cross) > 0.01f) simplified.push_back(path[i]);
+// ─── JumpJPS ─────────────────────────────────────────────────────────────────
+std::pair<int,int> Geodata::JumpJPS(int bx, int by,
+                                     int dx, int dy,
+                                     int ebx, int eby) const
+{
+    // Визначаємо NSWE bit для напряму
+    uint16_t dir_bit;
+    if      (dx > 0) dir_bit = GEO_E;
+    else if (dx < 0) dir_bit = GEO_W;
+    else if (dy > 0) dir_bit = GEO_N;
+    else             dir_bit = GEO_S;
+
+    static constexpr int MAX_JUMP = 128;
+    int cx = bx, cy = by;
+
+    for (int step = 0; step < MAX_JUMP; step++) {
+        if (!CanExit(cx, cy, dir_bit)) return {-1, -1};
+        int nx = cx + dx, ny = cy + dy;
+
+        if (nx == ebx && ny == eby) return {nx, ny};
+
+        // Forced neighbor detection для 4-connected:
+        // Obstacle в перпендикулярному напрямку з cx,cy але не з nx,ny → jump point
+        if (dx != 0) {
+            if ((!CanExit(cx, cy, GEO_N) && CanExit(nx, ny, GEO_N)) ||
+                (!CanExit(cx, cy, GEO_S) && CanExit(nx, ny, GEO_S)))
+                return {nx, ny};
+        } else {
+            if ((!CanExit(cx, cy, GEO_E) && CanExit(nx, ny, GEO_E)) ||
+                (!CanExit(cx, cy, GEO_W) && CanExit(nx, ny, GEO_W)))
+                return {nx, ny};
         }
-        simplified.push_back(path.back());
-        path = std::move(simplified);
+        cx = nx; cy = ny;
+    }
+    return {-1, -1};
+}
+
+// ─── FindPathJPS ──────────────────────────────────────────────────────────────
+std::vector<std::pair<float,float>>
+Geodata::FindPathJPS(int sbx, int sby, int ebx, int eby) const
+{
+    auto t_start = std::chrono::steady_clock::now();
+
+    auto Key = [](int bx, int by) -> int64_t {
+        return ((int64_t)(bx + 4096) << 16) | (int64_t)(by + 4096);
+    };
+    auto H = [&](int bx, int by) -> float {
+        return (float)(std::abs(bx - ebx) + std::abs(by - eby));
+    };
+
+    struct NodeInfo { float g = 1e9f; int pbx = -1, pby = -1; bool closed = false; };
+    std::unordered_map<int64_t, NodeInfo> nodes;
+    nodes.reserve(256);
+
+    using QNode = std::tuple<float, int, int, int, int>; // f, bx, by, dx, dy
+    std::priority_queue<QNode, std::vector<QNode>, std::greater<QNode>> open;
+
+    nodes[Key(sbx, sby)].g    = 0.f;
+    nodes[Key(sbx, sby)].pbx  = sbx;
+    nodes[Key(sbx, sby)].pby  = sby;
+
+    // Старт: всі 4 напрямки
+    const int dirs[4][2] = {{0,1},{0,-1},{-1,0},{1,0}};
+    for (auto& d : dirs)
+        open.push({H(sbx, sby), sbx, sby, d[0], d[1]});
+
+    bool found = false;
+    int explored = 0;
+
+    while (!open.empty() && explored < GEO_MAX_NODES) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t_start).count();
+        if (elapsed > GEO_PATH_TIMEOUT_MS) break;
+
+        auto [f, cx, cy, dx, dy] = open.top(); open.pop();
+        int64_t cur_key = Key(cx, cy);
+        auto& cur_node = nodes[cur_key];
+        if (cur_node.closed) continue;
+        cur_node.closed = true;
+        explored++;
+
+        if (cx == ebx && cy == eby) { found = true; break; }
+
+        float cur_g = cur_node.g;
+
+        // Знаходимо jump point у поточному напрямку
+        auto [jx, jy] = JumpJPS(cx, cy, dx, dy, ebx, eby);
+        if (jx >= 0) {
+            float jg = cur_g + std::sqrt((float)((jx-cx)*(jx-cx)+(jy-cy)*(jy-cy)));
+            int64_t jkey = Key(jx, jy);
+            auto& jn = nodes[jkey];
+            if (jg < jn.g) {
+                jn.g = jg; jn.pbx = cx; jn.pby = cy;
+                open.push({jg + H(jx, jy), jx, jy, dx, dy});
+            }
+
+            // Перпендикулярні напрямки від jump point
+            for (auto& nd : dirs) {
+                if ((nd[0] == dx && nd[1] == dy) || (nd[0] == -dx && nd[1] == -dy)) continue;
+                auto [nx2, ny2] = JumpJPS(jx, jy, nd[0], nd[1], ebx, eby);
+                if (nx2 < 0) continue;
+                float ng = jg + std::sqrt((float)((nx2-jx)*(nx2-jx)+(ny2-jy)*(ny2-jy)));
+                int64_t nkey = Key(nx2, ny2);
+                auto& nn = nodes[nkey];
+                if (ng < nn.g) {
+                    nn.g = ng; nn.pbx = jx; nn.pby = jy;
+                    open.push({ng + H(nx2, ny2), nx2, ny2, nd[0], nd[1]});
+                }
+            }
+        }
     }
 
+    if (!found) return {};
+
+    // Реконструкція шляху
+    std::vector<std::pair<float,float>> path;
+    int cx = ebx, cy = eby;
+    for (int safety = 0; safety < GEO_MAX_NODES; safety++) {
+        path.push_back({BlockToWorld(cx), BlockToWorld(cy)});
+        int64_t key = Key(cx, cy);
+        if (!nodes.count(key)) break;
+        int px = nodes[key].pbx, py = nodes[key].pby;
+        if (px == cx && py == cy) break;
+        cx = px; cy = py;
+    }
+    std::reverse(path.begin(), path.end());
+    if (!path.empty()) path.erase(path.begin());
     return path;
 }

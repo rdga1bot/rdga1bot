@@ -134,7 +134,7 @@ private:
     // (перевіряємо протилежний bit в destination)
     bool CanEnter(int gbx, int gby, uint16_t from_dir) const;
 
-    // ── A* ───────────────────────────────────────────────────────────────────
+    // ── A* (fallback) ────────────────────────────────────────────────────────
 
     struct ANode {
         int bx, by;
@@ -143,6 +143,19 @@ private:
         int parent_bx, parent_by;
         bool operator>(const ANode& o) const { return f() > o.f(); }
     };
+
+    std::vector<std::pair<float,float>> FindPathAStar(
+        int sbx, int sby, int ebx, int eby) const;
+
+    // ── JPS (Jump Point Search) ───────────────────────────────────────────────
+
+    std::vector<std::pair<float,float>> FindPathJPS(
+        int sbx, int sby, int ebx, int eby) const;
+
+    // JPS: рекурсивний пошук jump point у напрямку (dx,dy) від (bx,by)
+    // Повертає {jx, jy} якщо знайдено, або {-1,-1}
+    std::pair<int,int> JumpJPS(int bx, int by, int dx, int dy,
+                                int ebx, int eby) const;
 
     // Зворотній напрямок (для CanEnter)
     static uint16_t Opposite(uint16_t dir);

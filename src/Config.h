@@ -202,6 +202,15 @@ public:
         float max_range   = 1200.f;
     } weighted_target;
 
+    // [Fuzzy] — нечітке порівняння назв мобів (Levenshtein)
+    struct FuzzyConfig {
+        bool   enabled   = false; // false = точне порівняння або ігнорування назв
+        double threshold = 0.85;  // поріг подібності (0.0..1.0)
+    } fuzzy;
+
+    // [Targeting] MobNames — дозволені назви мобів (порожньо = всі)
+    std::vector<std::string> mob_names;
+
     struct TargetingTuning {
         int minimap_dx_threshold     = 20; // |dx| > N → RotateLeft/Right
         int minimap_rotate_limit     = 4;  // скільки ротацій → WalkForward fallback
@@ -240,5 +249,6 @@ private:
     bool   GetBool  (const std::string& section, const std::string& key, bool def)   const;
     cv::Scalar GetScalar(const std::string& section, const std::string& key, const cv::Scalar& def) const;
     std::vector<Input::KeyboardKey> GetKeys(const std::string& section, const std::string& key) const;
+    std::vector<std::string> GetStringList(const std::string& section, const std::string& key) const;
     std::string KeyName(Input::KeyboardKey k) const;
 };

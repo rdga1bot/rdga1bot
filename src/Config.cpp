@@ -111,6 +111,20 @@ std::vector<Input::KeyboardKey> Config::GetKeys(const std::string& section, cons
     return result;
 }
 
+std::vector<std::string> Config::GetStringList(const std::string& section,
+                                                const std::string& key) const {
+    std::string v = Get(section, key);
+    std::vector<std::string> result;
+    if (v.empty()) return result;
+    std::istringstream ss(v);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        token = Trim(token);
+        if (!token.empty()) result.push_back(token);
+    }
+    return result;
+}
+
 bool Config::Load(const std::string& path) {
     std::ifstream f(path);
     if (!f.is_open()) {
@@ -133,6 +147,7 @@ bool Config::Load(const std::string& path) {
     if (!mk.empty()) target_macro_keys = mk;
     nearby_y_threshold = GetInt("Targeting", "NearbyYThreshold", nearby_y_threshold);
     max_far_rejects    = GetInt("Targeting", "MaxFarRejects",    max_far_rejects);
+    { auto v = GetStringList("Targeting", "MobNames"); if (!v.empty()) mob_names = v; }
 
     // [Attack]
     auto ak = GetKeys("Attack", "AttackKeys");
@@ -376,6 +391,10 @@ bool Config::Load(const std::string& path) {
     weighted_target.w_freshness= (float)GetDouble("WeightedTargeting", "WeightFreshness", (double)weighted_target.w_freshness);
     weighted_target.max_range  = (float)GetDouble("WeightedTargeting", "MaxRange",        (double)weighted_target.max_range);
 
+    // [Fuzzy]
+    fuzzy.enabled   = GetBool  ("Fuzzy", "Enabled",   fuzzy.enabled);
+    fuzzy.threshold = GetDouble("Fuzzy", "Threshold",  fuzzy.threshold);
+
     // [TargetingTuning]
     targeting_tuning.minimap_dx_threshold     = GetInt("TargetingTuning","MinimapDxThreshold",    targeting_tuning.minimap_dx_threshold);
     targeting_tuning.minimap_rotate_limit     = GetInt("TargetingTuning","MinimapRotateLimit",    targeting_tuning.minimap_rotate_limit);
@@ -591,6 +610,12 @@ bool Config::Save(const std::string& path) const {
     f << "[Rest]\n";
     f << "# Пауза при низькому MP. 0 = вимкнено.\n";
     f << "MPThreshold = " << mp_threshold << "\n";
+    f << "\n";
+    f << "[Fuzzy]\n";
+    f << "# Нечітке порівняння назв мобів (Levenshtein). false = вимкнено.\n";
+    f << "# Threshold: 1.0 = точна відповідність, 0.85 = 15% різниці дозволено.\n";
+    f << "Enabled   = " << (fuzzy.enabled ? "true" : "false") << "\n";
+    f << "Threshold = " << fuzzy.threshold << "\n";
     f << "\n";
     f << "[WeightedTargeting]\n";
     f << "Enabled        = " << (weighted_target.enabled ? "true" : "false") << "\n";

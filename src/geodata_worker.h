@@ -7,6 +7,8 @@
 #include <vector>
 #include <utility>
 #include <cstdint>
+#include <unordered_map>
+#include <chrono>
 
 // ── GeodataWorker ─────────────────────────────────────────────────────────────
 // Виконує A* FindPath() у окремому потоці щоб не блокувати Brain (50мс+).
@@ -67,4 +69,19 @@ private:
     std::optional<PathResult>   m_result;
     std::atomic<int>            m_last_time_ms{0};
     int                         m_core_id = -1;
+
+    // Path cache
+    struct CachedPath {
+        std::vector<std::pair<float,float>> path;
+        std::chrono::steady_clock::time_point ts;
+    };
+    std::unordered_map<uint64_t, CachedPath> m_cache;
+    static constexpr int CACHE_TTL_MS = 500;
+    static constexpr int CACHE_MAX    = 32;
+
+    static uint64_t PathHash(float sx, float sy, float ex, float ey) {
+        // Точність до 256 L2u (1 блок)
+        auto q = [](float v){ return (uint64_t)((int)(v / 256.0f) + 1280); };
+        return q(sx) | (q(sy) << 12) | (q(ex) << 24) | (q(ey) << 36);
+    }
 };

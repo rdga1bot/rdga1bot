@@ -942,7 +942,14 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - `farm_objectives.h` AttackObjective: двохрежимний UseForTargetHP; HP-stable через `m_mem_hp_abs`. ✓
 - `objective_manager.cpp`: Switch case не перевіряє `canRun()` → LootObjective тепер досягається → kills рахуються. ✓
 
-### Пріоритет 1: Тест фарму
+### ✅ MR17: Оптимізація (2026-04-05) — РЕАЛІЗОВАНО
+1. `Utils.h/cpp`: `LevenshteinDistance()`, `StringSimilarity()`, `FuzzyMatch()`. `Config::FuzzyConfig` + `[Fuzzy]` секція .ini. `SelectWeightedTarget()` фільтрує мобів по назві якщо `fuzzy.enabled=true` і `mob_names` задані. `GetStringList()` helper в Config. ✓
+2. Minimap throttle: `m_minimap_cache` + `m_minimap_last_update` в Brain. `DetectMinimap()` викликається max 10 FPS (100мс). ✓
+3. JPS+ в Geodata: `FindPathJPS()` + `JumpJPS()`. `FindPath()` диспетчить на JPS або A* залежно від `m_use_jps`. Спільна `SimplifyPath()`. ✓
+4. GeodataWorker path cache: `PathHash()` від координат (точність 256 L2u), TTL 500мс, max 32 записи. ✓
+5. WorldState scan throttle: `SCAN_EVERY_N=3` → повний регіон-скан раз на ~3с, між сканами — попередній snapshot. ✓
+
+### Пріоритет 1: Тест фарму MR16+MR17
 `./farm.sh` 30+ хв. В логах мають бути `[OBJ] Enter/Exit` переходи, `[LOOTING] Вбивство #N`.
 Kills > 0 в stats — підтверджує що MR16 Switch fix працює.
 

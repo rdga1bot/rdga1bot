@@ -75,10 +75,31 @@ void GeodataWorker::WorkerLoop() {
         auto t0 = std::chrono::steady_clock::now();
 
         PathResult res;
-        res.id   = req.id;
-        res.path = m_geo->FindPath(req.sx, req.sy, req.sz,
-                                   req.ex, req.ey, req.ez,
-                                   req.maxRange);
+        res.id = req.id;
+
+        // Перевіряємо path cache
+        uint64_t ph = PathHash(req.sx, req.sy, req.ex, req.ey);
+        auto now_c = std::chrono::steady_clock::now();
+        auto cache_it = m_cache.find(ph);
+        bool cache_hit = false;
+
+        if (cache_it != m_cache.end()) {
+            int age_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
+                now_c - cache_it->second.ts).count();
+            if (age_ms < CACHE_TTL_MS) {
+                res.path  = cache_it->second.path;
+                cache_hit = true;
+            }
+        }
+
+        if (!cache_hit) {
+            res.path = m_geo->FindPath(req.sx, req.sy, req.sz,
+                                       req.ex, req.ey, req.ez,
+                                       req.maxRange);
+            if (m_cache.size() >= (size_t)CACHE_MAX) m_cache.clear();
+            m_cache[ph] = { res.path, now_c };
+        }
+
         res.success  = !res.path.empty();
         float dx = req.ex - req.sx, dy = req.ey - req.sy;
         res.distance = std::sqrt(dx*dx + dy*dy);

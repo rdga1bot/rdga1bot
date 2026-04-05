@@ -2,6 +2,8 @@
 
 #include <map>
 #include <chrono>
+#include <vector>
+#include <algorithm>
 
 std::optional<cv::Mat> BitmapToImage(const Capture::Bitmap &bitmap)
 {
@@ -74,6 +76,38 @@ cv::Scalar VectorToScalar(const std::vector<int> &vector, const cv::Scalar &defa
 
     return default_val;
 }
+
+// ── Fuzzy string matching ─────────────────────────────────────────────────────
+
+int LevenshteinDistance(const std::string& a, const std::string& b) {
+    const int m = (int)a.size();
+    const int n = (int)b.size();
+    if (m == 0) return n;
+    if (n == 0) return m;
+    std::vector<int> row(n + 1);
+    for (int j = 0; j <= n; j++) row[j] = j;
+    for (int i = 1; i <= m; i++) {
+        int prev = row[0];
+        row[0] = i;
+        for (int j = 1; j <= n; j++) {
+            int temp = row[j];
+            row[j] = (a[i-1] == b[j-1])
+                ? prev
+                : 1 + std::min({prev, row[j], row[j-1]});
+            prev = temp;
+        }
+    }
+    return row[n];
+}
+
+double StringSimilarity(const std::string& a, const std::string& b) {
+    if (a.empty() && b.empty()) return 1.0;
+    int maxLen = (int)std::max(a.size(), b.size());
+    if (maxLen == 0) return 1.0;
+    return 1.0 - (double)LevenshteinDistance(a, b) / maxLen;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 std::map<std::string, std::chrono::time_point<std::chrono::steady_clock>> m_locks;
 

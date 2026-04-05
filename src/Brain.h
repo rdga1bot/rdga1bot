@@ -124,6 +124,11 @@ private:
     std::optional<std::vector<Eyes::MinimapDot>> m_async_minimap;
     bool m_has_async_vision = false;
 
+    // Minimap throttle: кешований результат, оновлюється max 10 FPS
+    std::vector<Eyes::MinimapDot> m_minimap_cache;
+    TP                            m_minimap_last_update{};
+    static constexpr int          MINIMAP_UPDATE_MS = 100;
+
     // RandomDelay генератори (ініціалізуються з Config.delays; живуть у Brain для ReloadConfig)
     std::unique_ptr<RandomDelay> m_rd_attack;
     std::unique_ptr<RandomDelay> m_rd_rotate;

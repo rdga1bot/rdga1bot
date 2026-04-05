@@ -1,4 +1,5 @@
 #include "Brain.h"
+#include "Utils.h"
 #include <iostream>
 #include <ctime>
 #include <cmath>
@@ -216,10 +217,20 @@ void Brain::updateGameState(GameState& gs) {
     gs.has_target = HasTarget();
     gs.target_hp  = m_target.has_value() ? m_target->hp : 0;
 
-    if (m_has_async_vision && m_async_minimap.has_value())
-        gs.minimap_dots = *m_async_minimap;
-    else
-        gs.minimap_dots = m_eyes.DetectMinimap();
+    // Minimap throttle: оновлюємо не частіше ніж MINIMAP_UPDATE_MS (10 FPS)
+    {
+        auto minimap_now = Clock::now();
+        auto minimap_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            minimap_now - m_minimap_last_update).count();
+        if (minimap_elapsed_ms >= MINIMAP_UPDATE_MS) {
+            if (m_has_async_vision && m_async_minimap.has_value())
+                m_minimap_cache = *m_async_minimap;
+            else
+                m_minimap_cache = m_eyes.DetectMinimap();
+            m_minimap_last_update = minimap_now;
+        }
+    }
+    gs.minimap_dots = m_minimap_cache;
 
     if (m_world) {
         gs.kl_mobs        = m_world->mobs();
@@ -422,6 +433,14 @@ std::optional<L2Character> Brain::SelectWeightedTarget(
     for (const auto& mob : mobs) {
         if (mob.isDead || mob.hp <= 0.f) continue;
         if (IsBlacklisted(mob.objectID)) continue;
+
+        // Fuzzy matching по назві якщо увімкнено і є список дозволених
+        if (m_cfg.fuzzy.enabled && !m_cfg.mob_names.empty() && !mob.name.empty()) {
+            bool name_ok = false;
+            for (const auto& allowed : m_cfg.mob_names)
+                if (FuzzyMatch(mob.name, allowed, m_cfg.fuzzy.threshold)) { name_ok = true; break; }
+            if (!name_ok) continue;
+        }
 
         float dist = mob.distanceTo(playerX, playerY);
         if (dist > maxRange) continue;

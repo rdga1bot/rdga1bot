@@ -13,6 +13,9 @@ WorldState::~WorldState() {
 
 // ── Фоновий потік: сканує кожні kScanIntervalMs мс ───────────────────────────
 void WorldState::bgLoop() {
+    int scan_skip = 0;
+    static constexpr int SCAN_EVERY_N = 3; // повний скан раз на 3 ітерації (~3с)
+
     while (!m_bg_stop.load(std::memory_order_relaxed)) {
         uintptr_t pb;
         float mob_r, item_r;
@@ -24,14 +27,24 @@ void WorldState::bgLoop() {
         }
 
         if (pb) {
-            auto mobs  = m_reader.readMobsRegionScan(pb, mob_r);
-            // Fallback: якщо region scan порожній → спробувати без type filter
-            // (objTypeOff може бути не відкаліброваним для цього клієнту)
-            if (mobs.empty()) {
-                mobs = m_reader.readAllAsChars(pb);
+            std::vector<L2Character> mobs;
+            std::vector<L2Object>    items;
+            bool all_mobs_empty = false;
+
+            if (++scan_skip >= SCAN_EVERY_N) {
+                scan_skip = 0;
+                mobs = m_reader.readMobsRegionScan(pb, mob_r);
+                if (mobs.empty()) {
+                    mobs = m_reader.readAllAsChars(pb);
+                }
+                all_mobs_empty = mobs.empty();
+                items = m_reader.readItemsRegionScan(pb, item_r);
+            } else {
+                // Між повними сканами: використовуємо попередній snapshot
+                std::lock_guard<std::mutex> lk(m_mutex);
+                mobs  = m_mobs;
+                items = m_items;
             }
-            const bool all_mobs_empty = mobs.empty(); // захоплюємо до std::move
-            auto items = m_reader.readItemsRegionScan(pb, item_r);
 
             int alive = 0;
             for (const auto& mob : mobs)
