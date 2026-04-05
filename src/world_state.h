@@ -86,6 +86,11 @@ public:
     // Координати гравця (заповнюються якщо playerBase відомий)
     float playerX = 0.f, playerY = 0.f, playerZ = 0.f;
 
+    // Прочитати XYZ гравця з PlayerBase (OFF_PLAYER_X/Y/Z = 0x24/28/2C).
+    // Викликати коли MemReader вимкнений але PlayerBase відомий.
+    // Оновлює playerX/Y/Z. Повертає true якщо координати валідні.
+    bool refreshPlayerXYZ();
+
 private:
     KnownListReader          m_reader;
     pid_t                    m_pid;
