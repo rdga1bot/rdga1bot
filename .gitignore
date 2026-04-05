@@ -38,3 +38,11 @@ venv/
 # Misc
 compile_commands.json
 tmp/
+
+# Recast/Detour (клонується локально через build.sh / CLAUDE.md)
+src/recast/
+tools/build_navmesh
+
+# NavMesh artifacts
+*.pts
+*.bin
