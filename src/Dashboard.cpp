@@ -172,7 +172,7 @@ void Dashboard::Update(const Brain& brain, double fps) {
 
 // ─── DrawHeader ────────────────────────────────────────────────────────────
 
-void Dashboard::DrawHeader(Brain::State state, double fps, bool paused) {
+void Dashboard::DrawHeader(const std::string& state, double fps, bool paused) {
     if (!m_win_header) return;
     werase(m_win_header);
 
@@ -190,10 +190,10 @@ void Dashboard::DrawHeader(Brain::State state, double fps, bool paused) {
 
     // Права частина: FPS + стан
     int state_color = StateColor(state);
-    const char* state_name = Brain::StateName(state);
+    const char* state_emoji = StateEmoji(state);
 
     char right[64];
-    snprintf(right, sizeof(right), "FPS:%-3d  %s ", (int)fps, state_name);
+    snprintf(right, sizeof(right), "FPS:%-3d  %s ", (int)fps, state_emoji);
     int rx = m_cols - (int)strlen(right);
     if (rx > 0) {
         wattron(m_win_header, COLOR_PAIR(state_color) | A_BOLD);
@@ -351,12 +351,11 @@ void Dashboard::DrawLog() {
     for (int i = start; i < (int)m_log.size() && row < rows; i++, row++) {
         const std::string& line = m_log[i];
 
-        // Виявляємо рядки переходу стану (містять "──────")
-        bool is_separator = (line.find("->") != std::string::npos &&
-                             (line.find("[STATE]") != std::string::npos ||
-                              line.find("ATTACKING") != std::string::npos ||
-                              line.find("LOOTING") != std::string::npos ||
-                              line.find("TARGETING") != std::string::npos));
+        // Виявляємо рядки переходу стану (OBJ Enter/Exit або STATE переходи)
+        bool is_separator = (line.find("[OBJ]") != std::string::npos &&
+                             (line.find("Enter:") != std::string::npos ||
+                              line.find("Exit:") != std::string::npos ||
+                              line.find("Preempt:") != std::string::npos));
 
         if (is_separator) {
             wattron(m_win_log, COLOR_PAIR(COLOR_LOG_SEP) | A_BOLD);
@@ -413,26 +412,22 @@ int Dashboard::HandleInput() {
 
 // ─── StateColor / StateEmoji ───────────────────────────────────────────────
 
-int Dashboard::StateColor(Brain::State s) {
-    switch (s) {
-        case Brain::State::Targeting: return COLOR_TARGET;
-        case Brain::State::Attacking: return COLOR_ATTACK;
-        case Brain::State::Looting:   return COLOR_LOOT;
-        case Brain::State::Dead:      return COLOR_DEAD;
-        case Brain::State::Buffing:   return COLOR_BUFF;
-        default:                      return COLOR_IDLE;
-    }
+int Dashboard::StateColor(const std::string& s) {
+    if (s == "Target") return COLOR_TARGET;
+    if (s == "Attack") return COLOR_ATTACK;
+    if (s == "Loot")   return COLOR_LOOT;
+    if (s == "Dead")   return COLOR_DEAD;
+    if (s == "Buff")   return COLOR_BUFF;
+    return COLOR_IDLE;
 }
 
-const char* Dashboard::StateEmoji(Brain::State s) {
-    switch (s) {
-        case Brain::State::Targeting: return "[SEARCH]";
-        case Brain::State::Attacking: return "[ATTACK]";
-        case Brain::State::Looting:   return "[LOOT]  ";
-        case Brain::State::Dead:      return "[DEAD]  ";
-        case Brain::State::Buffing:   return "[BUFF]  ";
-        default:                      return "[IDLE]  ";
-    }
+const char* Dashboard::StateEmoji(const std::string& s) {
+    if (s == "Target") return "[SEARCH]";
+    if (s == "Attack") return "[ATTACK]";
+    if (s == "Loot")   return "[LOOT]  ";
+    if (s == "Dead")   return "[DEAD]  ";
+    if (s == "Buff")   return "[BUFF]  ";
+    return "[IDLE]  ";
 }
 
 // ─── EditTextField (мінімальний inline редактор) ───────────────────────────

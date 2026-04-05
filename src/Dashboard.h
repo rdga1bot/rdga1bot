@@ -79,7 +79,7 @@ private:
 
     // ─── Малювання ───────────────────────────────────────────────
     void RecreateWindows();
-    void DrawHeader(Brain::State state, double fps, bool paused);
+    void DrawHeader(const std::string& state, double fps, bool paused);
     void DrawStatus(const Brain& brain, const Eyes::Me& me, const Eyes::Target& tgt, const Stats& stats);
     void DrawLog();
     void DrawFooter();
@@ -89,8 +89,8 @@ private:
                  int percent, int color_pair, const char* label);
 
     // Колір для стану
-    static int StateColor(Brain::State s);
-    static const char* StateEmoji(Brain::State s);
+    static int StateColor(const std::string& s);
+    static const char* StateEmoji(const std::string& s);
 
     // ─── Панель налаштувань ───────────────────────────────────────
     void DrawSettingsOverlay(WINDOW* win, const Config& cfg, int sel, int edit_mode);

@@ -48,6 +48,16 @@ std::string ObjectiveManager::tick(GameState& gs) {
         if (!m_current) return "None";
     }
 
+    // Preemption: вищий пріоритет може перервати нижчий (до поточного в списку)
+    for (auto& obj : m_objectives) {
+        if (obj.get() == m_current) break;  // зупиняємось на поточному рівні
+        if (obj->canRun(gs)) {
+            log("Preempt: " + m_current->name() + " → " + obj->name());
+            switchTo(obj.get(), gs);
+            break;
+        }
+    }
+
     ObjectiveResult result = m_current->execute(gs);
 
     switch (result.type) {

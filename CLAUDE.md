@@ -886,8 +886,36 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - Brain: `m_obj_manager`, `updateGameState()`, `GetCurrentObjective()`. `tick()` після FSM диспетчу — noop поки порожній. ✓
 - Існуючий FSM Handle* незмінний. ✓
 
-### Пріоритет 1: MR12 — Перенос Handle* → Objective підкласи
-`farm_objectives.h`: TargetObjective, AttackObjective, LootObjective, BuffObjective, DeadObjective. Реєстрація в Brain конструкторі. Видалення Handle* після верифікації.
+### ✅ MR12: Перенос Handle* → Objective підкласи (2026-04-05) — РЕАЛІЗОВАНО
+- `farm_objectives.h`: DeadObjective, BuffObjective, TargetObjective, AttackObjective, LootObjective — вся логіка Handle* перенесена без змін логіки. ✓
+- Preemption в ObjectiveManager::tick() — вищий пріоритет (Dead/Buff) перериває нижчий без явних перевірок в Process(). ✓
+- GameState розширено: shared Brain state pointers (`last_kill_time`, `last_buff`, `respawn_until`), TargetObjective pointers (`attack_was_unreachable`, `macro_idx`), callbacks (`navigate_to_mob`, `is_blacklisted`, `blacklist_mob`, `select_target`, `find_nearest_mob`), RandomDelay raw ptrs, Geodata ptr. ✓
+- Brain::Process() спрощений: сприйняття + потіони + heartbeat + death detection + ObjectiveManager::tick(). Handle* і EnterState() видалені. ✓
+- Brain::State enum видалено. GetState() повертає рядок через m_obj_manager.currentName(). ✓
+- Dashboard/main.cpp адаптовані: StateColor/StateEmoji/DrawHeader беруть std::string. ✓
+- Тест запуску: `[OBJ] Enter: Buff` з першого тіку (buff needed at startup). ✓
 
-### Пріоритет 2: Тест фарму після MR11
-`./farm.sh` 30+ хв. `[OBJ]` рядки не повинні з'являтись (manager порожній).
+### ✅ MR13: Нові Objectives — Rest і Zone (2026-04-05) — РЕАЛІЗОВАНО
+- **RestObjective**: пауза при HP < hp_threshold або MP < mp_threshold.
+  Активується між Kill і Target (`!gs.has_target`). Timeout 30с → повертається до Target. ✓
+- **ZoneObjective**: повернення в зону фарму якщо персонаж вийшов за radius.
+  Потребує `coords_valid` (MemReader XYZ). `use_heading=false` → WalkForward. ✓
+- **Config**: `zone_enabled`, `zone_x/y/radius` (новий `[Zone]` розділ). ✓
+  `mp_threshold` синхронізовано: `[Potions] MP_Threshold` або `[Rest] MPThreshold`. ✓
+- **Brain constructor**: Rest (якщо `mp_threshold>0`), Zone (якщо `zone_enabled`) — після Dead, перед Buff. ✓
+- Build: 0 errors, 0 warnings. ✓
+
+### Пріоритет 1: Тест фарму MR12+MR13
+`./farm.sh` 30+ хв. В логах мають бути `[OBJ] Enter/Exit` переходи.
+Поведінка ідентична попередньому FSM: знаходить моба, атакує, лутає, бафає.
+
+### Пріоритет 2: Тест RestObjective
+Встановити `MPThreshold=80` (штучно) і запустити фарм.
+В логах має з'являтись `[REST] HP=X% MP=Y%` при витраті MP.
+
+### Пріоритет 3: ZoneObjective після heading калібровки
+Потребує `[MemReader] Enabled=true` + PosX/PosY offsets.
+`[Zone] Enabled=true, CenterX/Y = координати спауну, Radius=800`.
+
+### Пріоритет 4: Майбутні Objectives
+TradeObjective, QuestObjective, CraftObjective.

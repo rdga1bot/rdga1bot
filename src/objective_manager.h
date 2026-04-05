@@ -35,6 +35,9 @@ public:
         return m_current ? m_current->name() : "None";
     }
 
+    // Пошук за іменем (публічно — для proxy методів Brain)
+    Objective* findByName(const std::string& name);
+
 private:
     std::vector<std::unique_ptr<Objective>> m_objectives;
     Objective*                              m_current = nullptr;
@@ -44,7 +47,6 @@ private:
         if (m_log_fn) m_log_fn("[OBJ] " + msg);
     }
 
-    Objective* findByName(const std::string& name);
     Objective* findNext  (GameState& gs);
     void       switchTo  (Objective* next, GameState& gs);
 };

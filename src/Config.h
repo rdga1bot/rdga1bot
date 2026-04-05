@@ -182,6 +182,12 @@ public:
         float potion_mean_ms  = 50.f,   potion_std_ms  = 15.f;  // потіони
     } delays;
 
+    // [Zone] — обмеження зони фарму (потребує MemReader з XYZ offsets)
+    bool  zone_enabled = false;  // false = без обмежень зони
+    float zone_x       = 0.f;   // центр зони X (L2 координати)
+    float zone_y       = 0.f;   // центр зони Y
+    float zone_radius  = 1000.f; // радіус зони в L2 units
+
     // [Geodata] — геодата L2J формату для навігації
     bool        geodata_enabled  = false;
     std::string geodata_path     = "./geodata/";

@@ -1124,7 +1124,7 @@ int main(int argc, char* argv[]) {
                 if (cmd == 'r') { eyes.Reset(); std::cout << "Bars reset.\n"; }
                 if (cmd == 's') {
                     auto& st = brain.GetStats();
-                    std::cout << "State: " << Brain::StateName(brain.GetState())
+                    std::cout << "State: " << brain.GetState()
                               << " | Kills: " << st.kills
                               << " | Deaths: " << st.deaths
                               << " | Uptime: " << st.UptimeStr() << "\n";
@@ -1285,7 +1285,7 @@ int main(int argc, char* argv[]) {
                 const auto& tgt = brain.Target().value_or(tgt_def);
 
                 std::string overlay =
-                    std::string("State: ") + Brain::StateName(brain.GetState()) +
+                    std::string("State: ") + brain.GetState() +
                     "  HP:" + std::to_string(me.hp) +
                     "%  MP:" + std::to_string(me.mp) +
                     "%  Target:" + std::to_string(tgt.hp) +

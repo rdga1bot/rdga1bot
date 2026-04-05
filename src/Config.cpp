@@ -253,6 +253,15 @@ bool Config::Load(const std::string& path) {
         }
     }
 
+    // [Zone]
+    zone_enabled = GetBool  ("Zone", "Enabled", zone_enabled);
+    zone_x       = (float)GetDouble("Zone", "CenterX", zone_x);
+    zone_y       = (float)GetDouble("Zone", "CenterY", zone_y);
+    zone_radius  = (float)GetDouble("Zone", "Radius",  zone_radius);
+
+    // [Rest] — mp_threshold (ще один ключ, той самий що і [Potions])
+    mp_threshold = GetInt("Rest", "MPThreshold", mp_threshold);
+
     // [Vision]
     use_robust_bar = GetBool("Vision", "UseRobustBarDetection", use_robust_bar);
     windows_info_path = Get("Vision", "WindowsInfoPath", windows_info_path);
@@ -570,6 +579,18 @@ bool Config::Save(const std::string& path) const {
     f << "WalkStdMs    = " << delays.walk_std_ms     << "\n";
     f << "PotionMeanMs = " << delays.potion_mean_ms  << "\n";
     f << "PotionStdMs  = " << delays.potion_std_ms   << "\n";
+    f << "\n";
+    f << "[Zone]\n";
+    f << "# Обмеження зони фарму. Enabled=false = без обмежень.\n";
+    f << "# Потрібен [MemReader] Enabled=true + відкалібровані XYZ offsets.\n";
+    f << "Enabled = " << (zone_enabled ? "true" : "false") << "\n";
+    f << "CenterX = " << zone_x      << "\n";
+    f << "CenterY = " << zone_y      << "\n";
+    f << "Radius  = " << zone_radius  << "\n";
+    f << "\n";
+    f << "[Rest]\n";
+    f << "# Пауза при низькому MP. 0 = вимкнено.\n";
+    f << "MPThreshold = " << mp_threshold << "\n";
     f << "\n";
     f << "[WeightedTargeting]\n";
     f << "Enabled        = " << (weighted_target.enabled ? "true" : "false") << "\n";
