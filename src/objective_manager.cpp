@@ -80,13 +80,15 @@ std::string ObjectiveManager::tick(GameState& gs) {
             break;
 
         case ObjectiveResult::Type::Switch: {
+            // Switch — явний перехід: canRun() не перевіряємо
+            // (LootObjective::canRun()=false але викликається тільки через Switch)
             Objective* target = findByName(result.next);
-            if (target && target->canRun(gs)) {
+            if (target) {
                 log(m_current->name() + " Switch→" + result.next);
                 switchTo(target, gs, result.context);
             } else {
                 log(m_current->name() + " Switch→" + result.next +
-                    " FAIL, шукаємо наступний");
+                    " FAIL (не знайдено), шукаємо наступний");
                 switchTo(findNext(gs), gs);
             }
             break;

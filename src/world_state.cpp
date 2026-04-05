@@ -35,7 +35,7 @@ void WorldState::bgLoop() {
 
             int alive = 0;
             for (const auto& mob : mobs)
-                if (!mob.isDead && mob.hp > 0.f) alive++;
+                if (mob.isAlive()) alive++;
 
             {
                 std::lock_guard<std::mutex> lk(m_mutex);

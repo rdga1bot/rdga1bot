@@ -37,9 +37,17 @@ struct L2Character : L2Object {
     float mpMax  = 0.f;   // максимальний MP
 
     float hpPercent() const {
-        return hpMax > 0.f ? (hp / hpMax * 100.f) : 0.f;
+        if (hpMax > 0.f) return hp / hpMax * 100.f;
+        // ElmoreLab Kamael: MaxHP не зберігається в KnownList.
+        // Sentinel -1.0 = "HP відомий абсолютно, але % невідомий".
+        // Використовуй isAlive() замість hpPercent() > 0.
+        return -1.f;
     }
     float mpPercent() const {
         return mpMax > 0.f ? (mp / mpMax * 100.f) : 0.f;
     }
+    // Чи живий моб — не залежить від hpMax
+    bool isAlive() const { return !isDead && hp > 0.f; }
+    // Абсолютне HP (для порівняння між тіками)
+    float hpAbs() const { return hp; }
 };

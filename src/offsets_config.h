@@ -20,11 +20,10 @@ constexpr uintptr_t OFF_OBJ_X        = 0x90;   // float  — world X (підтв
 constexpr uintptr_t OFF_OBJ_Y        = 0x94;   // float  — world Y
 constexpr uintptr_t OFF_OBJ_Z        = 0x98;   // float  — world Z
 
-// L2Character extra offsets — ще не відкалібровано для цього клієнту
-// Потребують Cheat Engine або dump живого моба (TODO)
-constexpr uintptr_t OFF_CHAR_HP      = 0x1F4;  // float  — HP (HF default, може бути неправильно)
-constexpr uintptr_t OFF_CHAR_HP_MAX  = 0x1F8;  // float  — MaxHP
-constexpr uintptr_t OFF_CHAR_IS_DEAD = 0x210;  // int32  — 1=мертвий
+// L2Character extra offsets (відкалібровано ElmoreLab Kamael 2026-04-02)
+constexpr uintptr_t OFF_CHAR_HP      = 0x100;  // float  — HP (підтверджено: 87.22→0.00 після kill)
+constexpr uintptr_t OFF_CHAR_HP_MAX  = 0x000;  // N/A    — ElmoreLab не зберігає MaxHP в KnownList
+constexpr uintptr_t OFF_CHAR_IS_DEAD = 0x180;  // int32  — 1=мертвий (підтверджено: 0→1 після kill)
 
 // L2Character extended offsets (потребують калібровки через --calibrate)
 // MP гравця/моба — типові HF значення, перевір через HP scan в --calibrate

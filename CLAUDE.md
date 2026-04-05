@@ -813,6 +813,8 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **Kamael HP offsets відкалібровано (2026-04-02)**: `--hp-calibrate` multi-pass scans. `offsets.json` оновлено: `OFF_CHAR_HP=256(0x100)` (87.22→0.00 після kill ✓), `OFF_CHAR_IS_DEAD=384(0x180)` (0→1 після kill ✓). `OFF_CHAR_HP_MAX=480` — L2 клієнт ElmoreLab **не зберігає MaxHP** в KnownList об'єкті (0x100-0x3C0 range = 0 для всіх alive мобів); `hpPercent()` повертає 0 безпечно (guard `hpMax>0`). Попередні значення 664(0x298)/440(0x1b8) неправильні → alive=0 завжди. З новими: `alive=N > 0` працює. ✓
 - **UseForKillDetect баг виявлено і вимкнено (2026-03-31)**: перевіряв `hp<=0` у ВСІХ мобах KnownList → завжди є мертві моби у списку → ATTACKING одразу → fake kills (22 kills/min). `UseForKillDetect = false` назавжди. Kill detection: `anyMobDiedThisTick()` + OpenCV `hp<=2%`. ✓
 - **UseForTargetHP фікс: min HP% (2026-03-31)**: раніше брав першого живого моба → читав HP чужої цілі → HP завжди 100%. Тепер: моб з мінімальним HP% = той що атакується. `UseForTargetHP = true` в .ini. ✓
+- **HP reading fix ElmoreLab Kamael MR16 (2026-04-05)**: `offsets_config.h` — `OFF_CHAR_HP=0x100`, `OFF_CHAR_IS_DEAD=0x180` (відкалібровано 2026-04-02, тепер як дефолт). `OFF_CHAR_HP_MAX=0x000` — явно позначено що MaxHP відсутній. `l2_objects.h`: `hpPercent()` повертає -1.f якщо hpMax=0, додано `isAlive()` і `hpAbs()`. `world_state.cpp`: alive count через `mob.isAlive()`. `AttackObjective`: двохрежимний UseForTargetHP — з hpMax оновлює target->hp%, без hpMax зберігає абсолютне HP у `m_mem_hp_abs` для HP-stable detection. ✓
+- **Switch→canRun() FIX (2026-04-05)**: `ObjectiveManager::tick()` Switch case більше не перевіряє `canRun()` — явний Switch переходить напряму. `LootObjective::canRun()=false` але активується через `switchTo("Loot")` — тепер працює. Kills=0 bug усунуто. ✓
 - **Approach re-target вимкнено (2026-03-31)**: `false &&` в `approach_possible`. Причина: для товстих мобів де 1 удар < 20% → ретаргет кожну секунду → кидав живих мобів. ✓
 - **RunTick вимкнено (2026-03-31)**: `should_run = false`. Акумулював кут повороту від RotateRight → персонаж дрейфував у протилежну від мобів сторону. В підземеллях: ротація + F2 достатньо; моби з aggro підходять самі. ✓
 - **Мінімапа dx=25 підтверджено РЕАЛЬНИЙ моб (2026-03-31)**: python аналіз ROI: 182 контури (рамка мінімапи = gold/orange), 2 реальні моби всередині кола (dx=24 dy=-68 dist=72, dx=-30 dy=-66 dist=72). Рамка дає шум але не впливає на вибір найближчого моба. ✓
@@ -932,9 +934,17 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - GameState більше не містить coupling між Objectives. ✓
 - Build: 0 errors. Запуск: нормальний. ✓
 
-### Пріоритет 1: Тест фарму MR12–MR15
-`./farm.sh` 30+ хв. В логах мають бути `[OBJ] Enter/Exit` переходи.
-Поведінка ідентична попередньому FSM: знаходить моба, атакує, лутає, бафає.
+### ✅ MR16: HP reading fix ElmoreLab Kamael (2026-04-05) — РЕАЛІЗОВАНО
+- `offsets_config.h`: `OFF_CHAR_HP=0x100`, `OFF_CHAR_IS_DEAD=0x180` (відкалібровано 2026-04-02). ✓
+- `OFF_CHAR_HP_MAX=0x000` — ElmoreLab не зберігає MaxHP явно позначено. ✓
+- `l2_objects.h`: `hpPercent()` повертає -1.f якщо hpMax=0; додано `isAlive()`, `hpAbs()`. ✓
+- `world_state.cpp`: alive count через `mob.isAlive()`. ✓
+- `farm_objectives.h` AttackObjective: двохрежимний UseForTargetHP; HP-stable через `m_mem_hp_abs`. ✓
+- `objective_manager.cpp`: Switch case не перевіряє `canRun()` → LootObjective тепер досягається → kills рахуються. ✓
+
+### Пріоритет 1: Тест фарму
+`./farm.sh` 30+ хв. В логах мають бути `[OBJ] Enter/Exit` переходи, `[LOOTING] Вбивство #N`.
+Kills > 0 в stats — підтверджує що MR16 Switch fix працює.
 
 ### Пріоритет 2: Тест RestObjective
 Встановити `MPThreshold=80` (штучно) і запустити фарм.

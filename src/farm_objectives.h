@@ -417,6 +417,7 @@ public:
             std::chrono::duration<double>(gs.cfg.attack_wait + 0.1));
         m_last_redetect        = Now();
         m_mem_target_hp_valid  = false;
+        m_mem_hp_abs           = -1.f;
         // Ініціалізація RandomDelay
         if (gs.cfg.delays.enabled) {
             m_rd_attack = std::make_unique<RandomDelay>(
@@ -447,19 +448,33 @@ public:
                 return ObjectiveResult::switchTo("Loot");
             }
 
-            // HP моба з пам'яті (якщо увімкнено) — моб з мінімальним HP% (той що атакується)
+            // HP моба з пам'яті (якщо увімкнено) — моб з мінімальним HP (той що атакується)
             if (gs.cfg.mem_use_for_target_hp && gs.target.has_value()) {
-                float min_pct = 101.f;
+                float min_hp_abs = 1e9f;  // ElmoreLab: абсолютне HP (без MaxHP)
+                float min_pct    = 101.f; // стандартний режим: з MaxHP
+                bool  has_pct    = false;
+
                 for (const auto& mob : gs.kl_mobs) {
-                    if (!mob.isDead && mob.hp > 0.f && mob.hpMax > 0.f) {
+                    if (!mob.isAlive()) continue;
+                    if (mob.hpMax > 0.f) {
                         float pct = mob.hpPercent();
                         if (pct < min_pct) min_pct = pct;
+                        has_pct = true;
+                    } else {
+                        // ElmoreLab Kamael: MaxHP відсутній, використовуємо абсолютне HP
+                        if (mob.hpAbs() < min_hp_abs) min_hp_abs = mob.hpAbs();
                     }
                 }
-                if (min_pct <= 100.f) {
+
+                if (has_pct && min_pct <= 100.f) {
                     m_mem_target_hp_valid = true;
                     const_cast<GameState&>(gs).target->hp = (int)min_pct;
                     const_cast<GameState&>(gs).has_target = (min_pct > 2.f);
+                } else if (!has_pct && min_hp_abs < 1e8f) {
+                    // ElmoreLab режим: зберігаємо абсолютне HP для HP-stable detection
+                    // target->hp НЕ змінюємо — OpenCV бар залишається для kill detection
+                    m_mem_target_hp_valid = true;
+                    m_mem_hp_abs = min_hp_abs;
                 }
             }
         }
@@ -506,19 +521,27 @@ public:
 
         // HP-stable: якщо HP моба не змінився 5с після першої атаки — моб недосяжний
         if (!m_first_attack && gs.target.has_value() && gs.target->hp > 0) {
-            if (gs.target->hp != m_attack_last_hp) {
-                m_attack_last_hp = gs.target->hp;
+            // Використовуємо абсолютне HP з пам'яті якщо є (ElmoreLab: без MaxHP)
+            int hp_for_stable = (m_mem_target_hp_valid && m_mem_hp_abs >= 0.f)
+                                ? (int)m_mem_hp_abs
+                                : gs.target->hp;
+            if (hp_for_stable != m_attack_last_hp) {
+                m_attack_last_hp = hp_for_stable;
                 m_hp_stable_since = Now();
             } else if (SecsSince(m_hp_stable_since) > 5.0) {
                 gs.log("[ATTACKING] HP стабільний 5с (моб недосяжний) → TARGETING");
-                // Blacklist: моб з мін HP% (той що атакується)
+                // Blacklist: моб з мін HP (той що атакується)
                 if (gs.blacklist_mob && !gs.kl_mobs.empty()) {
-                    int   bid  = 0;
-                    float best = 101.f;
+                    int   bid      = 0;
+                    float best_hp  = 1e9f;
+                    float best_pct = 101.f;
                     for (const auto& mob : gs.kl_mobs) {
-                        if (!mob.isDead && mob.hp > 0.f && mob.hpMax > 0.f) {
+                        if (!mob.isAlive()) continue;
+                        if (mob.hpMax > 0.f) {
                             float pct = mob.hpPercent();
-                            if (pct < best) { best = pct; bid = mob.objectID; }
+                            if (pct < best_pct) { best_pct = pct; bid = mob.objectID; }
+                        } else {
+                            if (mob.hpAbs() < best_hp) { best_hp = mob.hpAbs(); bid = mob.objectID; }
                         }
                     }
                     if (bid != 0) gs.blacklist_mob(bid, 60.f);
@@ -567,6 +590,7 @@ private:
     TP    m_last_attack{};
     TP    m_last_redetect{};
     bool  m_mem_target_hp_valid  = false;
+    float m_mem_hp_abs           = -1.f;  // абсолютне HP з пам'яті (ElmoreLab режим без MaxHP)
     std::unique_ptr<RandomDelay> m_rd_attack;
 };
 
