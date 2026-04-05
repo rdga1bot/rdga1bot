@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 #include <functional>
+#include <optional>
+#include <chrono>
 
 struct GameState;
 
@@ -17,6 +19,8 @@ struct GameState;
 //   Якщо жоден canRun() → поточний = null
 class ObjectiveManager {
 public:
+    using Clock = std::chrono::steady_clock;
+    using TP    = Clock::time_point;
     using LogFn = std::function<void(const std::string&)>;
 
     void setLogCallback(LogFn fn) { m_log_fn = std::move(fn); }
@@ -35,13 +39,27 @@ public:
         return m_current ? m_current->name() : "None";
     }
 
-    // Пошук за іменем (публічно — для proxy методів Brain)
-    Objective* findByName(const std::string& name);
+    // ── Geo path delegation ───────────────────────────────────────────────────
+    void deliverGeoPath(const std::vector<std::pair<float,float>>& path,
+                        uint64_t id);
+    std::optional<PathRequest> takePendingPathRequest();
+
+    // ── Timer getters (delegates to Objectives via virtual dispatch) ──────────
+    TP   getLastKillTime()  const;
+    TP   getLastBuff()      const;
+    TP   getRespawnUntil()  const;
+    bool isInGrace()        const;
+
+    // ── Attack state notification (delegates to TargetObjective) ─────────────
+    void notifyMobUnreachable(int macro_count);
 
 private:
     std::vector<std::unique_ptr<Objective>> m_objectives;
     Objective*                              m_current = nullptr;
     LogFn                                   m_log_fn;
+
+    // Пошук за іменем (private — внутрішнє використання)
+    Objective* findByName(const std::string& name);
 
     void log(const std::string& msg) {
         if (m_log_fn) m_log_fn("[OBJ] " + msg);

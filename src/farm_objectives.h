@@ -74,7 +74,7 @@ public:
 
             case 2:
                 gs.log("[DEAD] Фаза 2: відроджено, grace period 30с\n");
-                if (gs.respawn_until) *gs.respawn_until = FutureBy(30.0);
+                m_respawn_until = FutureBy(30.0);
                 return ObjectiveResult::done("відроджено");
 
             default:
@@ -82,8 +82,12 @@ public:
         }
     }
 
+    TP respawnUntil() const override { return m_respawn_until; }
+    bool inGrace()    const override { return Clock::now() < m_respawn_until; }
+
 private:
     int m_phase = 0;
+    TP  m_respawn_until{};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,8 +104,7 @@ public:
         if (!gs.buff_needed()) return false;
         if (!gs.cfg.buff_use_altb && gs.cfg.buff_keys.empty()) return false;
         // Cooldown: >= 2с після останнього вбивства
-        const double kill_secs = gs.last_kill_time ? SecsSince(*gs.last_kill_time) : 9999.0;
-        return kill_secs >= 2.0;
+        return gs.secs_since_last_kill >= 2.0;
     }
 
     void onEnter(GameState& gs) override {
@@ -120,19 +123,16 @@ public:
         if (!gs.hands_ready) return ObjectiveResult::running();
 
         // Safety: вбивство під час бафу (edge case)
-        const double kill_secs = gs.last_kill_time ? SecsSince(*gs.last_kill_time) : 9999.0;
-        if (kill_secs < 2.0) {
+        if (gs.secs_since_last_kill < 2.0) {
             gs.log("[Buffs] Kill щойно → скасовуємо баф");
-            if (gs.last_buff)
-                *gs.last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 30);
+            m_last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 30);
             return ObjectiveResult::done("kill під час бафу");
         }
 
         // HP низький → перериваємо
         if (gs.hp_valid && gs.hp > 0 && gs.hp < gs.cfg.hp_threshold) {
             gs.log("[Buffs] HP " + std::to_string(gs.hp) + "% → перериваємо бафи!\n");
-            if (gs.last_buff)
-                *gs.last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 60);
+            m_last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 60);
             return ObjectiveResult::done("низький HP");
         }
 
@@ -149,8 +149,7 @@ public:
         // Є таргет → перериваємо
         if (gs.has_target) {
             if (m_stage >= 1) { sendAltB(); gs.hands.Send(); }
-            if (gs.last_buff)
-                *gs.last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 10);
+            m_last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 10);
             gs.log("[Buffs] Є таргет → перериваємо бафи, retry через 10с\n");
             return ObjectiveResult::switchTo("Attack");
         }
@@ -188,7 +187,7 @@ public:
                 m_stage = 4;
             } else {
                 m_stage = 0;
-                if (gs.last_buff) *gs.last_buff = Now();
+                m_last_buff = Now();
                 gs.log("[Buffs] Завершено, наступний баф через " +
                     std::to_string(gs.cfg.buff_interval) + "с\n");
                 gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
@@ -204,11 +203,10 @@ public:
 
         case 0: { // Чекаємо скидання бойового стану L2 → ESC + ALT+B
             const double kCombatExpire = 15.0;
-            const double secs_since_kill = gs.last_kill_time ? SecsSince(*gs.last_kill_time) : 9999.0;
-            if (secs_since_kill < kCombatExpire) {
+            if (gs.secs_since_last_kill < kCombatExpire) {
                 if (m_open_retries % 50 == 0) {
                     gs.log("[Buffs] Чекаємо скидання бойового стану ще " +
-                        std::to_string((int)(kCombatExpire - secs_since_kill)) + "с...");
+                        std::to_string((int)(kCombatExpire - gs.secs_since_last_kill)) + "с...");
                 }
                 ++m_open_retries;
                 return ObjectiveResult::running();
@@ -318,11 +316,10 @@ public:
         default:
             m_stage = 0;
             if (m_tab_fallback) {
-                if (gs.last_buff)
-                    *gs.last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 120);
+                m_last_buff = Now() - std::chrono::seconds(gs.cfg.buff_interval - 120);
                 gs.log("[Buffs] Завершено (fallback), retry через 120с\n");
             } else {
-                if (gs.last_buff) *gs.last_buff = Now();
+                m_last_buff = Now();
                 gs.log("[Buffs] Завершено, наступний баф через " +
                     std::to_string(gs.cfg.buff_interval) + "с\n");
             }
@@ -335,6 +332,8 @@ public:
         return ObjectiveResult::running();
     }
 
+    TP lastBuff() const override { return m_last_buff; }
+
 private:
     int       m_stage        = 0;
     int       m_open_retries = 0;
@@ -342,6 +341,7 @@ private:
     cv::Point m_tab_click_pos{0, 0};
     cv::Mat   m_buff_tab_templ;
     cv::Mat   m_buff_profile_templ;
+    TP        m_last_buff = Clock::now() - std::chrono::hours(1); // перший баф одразу
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,7 +360,7 @@ public:
         m_issued = false;
         gs.eyes.ResetTarget(); // скидаємо кеш бару — наступний моб детектується заново
         gs.stats.RecordKill();
-        if (gs.last_kill_time) *gs.last_kill_time = Now();
+        m_last_kill_time = Now();
         // Авто-збереження stats
         if (gs.cfg.auto_save_kills > 0 && gs.stats.kills % gs.cfg.auto_save_kills == 0) {
             gs.stats.SaveToFile();
@@ -387,8 +387,11 @@ public:
         return ObjectiveResult::switchTo("Target");
     }
 
+    TP lastKillTime() const override { return m_last_kill_time; }
+
 private:
     bool m_issued = false;
+    TP   m_last_kill_time = Clock::now() - std::chrono::hours(1);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -508,10 +511,8 @@ public:
                 m_hp_stable_since = Now();
             } else if (SecsSince(m_hp_stable_since) > 5.0) {
                 gs.log("[ATTACKING] HP стабільний 5с (моб недосяжний) → TARGETING + інший макрос");
-                // Просуваємо macro_idx і встановлюємо unreachable у TargetObjective
-                if (!gs.cfg.target_macro_keys.empty() && gs.macro_idx)
-                    *gs.macro_idx = (*gs.macro_idx + 1) % (int)gs.cfg.target_macro_keys.size();
-                if (gs.attack_was_unreachable) *gs.attack_was_unreachable = true;
+                // Сигналізуємо TargetObjective через callback (без raw pointers)
+                if (gs.on_mob_unreachable) gs.on_mob_unreachable();
                 // Blacklist: моб з мін HP% (той що атакується)
                 if (gs.blacklist_mob) {
                     for (const auto& mob : gs.kl_mobs) {
@@ -582,6 +583,28 @@ public:
         return !gs.is_dead
             && !gs.has_target
             && !gs.buff_needed();
+    }
+
+    // ── Virtual overrides для ObjectiveManager dispatch ────────────────────────
+    void deliverGeoPath(const std::vector<std::pair<float,float>>& path,
+                        uint64_t id) override {
+        if (id <= m_geo_path_id) return; // застарілий результат
+        m_geo_path       = path;
+        m_geo_path_idx   = 0;
+        m_geo_path_id    = id;
+        m_geo_path_ready = !path.empty();
+    }
+
+    std::optional<PathRequest> takePendingPathRequest() override {
+        if (!m_pending_path_req.has_value()) return std::nullopt;
+        auto req = std::move(m_pending_path_req);
+        m_pending_path_req = std::nullopt;
+        return req;
+    }
+
+    void setAttackWasUnreachable(bool v) override { m_attack_was_unreachable = v; }
+    void advanceMacroIdx(int total) override {
+        if (total > 0) m_macro_idx = (m_macro_idx + 1) % total;
     }
 
     void onEnter(GameState& gs) override {

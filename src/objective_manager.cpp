@@ -92,3 +92,60 @@ std::string ObjectiveManager::tick(GameState& gs) {
 
     return currentName();
 }
+
+// ── Geo path delegation ───────────────────────────────────────────────────────
+
+void ObjectiveManager::deliverGeoPath(
+        const std::vector<std::pair<float,float>>& path, uint64_t id) {
+    for (auto& obj : m_objectives)
+        obj->deliverGeoPath(path, id);
+}
+
+std::optional<PathRequest> ObjectiveManager::takePendingPathRequest() {
+    for (auto& obj : m_objectives) {
+        auto req = obj->takePendingPathRequest();
+        if (req.has_value()) return req;
+    }
+    return std::nullopt;
+}
+
+// ── Timer getters ─────────────────────────────────────────────────────────────
+
+ObjectiveManager::TP ObjectiveManager::getLastKillTime() const {
+    for (const auto& obj : m_objectives) {
+        auto t = obj->lastKillTime();
+        if (t != TP{}) return t;
+    }
+    return Clock::now() - std::chrono::hours(1);
+}
+
+ObjectiveManager::TP ObjectiveManager::getLastBuff() const {
+    for (const auto& obj : m_objectives) {
+        auto t = obj->lastBuff();
+        if (t != TP{}) return t;
+    }
+    return Clock::now() - std::chrono::hours(1);
+}
+
+ObjectiveManager::TP ObjectiveManager::getRespawnUntil() const {
+    for (const auto& obj : m_objectives) {
+        auto t = obj->respawnUntil();
+        if (t != TP{}) return t;
+    }
+    return TP{};
+}
+
+bool ObjectiveManager::isInGrace() const {
+    for (const auto& obj : m_objectives)
+        if (obj->inGrace()) return true;
+    return false;
+}
+
+// ── Attack state notification ─────────────────────────────────────────────────
+
+void ObjectiveManager::notifyMobUnreachable(int macro_count) {
+    for (auto& obj : m_objectives) {
+        obj->setAttackWasUnreachable(true);
+        obj->advanceMacroIdx(macro_count);
+    }
+}

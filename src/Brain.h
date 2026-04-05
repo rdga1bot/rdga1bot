@@ -103,9 +103,6 @@ private:
     // Смерть / grace period
     int  m_hp_zero_count   = 0;
     TP   m_session_start;
-    TP   m_respawn_until;
-    TP   m_last_kill_time;
-    TP   m_last_buff;
 
     // Потіони (не залежать від стану)
     TP m_last_hp_pot;
@@ -171,7 +168,13 @@ private:
         const std::vector<L2Character>& mobs, float playerX, float playerY);
 
     bool HasTarget() const { return m_target.has_value() && m_target->hp > 0; }
-    bool InRespawnGrace() const { return Clock::now() < m_respawn_until; }
+    bool InRespawnGrace()  const { return m_obj_manager.isInGrace(); }
+    double SecsSinceLastKill() const {
+        return std::chrono::duration<double>(Clock::now() - m_obj_manager.getLastKillTime()).count();
+    }
+    double SecsSinceLastBuff() const {
+        return std::chrono::duration<double>(Clock::now() - m_obj_manager.getLastBuff()).count();
+    }
     static float NormalizeAngle(float angle);
 
     static double SecsSince(TP t) {

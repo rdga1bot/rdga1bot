@@ -24,13 +24,10 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
     , m_cfg(cfg)
     , m_notify(cfg.tg_token, cfg.tg_chat_id, cfg.tg_on_death, cfg.tg_stats_interval)
 {
-    m_last_buff      = Clock::now() - std::chrono::hours(1); // перший баф одразу
-    m_respawn_until  = FutureBy(10.0);   // 10с grace при старті
     m_last_hp_pot    = Now();
     m_last_mp_pot    = Now();
     m_last_cp_pot    = Now();
     m_session_start  = Now();
-    m_last_kill_time = Now() - std::chrono::hours(1); // cooldown вже пройшов
 
     InitRandomDelays();
 
@@ -151,7 +148,7 @@ void Brain::Process(bool debug) {
     if (m_heartbeat_tick % 50 == 1) {
         std::string buff_info = !m_cfg.buff_enabled
             ? "buff=ВИМК"
-            : "buff_in=" + std::to_string((int)(m_cfg.buff_interval - SecsSince(m_last_buff))) + "с";
+            : "buff_in=" + std::to_string((int)(m_cfg.buff_interval - SecsSinceLastBuff())) + "с";
         Log("[HB] OBJ=" + cur_obj +
             " HP=" + std::to_string(me.hp) +
             " MP=" + std::to_string(me.mp) +
@@ -234,22 +231,16 @@ void Brain::updateGameState(GameState& gs) {
         gs.kl_mob_died    = false;
     }
 
-    gs.secs_since_last_buff = SecsSince(m_last_buff);
+    gs.secs_since_last_buff = SecsSinceLastBuff();
+    gs.secs_since_last_kill = SecsSinceLastKill();
     gs.in_grace    = InRespawnGrace();
     gs.hands_ready = m_hands.IsReady();
     // is_dead буде встановлено в Process() після updateGameState
 
-    // Shared mutable Brain state
-    gs.last_kill_time = &m_last_kill_time;
-    gs.last_buff      = &m_last_buff;
-    gs.respawn_until  = &m_respawn_until;
-
-    // Shared TargetObjective fields
-    auto* tgt_obj = dynamic_cast<TargetObjective*>(m_obj_manager.findByName("Target"));
-    if (tgt_obj) {
-        gs.attack_was_unreachable = &tgt_obj->m_attack_was_unreachable;
-        gs.macro_idx              = &tgt_obj->m_macro_idx;
-    }
+    // Callback: AttackObjective сигналізує TargetObjective про недосяжного моба
+    gs.on_mob_unreachable = [this]() {
+        m_obj_manager.notifyMobUnreachable((int)m_cfg.target_macro_keys.size());
+    };
 
     // RandomDelay (Brain-owned)
     gs.rd_attack = m_rd_attack.get();
@@ -470,22 +461,12 @@ void Brain::SetAsyncNPCs(const std::vector<Eyes::NPC>& npcs,
 
 void Brain::SetGeoPath(const std::vector<std::pair<float,float>>& path,
                         uint64_t path_id) {
-    auto* tgt = dynamic_cast<TargetObjective*>(m_obj_manager.findByName("Target"));
-    if (!tgt) return;
-    if (path_id <= tgt->m_geo_path_id) return; // застарілий результат
-    tgt->m_geo_path       = path;
-    tgt->m_geo_path_idx   = 0;
-    tgt->m_geo_path_id    = path_id;
-    tgt->m_geo_path_ready = !path.empty();
-    if (tgt->m_geo_path_ready)
+    m_obj_manager.deliverGeoPath(path, path_id);
+    if (!path.empty())
         Log("[GEO-W] Шлях отримано: " + std::to_string(path.size()) + " точок",
             LogLevel::Debug);
 }
 
 std::optional<PathRequest> Brain::GetPendingPathRequest() {
-    auto* tgt = dynamic_cast<TargetObjective*>(m_obj_manager.findByName("Target"));
-    if (!tgt || !tgt->m_pending_path_req.has_value()) return std::nullopt;
-    auto req = std::move(tgt->m_pending_path_req);
-    tgt->m_pending_path_req = std::nullopt;
-    return req;
+    return m_obj_manager.takePendingPathRequest();
 }

@@ -55,6 +55,7 @@ struct GameState {
 
     // ── Бафи ──────────────────────────────────────────────────────────────────
     double secs_since_last_buff = 9999.0;
+    double secs_since_last_kill = 9999.0; // read-only snapshot для canRun перевірок
     bool   buff_needed() const {
         return secs_since_last_buff >= (double)cfg.buff_interval;
     }
@@ -64,14 +65,8 @@ struct GameState {
     bool in_grace    = false;
     bool hands_ready = false;
 
-    // ── Shared mutable Brain state (pointers to Brain-level fields) ───────────
-    TP* last_kill_time = nullptr;   // Brain::m_last_kill_time — LootObjective writes
-    TP* last_buff      = nullptr;   // Brain::m_last_buff — BuffObjective writes
-    TP* respawn_until  = nullptr;   // Brain::m_respawn_until — DeadObjective writes
-
-    // ── Shared Objective fields (TargetObjective public fields) ──────────────
-    bool* attack_was_unreachable = nullptr; // TargetObjective::m_attack_was_unreachable
-    int*  macro_idx              = nullptr; // TargetObjective::m_macro_idx
+    // ── Callbacks для cross-Objective сигналізації ────────────────────────────
+    std::function<void()> on_mob_unreachable; // AttackObjective → TargetObjective
 
     // ── RandomDelay (owned by Brain, exposed as raw ptrs) ────────────────────
     RandomDelay* rd_attack = nullptr;

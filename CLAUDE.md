@@ -905,7 +905,22 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **Brain constructor**: Rest (якщо `mp_threshold>0`), Zone (якщо `zone_enabled`) — після Dead, перед Buff. ✓
 - Build: 0 errors, 0 warnings. ✓
 
-### Пріоритет 1: Тест фарму MR12+MR13
+### ✅ MR14: Архітектурні виправлення Objectives (2026-04-05) — РЕАЛІЗОВАНО
+1. **`dynamic_cast` видалено** з Brain.cpp (3 місця). Замінено на virtual dispatch:
+   `ObjectiveManager::deliverGeoPath()` і `takePendingPathRequest()` делегують через
+   `Objective::deliverGeoPath/takePendingPathRequest` (override в TargetObjective).
+   `findByName()` перенесено в private API. ✓
+2. **Raw pointers `last_kill_time/last_buff/respawn_until`** видалено з GameState.
+   TP поля перенесені в LootObjective/BuffObjective/DeadObjective як приватні.
+   Brain читає через `SecsSinceLastKill/LastBuff()` → `ObjectiveManager::getLastKillTime/LastBuff()`. ✓
+3. **Raw pointers `attack_was_unreachable/macro_idx`** видалено з GameState.
+   AttackObjective сигналізує через `gs.on_mob_unreachable` callback →
+   `ObjectiveManager::notifyMobUnreachable()` → virtual `setAttackWasUnreachable/advanceMacroIdx()`
+   → TargetObjective (приватні поля, вже були там). ✓
+4. **GameState**: `secs_since_last_kill` (read-only snapshot), `on_mob_unreachable` callback. ✓
+5. Build: 0 errors. Запуск: `[OBJ] Enter: Buff` з першого тіку. ✓
+
+### Пріоритет 1: Тест фарму MR12–MR14
 `./farm.sh` 30+ хв. В логах мають бути `[OBJ] Enter/Exit` переходи.
 Поведінка ідентична попередньому FSM: знаходить моба, атакує, лутає, бафає.
 
