@@ -13,6 +13,7 @@
 #include "RandomDelay.h"
 
 class Geodata;
+class NavMeshBuilder;
 
 // ── GameState ─────────────────────────────────────────────────────────────────
 // Повний знімок стану гри + доступ до інструментів.
@@ -72,6 +73,9 @@ struct GameState {
 
     // ── Geodata ───────────────────────────────────────────────────────────────
     Geodata* geodata = nullptr;
+
+    // ── NavMesh ───────────────────────────────────────────────────────────────
+    NavMeshBuilder* navmesh = nullptr;
 
     // ── Callbacks (Brain methods exposed for Objectives) ─────────────────────
     std::function<bool(const L2Character&)>    navigate_to_mob;

@@ -29,6 +29,8 @@
 #include "Geodata.h"
 #include "vision_worker.h"
 #include "geodata_worker.h"
+#include "navmesh_builder.h"
+#include "navmesh_worker.h"
 #ifdef __linux__
 #include <sched.h>
 #include <pthread.h>
@@ -996,6 +998,24 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // NavMesh: завантажуємо .bin якщо є і Enabled=true
+        std::shared_ptr<NavMeshBuilder> navmesh_builder;
+        std::unique_ptr<NavMeshWorker>  navmesh_worker;
+        if (cfg.navmesh_cfg.enabled) {
+            auto nb = std::make_shared<NavMeshBuilder>();
+            if (nb->Load(cfg.navmesh_cfg.navmesh_file)) {
+                brain.SetNavMeshBuilder(nb);
+                navmesh_builder = nb;
+                navmesh_worker = std::make_unique<NavMeshWorker>();
+                navmesh_worker->Start(nb, /*core_id=*/4);
+                std::cerr << "[NAVMESH] NavMeshWorker запущено\n";
+            } else {
+                std::cerr << "[NAVMESH] Файл не знайдено: "
+                          << cfg.navmesh_cfg.navmesh_file
+                          << " (спочатку запусти ./tools/build_navmesh)\n";
+            }
+        }
+
         // Geodata: завантаження L2J геодати (якщо увімкнено)
         if (cfg.geodata_enabled) {
             auto geo = std::make_shared<Geodata>();
@@ -1374,6 +1394,9 @@ int main(int argc, char* argv[]) {
         } // restart loop
 
 bot_exit:
+        if (cfg.navmesh_cfg.save_on_exit)
+            brain.SaveNavMeshPoints();
+
         if (use_tui) dashboard.Shutdown();
 
         brain.GetStats().PrintSummary();

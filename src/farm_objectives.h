@@ -1,6 +1,7 @@
 #pragma once
 #include "objective.h"
 #include "game_state.h"
+#include "navmesh_builder.h"
 #include "Eyes.h"
 #include "world_state.h"
 #include "Geodata.h"
@@ -9,6 +10,7 @@
 #include "Input.h"
 #include <chrono>
 #include <vector>
+#include <deque>
 #include <memory>
 #include <cmath>
 #include <opencv2/opencv.hpp>
@@ -214,17 +216,15 @@ public:
             m_open_retries = 0;
             gs.log("[Buffs] ESC + ALT+B → знімаємо таргет і відкриваємо вікно...");
             gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-            gs.hands.Delay(300);
+            gs.hands.Delay(200);
             sendAltB();
-            gs.hands.Delay(2000);
+            gs.hands.Delay(800);
             gs.hands.Send();
             m_stage = 1;
             break;
         }
 
         case 1: { // Знайти і натиснути вкладку "Баффер"
-            gs.eyes.SaveFrame("tmp/buff_stage1_check"
-                + std::to_string(m_open_retries) + ".png");
             float tab_score = 0.0f;
             auto tab_pt = m_buff_tab_templ.empty()
                 ? std::optional<cv::Point>{}
@@ -235,8 +235,10 @@ public:
                 gs.log("[Buffs] Баффер не знайдено (score="
                     + std::to_string((int)(tab_score * 100)) + "%) — ALT+B retry "
                     + std::to_string(m_open_retries) + "/3");
+                gs.eyes.SaveFrame("tmp/buff_stage1_retry"
+                    + std::to_string(m_open_retries) + ".png");
                 sendAltB();
-                gs.hands.Delay(2500);
+                gs.hands.Delay(1000);
                 gs.hands.Send();
                 break;
             }
@@ -258,18 +260,16 @@ public:
             }
 
             m_tab_click_pos = {cx, cy};
-            gs.eyes.SaveFrame("tmp/buff_stage1_before_click.png");
             gs.hands.MoveMouseTo({cx, cy});
-            gs.hands.Delay(200);
+            gs.hands.Delay(100);
             gs.hands.LeftMouseButtonClick();
-            gs.hands.Delay(4000);
+            gs.hands.Delay(1500);
             gs.hands.Send();
             m_stage = 2;
             break;
         }
 
         case 2: { // Знайти і натиснути профіль "tty"
-            gs.eyes.SaveFrame("tmp/buff_stage2_after_tab.png");
             int fb_x = gs.cfg.buff_profile_x;
             int fb_y = gs.cfg.buff_profile_y;
             if (m_tab_click_pos.x > 0 && gs.cfg.buff_tab_x > 0) {
@@ -297,9 +297,9 @@ public:
                 cx = fb_x; cy = fb_y;
             }
             gs.hands.MoveMouseTo({cx, cy});
-            gs.hands.Delay(200);
+            gs.hands.Delay(100);
             gs.hands.LeftMouseButtonClick();
-            gs.hands.Delay(1000);
+            gs.hands.Delay(500);
             gs.hands.Send();
             m_stage = 3;
             break;
@@ -307,7 +307,7 @@ public:
 
         case 3: // Закрити ALT+B
             sendAltB();
-            gs.hands.Delay(300);
+            gs.hands.Delay(200);
             gs.hands.Send();
             m_stage = 4;
             break;
@@ -643,7 +643,9 @@ public:
         m_geo_path_idx         = 0;
         m_pending_path_req     = std::nullopt;
         m_not_ready_count      = 0;
+        m_backtracking         = false;
         // m_macro_idx НЕ скидаємо — зберігається між циклами
+        // m_breadcrumbs НЕ чистимо — зберігаємо між TARGETING циклами
 
         // Context від попереднього Objective:
         // "unreachable" → моб недосяжний, даємо більше часу навігації
@@ -678,6 +680,10 @@ public:
             return ObjectiveResult::running();
         }
         m_not_ready_count = 0;
+
+        // ── Breadcrumbs: запис позиції ─────────────────────────────────────────
+        if (gs.coords_valid)
+            addCrumb(gs.player_x, gs.player_y, gs.player_z, gs.cfg.breadcrumbs);
 
         // Є ціль — перевіряємо screen-Y, потім атакуємо
         if (gs.has_target) {
@@ -887,6 +893,22 @@ public:
                             gs.hands.WalkForward(500);
                             m_nav_prev_was_walk = true;
                             m_nav_stuck_recoveries++;
+
+                            // ── Breadcrumbs: ініціація backtrack ──────────────
+                            if (gs.cfg.breadcrumbs.enabled && gs.coords_valid
+                                && !m_backtracking
+                                && m_nav_stuck_recoveries >= gs.cfg.breadcrumbs.stuck_threshold) {
+                                auto bc = findBacktrackCrumb(gs.player_x, gs.player_y,
+                                                              gs.cfg.breadcrumbs.backtrack_range);
+                                if (bc.has_value()) {
+                                    m_backtracking = true;
+                                    gs.log("[BREADCRUMB] Застряг ×" +
+                                        std::to_string(m_nav_stuck_recoveries) +
+                                        " → backtrack до (" +
+                                        std::to_string((int)bc->x) + "," +
+                                        std::to_string((int)bc->y) + ")");
+                                }
+                            }
                         }
                     } else {
                         m_walk_stuck_count = 0;
@@ -895,6 +917,28 @@ public:
                             gs.log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4));
                     }
                 }
+            }
+        }
+
+        // ── Breadcrumbs: виконання повернення ─────────────────────────────────
+        if (m_backtracking && gs.coords_valid && gs.navigate_to_mob) {
+            auto bc = findBacktrackCrumb(gs.player_x, gs.player_y,
+                                          gs.cfg.breadcrumbs.backtrack_range);
+            if (bc.has_value()) {
+                L2Character dummy{};
+                dummy.x = bc->x; dummy.y = bc->y; dummy.z = bc->z;
+                dummy.hp = 100.f; dummy.hpMax = 100.f;
+                if (!gs.navigate_to_mob(dummy)) {
+                    m_backtracking = false;
+                    m_nav_stuck_recoveries = 0;
+                    gs.log("[BREADCRUMB] Точку досягнуто → відновлюємо пошук");
+                } else {
+                    gs.hands.Send(200);
+                    return ObjectiveResult::running();
+                }
+            } else {
+                m_backtracking = false;
+                gs.log("[BREADCRUMB] Крихти вичерпано");
             }
         }
 
@@ -935,6 +979,33 @@ public:
                         req.id = ++m_path_req_id;
                         m_pending_path_req = req;
                     }
+                }
+            }
+        }
+
+        // ── NavMesh FindPath (пріоритет: < 1мс vs JPS 1-50мс) ────────────────────
+        if (gs.navmesh && gs.navmesh->IsValid()
+            && gs.coords_valid && !gs.kl_mobs.empty()
+            && !m_geo_path_ready) {
+            const L2Character* tgt = nullptr;
+            float best_d2 = 1e12f;
+            for (const auto& mob : gs.kl_mobs) {
+                if (mob.isDead || !mob.isAlive()) continue;
+                float dx = mob.x - gs.player_x, dy = mob.y - gs.player_y;
+                float d2 = dx*dx + dy*dy;
+                if (d2 < best_d2) { best_d2 = d2; tgt = &mob; }
+            }
+            if (tgt) {
+                auto nm_path = gs.navmesh->FindPath(
+                    gs.player_x, gs.player_y, gs.player_z,
+                    tgt->x,      tgt->y,      tgt->z);
+                if (!nm_path.empty()) {
+                    m_geo_path       = nm_path;
+                    m_geo_path_idx   = 0;
+                    m_geo_path_id    = ++m_path_req_id;
+                    m_geo_path_ready = true;
+                    gs.log("[NAVMESH] Шлях: " +
+                        std::to_string(nm_path.size()) + " точок");
                 }
             }
         }
@@ -1114,6 +1185,35 @@ private:
 
     std::unique_ptr<RandomDelay> m_rd_rotate;
     std::unique_ptr<RandomDelay> m_rd_walk;
+
+    // ── Breadcrumbs ───────────────────────────────────────────────────────────
+    struct Crumb { float x, y, z; };
+    std::deque<Crumb> m_breadcrumbs;
+    bool              m_backtracking = false;
+
+    void addCrumb(float x, float y, float z, const Config::BreadcrumbConfig& cfg) {
+        if (!cfg.enabled) return;
+        if (!std::isfinite(x) || !std::isfinite(y)) return;
+        if (!m_breadcrumbs.empty()) {
+            float dx = x - m_breadcrumbs.back().x;
+            float dy = y - m_breadcrumbs.back().y;
+            if (dx*dx + dy*dy < cfg.record_distance * cfg.record_distance) return;
+        }
+        if ((int)m_breadcrumbs.size() >= cfg.max_count)
+            m_breadcrumbs.pop_front();
+        m_breadcrumbs.push_back({x, y, z});
+    }
+
+    // Знайти крихту для повернення (найстаріша в межах range)
+    std::optional<Crumb> findBacktrackCrumb(float px, float py, float range) const {
+        for (int i = (int)m_breadcrumbs.size() - 2; i >= 0; --i) {
+            const auto& c = m_breadcrumbs[i];
+            float dx = c.x - px, dy = c.y - py;
+            float d2 = dx*dx + dy*dy;
+            if (d2 > 50.f*50.f && d2 <= range*range) return c;
+        }
+        return std::nullopt;
+    }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

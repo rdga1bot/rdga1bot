@@ -1,6 +1,7 @@
 #include "Brain.h"
 #include "Utils.h"
 #include <iostream>
+#include <fstream>
 #include <ctime>
 #include <cmath>
 #include <opencv2/opencv.hpp>
@@ -256,6 +257,23 @@ void Brain::updateGameState(GameState& gs) {
     // Geodata
     gs.geodata = m_geodata.get();
 
+    // NavMesh
+    gs.navmesh = m_navmesh_builder.get();
+
+    // NavMesh: збір точок під час руху якщо coords_valid
+    if (m_cfg.navmesh_cfg.collect_points && m_mem_player.valid) {
+        float dx = m_mem_player.x - m_nav_last_x;
+        float dy = m_mem_player.y - m_nav_last_y;
+        if (dx*dx + dy*dy >= m_cfg.navmesh_cfg.collect_dist *
+                             m_cfg.navmesh_cfg.collect_dist) {
+            m_nav_points.push_back({m_mem_player.x,
+                                    m_mem_player.y,
+                                    m_mem_player.z});
+            m_nav_last_x = m_mem_player.x;
+            m_nav_last_y = m_mem_player.y;
+        }
+    }
+
     // Callbacks
     gs.navigate_to_mob = [this](const L2Character& mob) {
         return NavigateToMob(mob);
@@ -341,6 +359,22 @@ bool Brain::IsBlacklisted(int objectID) const {
         if (b.objectID == objectID && now < b.until) return true;
     }
     return false;
+}
+
+// ── SaveNavMeshPoints ─────────────────────────────────────────────────────────
+void Brain::SaveNavMeshPoints() const {
+    if (!m_cfg.navmesh_cfg.collect_points || m_nav_points.empty()) return;
+    std::ofstream f(m_cfg.navmesh_cfg.points_file, std::ios::binary);
+    if (!f) {
+        std::cerr << "[NAVMESH] Не вдалося зберегти точки: "
+                  << m_cfg.navmesh_cfg.points_file << "\n";
+        return;
+    }
+    uint32_t n = (uint32_t)m_nav_points.size();
+    f.write((const char*)&n, 4);
+    f.write((const char*)m_nav_points.data(), n * 12);
+    std::cerr << "[NAVMESH] Збережено " << n << " точок у "
+              << m_cfg.navmesh_cfg.points_file << "\n";
 }
 
 // ── NavigateToMob ─────────────────────────────────────────────────────────────

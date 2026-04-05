@@ -188,6 +188,26 @@ public:
     float zone_y       = 0.f;   // центр зони Y
     float zone_radius  = 1000.f; // радіус зони в L2 units
 
+    // [Breadcrumbs] — запис шляху і повернення при застряганні
+    struct BreadcrumbConfig {
+        bool  enabled          = false;
+        float record_distance  = 100.f;  // мін відстань між крихтами (L2u)
+        int   max_count        = 200;    // макс крихт у деці
+        int   stuck_threshold  = 4;      // m_nav_stuck_recoveries → backtrack
+        float backtrack_range  = 600.f;  // радіус пошуку крихти
+    } breadcrumbs;
+
+    // [NavMesh] — NavMesh через Recast/Detour (без .geo файлів)
+    struct NavMeshConfig {
+        bool        enabled         = false;
+        bool        collect_points  = true;   // збирати точки під час руху
+        bool        save_on_exit    = true;   // зберігати .pts при виході
+        std::string points_file     = "navmesh_points.pts";
+        std::string navmesh_file    = "navmesh.bin";
+        float       collect_dist    = 80.f;   // мін відстань між точками (L2u)
+        int         rebuild_after   = 0;      // 0=вручну, N=rebuild після N точок
+    } navmesh_cfg;
+
     // [Geodata] — геодата L2J формату для навігації
     bool        geodata_enabled  = false;
     std::string geodata_path     = "./geodata/";

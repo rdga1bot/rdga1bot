@@ -50,10 +50,27 @@ SRCS="
   $SRC/vision_worker.cpp
   $SRC/geodata_worker.cpp
   $SRC/objective_manager.cpp
+  $SRC/navmesh_builder.cpp
+  $SRC/navmesh_worker.cpp
 "
 
+# Detour sources (тільки якщо src/recast/Detour існує)
+if [ -d "$SRC/recast/Detour" ]; then
+    DETOUR_SRCS="$SRC/recast/Detour/Source/*.cpp"
+    DETOUR_INC="-I$SRC/recast/Detour/Include"
+    CFLAGS="$CFLAGS $DETOUR_INC -DHAVE_RECAST"
+    echo "[BUILD] Recast/Detour знайдено → NavMesh увімкнено"
+else
+    DETOUR_SRCS=""
+    echo "[BUILD] src/recast/Detour не знайдено → NavMesh вимкнено"
+    echo "[BUILD] Щоб увімкнути:"
+    echo "[BUILD]   cd src/recast && git clone --depth 1 \\"
+    echo "[BUILD]     https://github.com/recastnavigation/recastnavigation tmp"
+    echo "[BUILD]   cp -r tmp/Recast . && cp -r tmp/Detour . && rm -rf tmp"
+fi
+
 echo "[1/2] Компіляція..."
-g++ $CFLAGS $SRCS -o "$OUT" $LDFLAGS
+g++ $CFLAGS $SRCS $DETOUR_SRCS -o "$OUT" $LDFLAGS
 
 echo "[2/2] Готово!"
 echo ""

@@ -379,6 +379,21 @@ bool Config::Load(const std::string& path) {
     delays.potion_mean_ms = (float)GetDouble("Delays", "PotionMeanMs",  (double)delays.potion_mean_ms);
     delays.potion_std_ms  = (float)GetDouble("Delays", "PotionStdMs",   (double)delays.potion_std_ms);
 
+    // [Breadcrumbs]
+    breadcrumbs.enabled         = GetBool  ("Breadcrumbs","Enabled",        breadcrumbs.enabled);
+    breadcrumbs.record_distance = (float)GetDouble("Breadcrumbs","RecordDistance",breadcrumbs.record_distance);
+    breadcrumbs.max_count       = GetInt   ("Breadcrumbs","MaxCount",        breadcrumbs.max_count);
+    breadcrumbs.stuck_threshold = GetInt   ("Breadcrumbs","StuckThreshold",  breadcrumbs.stuck_threshold);
+    breadcrumbs.backtrack_range = (float)GetDouble("Breadcrumbs","BacktrackRange",breadcrumbs.backtrack_range);
+
+    // [NavMesh]
+    navmesh_cfg.enabled        = GetBool  ("NavMesh","Enabled",       navmesh_cfg.enabled);
+    navmesh_cfg.collect_points = GetBool  ("NavMesh","CollectPoints",  navmesh_cfg.collect_points);
+    navmesh_cfg.save_on_exit   = GetBool  ("NavMesh","SaveOnExit",     navmesh_cfg.save_on_exit);
+    navmesh_cfg.points_file    = Get      ("NavMesh","PointsFile",     navmesh_cfg.points_file);
+    navmesh_cfg.navmesh_file   = Get      ("NavMesh","NavMeshFile",    navmesh_cfg.navmesh_file);
+    navmesh_cfg.collect_dist   = (float)GetDouble("NavMesh","CollectDist",navmesh_cfg.collect_dist);
+
     // [Geodata]
     geodata_enabled = GetBool  ("Geodata", "Enabled",  geodata_enabled);
     geodata_path    = Get      ("Geodata", "GeoPath",   geodata_path);
@@ -610,6 +625,26 @@ bool Config::Save(const std::string& path) const {
     f << "[Rest]\n";
     f << "# Пауза при низькому MP. 0 = вимкнено.\n";
     f << "MPThreshold = " << mp_threshold << "\n";
+    f << "\n";
+    f << "[Breadcrumbs]\n";
+    f << "# Backtrack при застряганні. Потребує coords_valid (MemReader XYZ).\n";
+    f << "Enabled         = " << (breadcrumbs.enabled ? "true" : "false") << "\n";
+    f << "RecordDistance  = " << breadcrumbs.record_distance << "\n";
+    f << "MaxCount        = " << breadcrumbs.max_count       << "\n";
+    f << "StuckThreshold  = " << breadcrumbs.stuck_threshold << "\n";
+    f << "BacktrackRange  = " << breadcrumbs.backtrack_range << "\n";
+    f << "\n";
+    f << "[NavMesh]\n";
+    f << "# NavMesh через Recast/Detour (MIT). Без .geo файлів.\n";
+    f << "# 1. CollectPoints=true → збирає позиції в PointsFile під час фарму\n";
+    f << "# 2. tools/build_navmesh PointsFile NavMeshFile — офлайн build\n";
+    f << "# 3. Enabled=true → завантажує NavMeshFile для FindPath() < 1мс\n";
+    f << "Enabled       = " << (navmesh_cfg.enabled ? "true" : "false") << "\n";
+    f << "CollectPoints = " << (navmesh_cfg.collect_points ? "true" : "false") << "\n";
+    f << "SaveOnExit    = " << (navmesh_cfg.save_on_exit ? "true" : "false") << "\n";
+    f << "PointsFile    = " << navmesh_cfg.points_file << "\n";
+    f << "NavMeshFile   = " << navmesh_cfg.navmesh_file << "\n";
+    f << "CollectDist   = " << navmesh_cfg.collect_dist << "\n";
     f << "\n";
     f << "[Fuzzy]\n";
     f << "# Нечітке порівняння назв мобів (Levenshtein). false = вимкнено.\n";

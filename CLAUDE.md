@@ -949,17 +949,44 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 4. GeodataWorker path cache: `PathHash()` від координат (точність 256 L2u), TTL 500мс, max 32 записи. ✓
 5. WorldState scan throttle: `SCAN_EVERY_N=3` → повний регіон-скан раз на ~3с, між сканами — попередній snapshot. ✓
 
-### Пріоритет 1: Тест фарму MR16+MR17
-`./farm.sh` 30+ хв. В логах мають бути `[OBJ] Enter/Exit` переходи, `[LOOTING] Вбивство #N`.
-Kills > 0 в stats — підтверджує що MR16 Switch fix працює.
+### ✅ MR18: Breadcrumbs + NavMesh (2026-04-06) — РЕАЛІЗОВАНО
+- **Breadcrumbs**: TargetObjective::addCrumb() записує кожні RecordDistance L2u (deque 200).
+  При `m_nav_stuck_recoveries >= StuckThreshold` → `findBacktrackCrumb()` → backtrack через
+  `navigate_to_mob(dummy)`. `m_backtracking` скидається при досягненні точки або вичерпанні крихт.
+  Потребує `coords_valid`. `[Breadcrumbs]` секція в .ini. ✓
+- **NavMesh Recast/Detour**: без .geo файлів — збір точок під час руху (Brain::SaveNavMeshPoints → .pts).
+  `tools/build_navmesh.cpp`: .pts → quad mesh → Recast pipeline → dtCreateNavMeshData → .bin.
+  `NavMeshBuilder` runtime (тільки Detour, `#ifdef HAVE_RECAST`): Load(.bin) → FindPath() < 1мс.
+  `NavMeshWorker`: async на окремому потоці (Core 4).
+  Компілюється без Recast (graceful degradation: `[BUILD] src/recast/Detour не знайдено → NavMesh вимкнено`).
+  NavMesh FindPath має пріоритет над Geodata waypoints. `[NavMesh]` секція в .ini. ✓
 
-### Пріоритет 2: Тест RestObjective
-Встановити `MPThreshold=80` (штучно) і запустити фарм.
-В логах має з'являтись `[REST] HP=X% MP=Y%` при витраті MP.
+### Пріоритет 1: Клонування Recast і build NavMesh
+```bash
+cd ~/l2bot/rdga1bot/src && mkdir -p recast && cd recast
+git clone --depth 1 https://github.com/recastnavigation/recastnavigation.git tmp
+cp -r tmp/Recast . && cp -r tmp/Detour . && rm -rf tmp && cd ~/l2bot/rdga1bot
+bash build.sh   # тепер буде "[BUILD] Recast/Detour знайдено → NavMesh увімкнено"
 
-### Пріоритет 3: ZoneObjective після heading калібровки
-Потребує `[MemReader] Enabled=true` + PosX/PosY offsets.
-`[Zone] Enabled=true, CenterX/Y = координати спауну, Radius=800`.
+# Компіляція build_navmesh (окремо):
+g++ -std=c++17 -O2 tools/build_navmesh.cpp \
+    src/recast/Recast/Source/*.cpp \
+    src/recast/Detour/Source/*.cpp \
+    -Isrc/recast/Recast/Include -Isrc/recast/Detour/Include \
+    -o tools/build_navmesh
+```
+
+### Пріоритет 2: Збір точок → build NavMesh
+```bash
+# 1. rdga1bot.ini: [NavMesh] CollectPoints=true, SaveOnExit=true
+# 2. Фармимо 20-30 хв → Ctrl+C → navmesh_points.pts збережено
+# 3. ./tools/build_navmesh navmesh_points.pts navmesh.bin
+# 4. rdga1bot.ini: [NavMesh] Enabled=true → NavMesh активний
+```
+
+### Пріоритет 3: Тест Breadcrumbs
+`[Breadcrumbs] Enabled=true` + `[MemReader] Enabled=true` (PosX/PosY offsets).
+В логах при застряганні: `[BREADCRUMB] Застряг ×N → backtrack до (X,Y)`.
 
 ### Пріоритет 4: Майбутні Objectives
 TradeObjective, QuestObjective, CraftObjective.

@@ -16,6 +16,8 @@
 #include "RandomDelay.h"
 #include "vision_worker.h"
 #include "geodata_worker.h"
+#include "navmesh_builder.h"
+#include "navmesh_worker.h"
 #include "game_state.h"
 #include "objective_manager.h"
 #include "farm_objectives.h"
@@ -56,6 +58,15 @@ public:
     // Geodata: навігація по геодаті (необов'язково — якщо null, стандартна навігація)
     void SetGeodata(std::shared_ptr<Geodata> geo) { m_geodata = std::move(geo); }
     Geodata* GetGeodata() const { return m_geodata.get(); }
+
+    // NavMesh: Recast/Detour pathfinding (без .geo файлів)
+    void SetNavMeshBuilder(std::shared_ptr<NavMeshBuilder> b) {
+        m_navmesh_builder = std::move(b);
+    }
+    NavMeshBuilder* GetNavMeshBuilder() const { return m_navmesh_builder.get(); }
+
+    // NavMesh: зберегти зібрані точки (викликається при виході)
+    void SaveNavMeshPoints() const;
 
     // VisionWorker інтеграція
     void SetAsyncNPCs(const std::vector<Eyes::NPC>& npcs,
@@ -118,6 +129,15 @@ private:
 
     // Geodata
     std::shared_ptr<Geodata> m_geodata;
+
+    // NavMesh
+    std::shared_ptr<NavMeshBuilder> m_navmesh_builder;
+    std::unique_ptr<NavMeshWorker>  m_navmesh_worker;
+
+    // NavMesh: зібрані точки під час руху
+    struct NavPoint { float x, y, z; };
+    std::vector<NavPoint> m_nav_points;
+    float m_nav_last_x = 0.f, m_nav_last_y = 0.f;
 
     // Async vision результат (від VisionWorker)
     std::optional<std::vector<Eyes::NPC>>        m_async_npcs;
