@@ -391,6 +391,8 @@ void Brain::TryRecordNavPoint() {
         m_nav_points.push_back({px, py, pz});
         m_nav_last_x = px;
         m_nav_last_y = py;
+        std::cerr << "[NAVMESH] +точка #" << m_nav_points.size()
+                  << " x=" << (int)px << " y=" << (int)py << " z=" << (int)pz << "\n";
     }
 }
 

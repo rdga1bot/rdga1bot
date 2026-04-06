@@ -25,6 +25,7 @@
 #include <fstream>
 #include "MemReader.h"
 #include "offset_scanner.h"
+#include "ProcessMemory.h"
 #include "world_state.h"
 #include "Geodata.h"
 #include "vision_worker.h"
@@ -139,6 +140,68 @@ static pid_t findL2Pid() {
     }
     closedir(dir);
     return found;
+}
+
+// ─── --watch-pos: моніторинг XYZ з кількох offsets під час руху ─────────────
+// Запуск: ./rdga1bot --watch-pos
+// Виводить координати кожні 200мс — знайди offset що оновлюється плавно під час руху.
+static void watchPos(const std::string& offsets_file) {
+    pid_t pid = findL2Pid();
+    if (!pid) { std::cerr << "L2 процес не знайдено\n"; return; }
+    std::cerr << "[watch-pos] L2 pid=" << pid << "\n";
+
+    OffsetScanner scanner(pid);
+    if (!scanner.loadOffsets(offsets_file)) {
+        std::cerr << "[watch-pos] offsets.json не знайдено — спочатку запусти бота (blindScan збереже базу)\n";
+        return;
+    }
+
+    uintptr_t base = scanner.playerBaseCache;
+    if (!base) {
+        std::cerr << "[watch-pos] playerBase не знайдено в offsets.json\n"
+                  << "[watch-pos] Запусти бота один раз — blindScan знайде і збереже PlayerBase\n";
+        return;
+    }
+    std::cerr << "[watch-pos] PlayerBase=0x" << std::hex << base << std::dec << "\n";
+    std::cerr << "[watch-pos] Рухай персонажа! Ctrl+C щоб зупинити.\n";
+    std::cerr << std::left
+              << std::setw(7)  << "t(мс)"
+              << std::setw(12) << "0x24(X)"
+              << std::setw(12) << "0x28(Y)"
+              << std::setw(12) << "0x2C(Z)"
+              << std::setw(12) << "0x90(X2)"
+              << std::setw(12) << "0x94(Y2)"
+              << "  delta_24  delta_90\n";
+
+    float prev_x24 = 0, prev_x90 = 0;
+    auto t0 = std::chrono::steady_clock::now();
+    while (true) {
+        auto now = std::chrono::steady_clock::now();
+        int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(now - t0).count();
+
+        float x24=0, y28=0, z2c=0, x90=0, y94=0;
+        ProcessMemory::Read(pid, base+0x24, &x24, 4);
+        ProcessMemory::Read(pid, base+0x28, &y28, 4);
+        ProcessMemory::Read(pid, base+0x2C, &z2c, 4);
+        ProcessMemory::Read(pid, base+0x90, &x90, 4);
+        ProcessMemory::Read(pid, base+0x94, &y94, 4);
+
+        int d24 = (int)(x24 - prev_x24);
+        int d90 = (int)(x90 - prev_x90);
+        prev_x24 = x24; prev_x90 = x90;
+
+        std::cerr << std::left
+                  << std::setw(7)  << ms
+                  << std::setw(12) << (int)x24
+                  << std::setw(12) << (int)y28
+                  << std::setw(12) << (int)z2c
+                  << std::setw(12) << (int)x90
+                  << std::setw(12) << (int)y94
+                  << "  " << std::setw(9) << d24
+                  << "  " << d90 << "\n";
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
 }
 
 static void dumpKnownListObjects(const std::string& offsets_file) {
@@ -677,6 +740,7 @@ int main(int argc, char* argv[]) {
 
     bool calibrate = false;
     bool heading_monitor = false;
+    bool watch_pos = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--quick")           quick          = true;
@@ -685,6 +749,7 @@ int main(int argc, char* argv[]) {
         if (a == "--calibrate")       calibrate      = true;
         if (a == "--hp-calibrate")    hp_calibrate   = true;
         if (a == "--heading-monitor") heading_monitor = true;
+        if (a == "--watch-pos")       watch_pos      = true;
         if (a == "--config" && i + 1 < argc) config_path = argv[++i];
     }
 
@@ -902,6 +967,13 @@ int main(int argc, char* argv[]) {
                   << "  Float що ЗМЕНШИВСЯ = OFF_CHAR_HP\n"
                   << "  Float що НЕ ЗМІНИВСЯ (більший) = OFF_CHAR_HP_MAX\n"
                   << "  int32 що став 1 після смерті = OFF_CHAR_IS_DEAD\n";
+        return 0;
+    }
+
+    // ─── --watch-pos: моніторинг XYZ координат під час руху ─────────────────────
+    if (watch_pos) {
+        Config cfg; cfg.Load(config_path);
+        watchPos(cfg.knownlist_offsets_file);
         return 0;
     }
 
@@ -1244,6 +1316,7 @@ int main(int argc, char* argv[]) {
                         // Re-scan після respawn/restart: оновити playerBase у bg thread
                         brain.GetWorldState()->setPlayerBase(base);
                     }
+                    kl_scanner->playerBaseCache = base;  // зберігаємо для --watch-pos
                     kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
                     std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base
                               << std::dec << " WorldState активовано\n";

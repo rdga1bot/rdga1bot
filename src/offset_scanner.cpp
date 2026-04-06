@@ -243,6 +243,7 @@ bool OffsetScanner::saveOffsets(const std::string& path) const {
     std::ofstream f(path);
     if (!f) return false;
     f << "{\n"
+      << "  \"playerBase\":"       << playerBaseCache << ",\n"
       << "  \"OFF_KNOWN_LIST\":"   << knownListOff  << ",\n"
       << "  \"OFF_KNOWN_COUNT\":"  << knownCountOff << ",\n"
       << "  \"OFF_OBJ_TYPE\":"     << objTypeOff    << ",\n"
@@ -276,6 +277,7 @@ bool OffsetScanner::loadOffsets(const std::string& path) {
         out = (uintptr_t)val;
     };
 
+    parseUint("playerBase",       playerBaseCache);
     parseUint("OFF_KNOWN_LIST",   knownListOff);
     parseUint("OFF_KNOWN_COUNT",  knownCountOff);
     parseUint("OFF_OBJ_TYPE",     objTypeOff);

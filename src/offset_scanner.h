@@ -73,6 +73,7 @@ public:
     void headingMonitor(uintptr_t playerBase) const;
 
     // Runtime-значення offsets (перевизначаються findKnownListOffset або loadOffsets)
+    uintptr_t playerBaseCache = 0;          // зберігається в offsets.json після blindScan
     uintptr_t knownListOff   = OFF_KNOWN_LIST;
     uintptr_t knownCountOff  = OFF_KNOWN_COUNT;
     uintptr_t objTypeOff     = OFF_OBJ_TYPE;
