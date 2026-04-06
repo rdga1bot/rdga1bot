@@ -117,12 +117,32 @@ uintptr_t OffsetScanner::blindScan() {
             if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // X і Y мають бути значущими (справжній гравець ніколи не X=0 або Y=0)
-            if (std::fabsf(px) < 500.f || std::fabsf(py) < 500.f) continue;
+            // X і Y мають бути в заселеній зоні L2 (не near-origin garbage).
+            // Реальні ігрові зони ElmoreLab: |X| > 30000, |Y| > 30000.
+            // Об'єкти ≈ (0,0) — false positive з неініціалізованих структур.
+            if (std::fabsf(px) < 30000.f || std::fabsf(py) < 30000.f) continue;
             // Z не може бути точно 0 або степінь двійки (сміттєвий float)
             if (std::fabsf(pz) < 10.f) continue;
             // Координати не мають бути рівними між собою
             if (px == py && py == pz) continue;
+
+            // ── Перевірка 4: перший KL об'єкт має бути ПОРЯД з кандидатом ─────
+            // Реальний гравець: KL містить локальних мобів (в радіусі MaxRange ~2500 L2u).
+            // False positive: KL "об'єкт" → випадкова пам'ять → рандомні XYZ.
+            // Перевіряємо offset +0x24 і +0x90 (два можливих XYZ поля в L2 об'єкті).
+            {
+                bool kl_nearby = false;
+                static constexpr float KL_MAX_DIST2 = 4000.f * 4000.f; // 4000 L2u
+                for (uint32_t xoff : {0x24u, 0x90u}) {
+                    float ox = rpm<float>(firstObjPtr + xoff);
+                    float oy = rpm<float>(firstObjPtr + xoff + 4);
+                    if (!isL2Coord(ox, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+                    if (!isL2Coord(oy, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+                    float ddx = ox - px, ddy = oy - py;
+                    if (ddx*ddx + ddy*ddy < KL_MAX_DIST2) { kl_nearby = true; break; }
+                }
+                if (!kl_nearby) continue; // KL об'єкти далеко → не гравець
+            }
 
             uintptr_t candidate = region.base + i;
             std::cerr << "[OffsetScanner] blindScan: PlayerBase=0x" << std::hex << candidate

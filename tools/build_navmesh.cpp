@@ -100,19 +100,26 @@ int main(int argc, char** argv) {
     cfg.walkableRadius      = (int)std::ceil(30.f   / cfg.cs); // 1 cell
     cfg.maxEdgeLen          = (int)(1200.f / cfg.cs);
     cfg.maxSimplificationError = 1.3f;
-    cfg.minRegionArea       = 8;
-    cfg.mergeRegionArea     = 20;
+    cfg.minRegionArea       = 2;   // тримаємо малі регіони (2 клітини мінімум)
+    cfg.mergeRegionArea     = 10;
     cfg.maxVertsPerPoly     = 6;
-    cfg.detailSampleDist    = 0.f;
-    cfg.detailSampleMaxError= 0.f;
+    // detailSampleDist=0 → мінімальна тріангуляція → Recast triangulateHull segfault
+    // з маленькими полігонами. Використовуємо 1 cell = cs.
+    cfg.detailSampleDist    = cfg.cs;
+    cfg.detailSampleMaxError= cfg.ch * 0.5f;
 
     // AABB з точок
     rcCalcBounds(verts.data(), (int)verts.size()/3, cfg.bmin, cfg.bmax);
-    // Додаємо padding для walkableRadius
-    for (int i = 0; i < 3; i++) {
-        cfg.bmin[i] -= cfg.walkableRadius * cfg.cs + cfg.cs;
-        cfg.bmax[i] += cfg.walkableRadius * cfg.cs + cfg.cs;
-    }
+    // Padding: XZ — для walkableRadius (агент по горизонталі)
+    //          Y-мін — 1 cell вниз (small margin)
+    //          Y-макс — walkableHeight cells ВГОРУ (потрібно місце для агента над поверхнею!)
+    //   Без достатнього Y-max padding: clearance над спаном < walkableHeight →
+    //   rcBuildCompactHeightfield відфільтровує ВСІ спани → Polys=0.
+    const float xz_pad = (cfg.walkableRadius + 1) * cfg.cs;
+    cfg.bmin[0] -= xz_pad;   cfg.bmax[0] += xz_pad;
+    cfg.bmin[2] -= xz_pad;   cfg.bmax[2] += xz_pad;
+    cfg.bmin[1] -= cfg.ch;                                    // 1 cell вниз
+    cfg.bmax[1] += (cfg.walkableHeight + 1) * cfg.ch;        // ~200 L2u вгору
     rcCalcGridSize(cfg.bmin, cfg.bmax, cfg.cs, &cfg.width, &cfg.height);
     std::cerr << "[BUILD] Grid: " << cfg.width << "×" << cfg.height << "\n";
 
@@ -131,7 +138,10 @@ int main(int argc, char** argv) {
     }
 
     rcFilterLowHangingWalkableObstacles(&ctx, cfg.walkableClimb, *hf);
-    rcFilterLedgeSpans(&ctx, cfg.walkableHeight, cfg.walkableClimb, *hf);
+    // rcFilterLedgeSpans: ВИМКНЕНО — для підземелля L2 з ізольованими flat квадами
+    // цей фільтр видаляє ВСІ граничні клітини (сусід = порожньо = drop 21 cells > walkableHeight=9)
+    // → лишається тільки 1 inner cell → Contours=0 → Polys=0.
+    // rcFilterLedgeSpans(&ctx, cfg.walkableHeight, cfg.walkableClimb, *hf);
     rcFilterWalkableLowHeightSpans(&ctx, cfg.walkableHeight, *hf);
 
     rcCompactHeightfield* chf = rcAllocCompactHeightfield();
@@ -159,7 +169,6 @@ int main(int argc, char** argv) {
                           cfg.maxEdgeLen, *cset)) {
         std::cerr << "[BUILD] rcBuildContours failed\n"; return 1;
     }
-
     rcPolyMesh* pmesh = rcAllocPolyMesh();
     if (!rcBuildPolyMesh(&ctx, *cset, cfg.maxVertsPerPoly, *pmesh)) {
         std::cerr << "[BUILD] rcBuildPolyMesh failed\n"; return 1;

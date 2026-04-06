@@ -480,17 +480,19 @@ public:
             }
         }
 
-        // Kill detection: HP ≤ 2% — потрібно 3 тіки (debounce)
+        // Kill detection: HP ≤ 2% — 3 тіки debounce.
+        // DetectTargetHPDirect має guard hp<1→1: мін 1% якщо є хоч 1px бару.
+        // Тому hp==0 ніколи не спрацьовує (0px → 0, але 1px → 1%).
+        // hp<=2 тригерить при 0-4px барі (0-2.6% HP) → правильно: моб при смерті.
+        // Смерть ГРАВЦЯ захищена окремо: me.hp==0 + 10 тіків debounce в Brain.cpp.
         if (gs.target.has_value() && gs.target->hp <= 2) {
             m_target_hp_zero_count++;
             if (m_target_hp_zero_count >= 3) {
                 if (m_first_attack) {
-                    gs.log("[ATTACKING] Kill(hp=" + std::to_string(gs.target->hp) +
-                        "%) вже мертвий до першої атаки → TARGETING");
+                    gs.log("[ATTACKING] Kill(hp=0%) вже мертвий до першої атаки → TARGETING");
                     return ObjectiveResult::switchTo("Target");
                 } else {
-                    gs.log("[ATTACKING] Kill(hp=" + std::to_string(gs.target->hp) +
-                        "%) → LOOTING");
+                    gs.log("[ATTACKING] Kill(hp=0%) → LOOTING");
                     return ObjectiveResult::switchTo("Loot");
                 }
             }

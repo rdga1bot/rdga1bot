@@ -961,6 +961,34 @@ printf "status\n" | ./rdga1bot --no-tui --quick
   Компілюється без Recast (graceful degradation: `[BUILD] src/recast/Detour не знайдено → NavMesh вимкнено`).
   NavMesh FindPath має пріоритет над Geodata waypoints. `[NavMesh]` секція в .ini. ✓
 
+### ✅ MR20a: BehaviorTree VM (2026-04-07) — РЕАЛІЗОВАНО
+- **`src/BehaviorTree.h/.cpp`** — stackless BT VM: `BTNode` (24 bytes), `BTState` (8 bytes), плоскі масиви (MAX_NODES=256, MAX_CHILDREN=512). Без рекурсії, без heap.
+- **BTNodeType**: Selector, Sequence, Condition, Action, Inverter, Repeat, Wait.
+- **tick()**: program-counter loop, `goto exit_loop` коли Action повертає Running або Wait чекає.
+- **addChild() lazy childStart**: `childStart` встановлюється при першому addChild дзвінку, а не при створенні вузла. Критично для коректного BFS-порядку в m_children[].
+- **build.sh**: додано `$SRC/BehaviorTree.cpp`. ✓
+
+### ✅ MR20b: BotBehaviorTree Dead/Rest/Zone/Buff/Loot/Attack (2026-04-07) — РЕАЛІЗОВАНО
+- **`src/BotBehaviorTree.h/.cpp`** — Farm BT: Selector root → Dead/Rest/Zone/Buff/Loot/Attack/Target гілки.
+- **thread_local BotBehaviorTree* s_self** — static Action/Condition функції звертаються до стану через цей pointer (single-threaded Brain, безпечно).
+- **init() BFS-порядок** — спочатку addChild(root, всі seq), потім addChild(seq, їх нащадки). Порушення цього порядку → circular childStart → infinite loop у VM.
+- **Brain A/B switch**: `[BehaviorTree] Enabled=true/false` → BotBehaviorTree або ObjectiveManager.
+- **Config**: `bool use_behavior_tree = false` у `[BehaviorTree]` секції .ini.
+- **build.sh**: додано `$SRC/BotBehaviorTree.cpp`. ✓
+
+### ✅ MR20c: actTarget — повна міграція TargetObjective (2026-04-07) — РЕАЛІЗОВАНО
+- **actTarget** — повний порт TargetObjective::execute() в BotBehaviorTree: m_tgt_* поля, мінімапа ротація, F2, макро fallback, pokemon, breadcrumbs, NavMesh/Geodata waypoints, patrol, stuck detection.
+- **deliverGeoPath() / takePendingPathRequest()** — публічний API для Brain dispatch.
+- **resetTargetState()** через `m_tgt_active` flag: скидається з resetAttackState() та actLoot. Читає `m_unreachable_flag` → встановлює `m_attack_was_unreachable` + просуває `m_tgt_macro_idx`.
+- **Screen-Y фільтр** перенесено з Target → actAttack (при `m_atk_first_attack=true`), повертає Running (не Failure) щоб наступний тік повторив Target.
+- **Тест** (без гри): `[BT] Buff avg=858µs` ✓ — BT Buff гілка активується і логується коректно.
+
+### ⚠ КРИТИЧНА ПРИМІТКА: BT init() порядок
+init() ПОВИНЕН будувати дерево в BFS-порядку (2 фази):
+1. addChild(root, всі прямі нащадки) — спочатку
+2. addChild(кожен seq, його нащадки) — потім
+Порушення → childStart кожного Sequence вказує на себе → infinite loop у tick().
+
 ### Пріоритет 1: Клонування Recast і build NavMesh
 ```bash
 cd ~/l2bot/rdga1bot/src && mkdir -p recast && cd recast

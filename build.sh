@@ -52,6 +52,8 @@ SRCS="
   $SRC/objective_manager.cpp
   $SRC/navmesh_builder.cpp
   $SRC/navmesh_worker.cpp
+  $SRC/BehaviorTree.cpp
+  $SRC/BotBehaviorTree.cpp
 "
 
 # Detour sources (тільки якщо src/recast/Detour існує)

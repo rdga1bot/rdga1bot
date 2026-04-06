@@ -142,63 +142,190 @@ static pid_t findL2Pid() {
     return found;
 }
 
+// ─── --find-pos: сканує ВСЮ пам'ять L2 на XYZ гравця (як Cheat Engine) ──────
+// Запуск у фоні: ./rdga1bot --find-pos &
+// 1) Відразу клікни мишею в L2 вікно (переключи фокус)
+// 2) Стоїш нерухомо 5с (перший скан)
+// 3) "ПЕРЕМІЩУЙСЯ ДАЛЕКО!" → клікни мишею далеко від поточного місця (300+ L2u)
+// 4) Показуємо адреси де X змінився на > 150 L2u — це реальний PlayerBase XYZ
+//
+// НЕ потребує blindScan/PlayerBase — шукає значення прямо по значенню.
+// Кандидати: float X,Y обидва в |val| > 30000 AND < 327000 (не ближня зона до 0).
+static void findPos(const std::string& /*offsets_file*/) {
+    pid_t pid = findL2Pid();
+    if (!pid) { std::cerr << "[find-pos] L2 процес не знайдено\n"; return; }
+    std::cerr << "[find-pos] PID=" << pid << "\n";
+
+    // Зчитуємо readable регіони пам'яті Wine процесу (пропускаємо >32MB)
+    auto getRegions = [&]() {
+        std::vector<std::pair<uintptr_t,size_t>> regions;
+        std::ifstream maps("/proc/" + std::to_string(pid) + "/maps");
+        std::string line;
+        while (std::getline(maps, line)) {
+            if (line.find('r') == std::string::npos) continue;
+            if (line.find("vvar") != std::string::npos ||
+                line.find("vsyscall") != std::string::npos) continue;
+            uintptr_t lo = 0, hi = 0;
+            if (sscanf(line.c_str(), "%lx-%lx", &lo, &hi) != 2) continue;
+            size_t sz = hi - lo;
+            if (sz > 32*1024*1024 || sz < 12) continue;
+            regions.push_back({lo, sz});
+        }
+        return regions;
+    };
+
+    // Перевірка: значення > 30000 і < 327000 (не нульова зона і не за межами світу)
+    // Виключаємо [−30000..30000] — це де blindScan знаходить garbage
+    auto isPopulatedCoord = [](float v) -> bool {
+        float abs_v = std::fabsf(v);
+        return std::isfinite(v) && abs_v > 30000.f && abs_v < 327000.f;
+    };
+    auto isValidZ = [](float v) -> bool {
+        return std::isfinite(v) && v > -16384.f && v < 16384.f;
+    };
+
+    std::cerr << "[find-pos] Перший скан — стій нерухомо 5с...\n";
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+    auto regions = getRegions();
+    std::cerr << "[find-pos] Регіонів: " << regions.size()
+              << " — сканую (float X,Y обидва > 30000)...\n";
+
+    // Перший скан: зберігаємо (addr, x0) де float X i Y обидва в populated range
+    struct Hit { uintptr_t addr; float x0; float y0; };
+    std::vector<Hit> hits;
+    hits.reserve(4096);
+    {
+        std::vector<uint8_t> buf;
+        for (auto& [lo, sz] : regions) {
+            buf.resize(sz);
+            struct iovec lv = { buf.data(), sz };
+            struct iovec rv = { (void*)lo, sz };
+            ssize_t rd = process_vm_readv(pid, &lv, 1, &rv, 1, 0);
+            if (rd < 12) continue;
+            for (size_t i = 0; i + 12 <= (size_t)rd; i += 4) {
+                float fx, fy, fz;
+                memcpy(&fx, buf.data()+i,   4);
+                memcpy(&fy, buf.data()+i+4, 4);
+                memcpy(&fz, buf.data()+i+8, 4);
+                if (!isPopulatedCoord(fx)) continue;
+                if (!isPopulatedCoord(fy)) continue;
+                if (!isValidZ(fz))         continue;
+                // Додаткова перевірка: X і Y не рівні (у реальних об'єктів X≠Y)
+                if (std::fabsf(fx - fy) < 1.f) continue;
+                hits.push_back({lo + (uintptr_t)i, fx, fy});
+            }
+        }
+    }
+    std::cerr << "[find-pos] Кандидатів: " << hits.size() << "\n";
+    if (hits.empty()) {
+        std::cerr << "[find-pos] Нічого — переконайся що персонаж зайшов у зону фарму (далеко від спавну)\n";
+        return;
+    }
+
+    std::cerr << "\n[find-pos] !!! ЗАРАЗ ПЕРЕМІЩУЙСЯ ДАЛЕКО (300+ L2u) МИШЕЮ В L2 !!!\n";
+    std::cerr << "[find-pos] Чекаємо 12 секунд...\n\n";
+    std::this_thread::sleep_for(std::chrono::seconds(12));
+
+    // Другий скан: шукаємо адреси де X змінився на > 150 L2u
+    std::cerr << "[find-pos] Аналіз змін (поріг >150 L2u)...\n";
+    int shown = 0;
+    for (auto& h : hits) {
+        float new_x = 0.f, new_y = 0.f, new_z = 0.f;
+        if (!ProcessMemory::Read(pid, h.addr,   &new_x, 4)) continue;
+        if (!ProcessMemory::Read(pid, h.addr+4, &new_y, 4)) continue;
+        if (!ProcessMemory::Read(pid, h.addr+8, &new_z, 4)) continue;
+        float dx = new_x - h.x0;
+        if (std::fabsf(dx) < 150.f) continue;  // моби теж рухаються, але < 150 L2u/10с
+        if (!isPopulatedCoord(new_x)) continue; // перевіряємо що нове значення теж валідне
+        if (!isPopulatedCoord(new_y)) continue;
+
+        // Шукаємо відстань від blindScan PlayerBase (для відладки)
+        std::cerr << "[find-pos] >>> addr=0x" << std::hex << h.addr << std::dec
+                  << "  X: " << (int)h.x0 << " → " << (int)new_x
+                  << " (Δ" << (int)dx << ")"
+                  << "  Y=" << (int)new_y << "  Z=" << (int)new_z
+                  << "  [potential pb = 0x" << std::hex << (h.addr - 0x24) << std::dec << "]\n";
+        if (++shown >= 20) break;
+    }
+    if (shown == 0)
+        std::cerr << "[find-pos] Жодна адреса не змінилась на >150 L2u\n"
+                  << "[find-pos] → гравець не рухався під час очікування\n"
+                  << "[find-pos] Запусти у фоні (&), клікни на L2 вікно, клікни ДАЛЕКО від персонажа\n";
+    else
+        std::cerr << "\n[find-pos] potential pb = addr_X - 0x24 (якщо X offset = 0x24)\n"
+                  << "[find-pos] Перевір: у offsets.json playerBase = potential_pb\n"
+                  << "[find-pos] Запусти ./rdga1bot --watch-pos для верифікації\n";
+}
+
 // ─── --watch-pos: моніторинг XYZ з кількох offsets під час руху ─────────────
 // Запуск: ./rdga1bot --watch-pos
 // Виводить координати кожні 200мс — знайди offset що оновлюється плавно під час руху.
-static void watchPos(const std::string& offsets_file) {
+// override_pb != 0 → використовувати вказану адресу замість offsets.json
+static void watchPos(const std::string& offsets_file, uintptr_t override_pb = 0) {
     pid_t pid = findL2Pid();
     if (!pid) { std::cerr << "L2 процес не знайдено\n"; return; }
     std::cerr << "[watch-pos] L2 pid=" << pid << "\n";
 
-    OffsetScanner scanner(pid);
-    if (!scanner.loadOffsets(offsets_file)) {
-        std::cerr << "[watch-pos] offsets.json не знайдено — спочатку запусти бота (blindScan збереже базу)\n";
-        return;
-    }
-
-    uintptr_t base = scanner.playerBaseCache;
+    uintptr_t base = override_pb;
     if (!base) {
-        std::cerr << "[watch-pos] playerBase не знайдено в offsets.json\n"
-                  << "[watch-pos] Запусти бота один раз — blindScan знайде і збереже PlayerBase\n";
-        return;
+        OffsetScanner scanner(pid);
+        if (!scanner.loadOffsets(offsets_file)) {
+            std::cerr << "[watch-pos] offsets.json не знайдено\n"
+                      << "[watch-pos] Запусти --find-pos → отримай pb адресу → запусти --watch-pos --pb 0xADDR\n";
+            return;
+        }
+        base = scanner.playerBaseCache;
+        if (!base) {
+            std::cerr << "[watch-pos] playerBase не знайдено в offsets.json\n"
+                      << "[watch-pos] Запусти --find-pos → потім --watch-pos --pb 0xADDR\n";
+            return;
+        }
     }
     std::cerr << "[watch-pos] PlayerBase=0x" << std::hex << base << std::dec << "\n";
-    std::cerr << "[watch-pos] Рухай персонажа! Ctrl+C щоб зупинити.\n";
-    std::cerr << std::left
-              << std::setw(7)  << "t(мс)"
-              << std::setw(12) << "0x24(X)"
-              << std::setw(12) << "0x28(Y)"
-              << std::setw(12) << "0x2C(Z)"
-              << std::setw(12) << "0x90(X2)"
-              << std::setw(12) << "0x94(Y2)"
-              << "  delta_24  delta_90\n";
+    std::cerr << "[watch-pos] Рухай персонажа МИШЕЮ в L2 (клікай далеко). Ctrl+C щоб зупинити.\n";
+    std::cerr << "[watch-pos] Показуємо тільки рядки де хоча б один offset змінився.\n\n";
 
-    float prev_x24 = 0, prev_x90 = 0;
+    // Читаємо набір кандидатів: 0x24/28/2C + 0x60/64/68 + 0x6C/70/74 + 0x78/7C/80
+    // З --find-pos: pb+0x60, pb+0x6C, pb+0x78 мали великі Δ при кліку
+    struct PosCandidate { unsigned off; const char* name; float prev; };
+    std::vector<PosCandidate> cands = {
+        {0x24, "0x24(X)",  0.f}, {0x28, "0x28(Y)",  0.f}, {0x2C, "0x2C(Z)",  0.f},
+        {0x60, "0x60(X2)", 0.f}, {0x64, "0x64(Y2)", 0.f}, {0x68, "0x68(Z2)", 0.f},
+        {0x6C, "0x6C(X3)", 0.f}, {0x70, "0x70(Y3)", 0.f}, {0x74, "0x74(Z3)", 0.f},
+        {0x78, "0x78(X4)", 0.f}, {0x7C, "0x7C(Y4)", 0.f}, {0x80, "0x80(Z4)", 0.f},
+    };
+    // Заголовок
+    std::cerr << std::left << std::setw(7) << "t(мс)";
+    for (auto& c : cands) std::cerr << std::setw(12) << c.name;
+    std::cerr << "\n" << std::string(7 + 12 * (int)cands.size(), '-') << "\n";
+
+    // Ініціалізуємо prev
+    for (auto& c : cands) ProcessMemory::Read(pid, base + c.off, &c.prev, 4);
+
     auto t0 = std::chrono::steady_clock::now();
     while (true) {
         auto now = std::chrono::steady_clock::now();
         int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(now - t0).count();
 
-        float x24=0, y28=0, z2c=0, x90=0, y94=0;
-        ProcessMemory::Read(pid, base+0x24, &x24, 4);
-        ProcessMemory::Read(pid, base+0x28, &y28, 4);
-        ProcessMemory::Read(pid, base+0x2C, &z2c, 4);
-        ProcessMemory::Read(pid, base+0x90, &x90, 4);
-        ProcessMemory::Read(pid, base+0x94, &y94, 4);
+        std::vector<float> vals(cands.size());
+        bool any_changed = false;
+        for (size_t i = 0; i < cands.size(); i++) {
+            ProcessMemory::Read(pid, base + cands[i].off, &vals[i], 4);
+            if (std::fabsf(vals[i] - cands[i].prev) > 10.f) any_changed = true;
+        }
 
-        int d24 = (int)(x24 - prev_x24);
-        int d90 = (int)(x90 - prev_x90);
-        prev_x24 = x24; prev_x90 = x90;
-
-        std::cerr << std::left
-                  << std::setw(7)  << ms
-                  << std::setw(12) << (int)x24
-                  << std::setw(12) << (int)y28
-                  << std::setw(12) << (int)z2c
-                  << std::setw(12) << (int)x90
-                  << std::setw(12) << (int)y94
-                  << "  " << std::setw(9) << d24
-                  << "  " << d90 << "\n";
+        if (any_changed) {
+            std::cerr << std::left << std::setw(7) << ms;
+            for (size_t i = 0; i < cands.size(); i++) {
+                int delta = (int)(vals[i] - cands[i].prev);
+                std::string cell = std::to_string((int)vals[i]);
+                if (delta != 0) cell += "(Δ" + std::to_string(delta) + ")";
+                std::cerr << std::setw(12) << cell;
+            }
+            std::cerr << "\n";
+            for (size_t i = 0; i < cands.size(); i++) cands[i].prev = vals[i];
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
@@ -741,6 +868,10 @@ int main(int argc, char* argv[]) {
     bool calibrate = false;
     bool heading_monitor = false;
     bool watch_pos = false;
+    bool map_mode  = false;
+    bool find_pos  = false;
+    bool scan_pos  = false;
+    uintptr_t override_pb = 0;  // --pb 0xADDR — переназначити PlayerBase для watch-pos/map
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--quick")           quick          = true;
@@ -750,6 +881,12 @@ int main(int argc, char* argv[]) {
         if (a == "--hp-calibrate")    hp_calibrate   = true;
         if (a == "--heading-monitor") heading_monitor = true;
         if (a == "--watch-pos")       watch_pos      = true;
+        if (a == "--map")             map_mode       = true;
+        if (a == "--find-pos")        find_pos       = true;
+        if (a == "--scan-pos")        scan_pos       = true;
+        if (a == "--pb" && i + 1 < argc) {
+            override_pb = (uintptr_t)std::stoull(argv[++i], nullptr, 16);
+        }
         if (a == "--config" && i + 1 < argc) config_path = argv[++i];
     }
 
@@ -970,10 +1107,220 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // ─── --find-pos: пошук реального offset поточної позиції в пам'яті ─────────
+    if (find_pos) {
+        Config cfg; cfg.Load(config_path);
+        findPos(cfg.knownlist_offsets_file);
+        return 0;
+    }
+
     // ─── --watch-pos: моніторинг XYZ координат під час руху ─────────────────────
     if (watch_pos) {
         Config cfg; cfg.Load(config_path);
-        watchPos(cfg.knownlist_offsets_file);
+        watchPos(cfg.knownlist_offsets_file, override_pb);
+        return 0;
+    }
+
+    // ─── --map: режим запису NavMesh точок вручну ─────────────────────────────
+    // Запуск: ./rdga1bot --map [--config rdga1bot.ini]
+    // Веди персонажа вручну навколо перешкод (колони, стіни) — записуються точки прибуття.
+    // Ctrl+C → зберігає navmesh_points.pts (додає до існуючого файлу).
+    if (map_mode) {
+        Config cfg; cfg.Load(config_path);
+        const std::string pts_file = cfg.navmesh_cfg.points_file.empty()
+                                   ? "navmesh_points.pts"
+                                   : cfg.navmesh_cfg.points_file;
+        const float collect_dist = cfg.navmesh_cfg.collect_dist > 0.f
+                                 ? cfg.navmesh_cfg.collect_dist : 30.f;
+
+        pid_t pid = findL2Pid();
+        if (!pid) { std::cerr << "[MAP] l2.exe не знайдено\n"; return 1; }
+
+        OffsetScanner scanner(pid);
+        // Структурні offsets з кешу (knownListOff, objX/Y/Z тощо)
+        scanner.loadOffsets(cfg.knownlist_offsets_file);
+        // PlayerBase: якщо задано --pb → використовуємо його; інакше blindScan
+        uintptr_t playerBase = override_pb;
+        if (!playerBase) {
+            std::cerr << "[MAP] blindScan()...\n";
+            playerBase = scanner.blindScan();
+            if (!playerBase) { std::cerr << "[MAP] PlayerBase не знайдено\n"
+                               << "[MAP] Спробуй: ./rdga1bot --find-pos  →  ./rdga1bot --map --pb 0xADDR\n";
+                               return 1; }
+        }
+        // Показуємо поточну позицію — перевір що вона відповідає місцю в грі!
+        float _cx = scanner.rpm_pub<float>(playerBase + OFF_PLAYER_X);
+        float _cy = scanner.rpm_pub<float>(playerBase + OFF_PLAYER_Y);
+        float _cz = scanner.rpm_pub<float>(playerBase + 0x2C);
+        std::cerr << "[MAP] PlayerBase=0x" << std::hex << playerBase << std::dec
+                  << "  поточна позиція: X=" << (int)_cx
+                  << " Y=" << (int)_cy << " Z=" << (int)_cz << "\n"
+                  << "[MAP] Якщо координати невірні → запусти --find-pos, отримай правильний pb\n";
+
+        // Завантажуємо існуючі точки (щоб не дублювати)
+        std::vector<std::array<float,3>> pts;
+        {
+            std::ifstream fin(pts_file, std::ios::binary);
+            if (fin) {
+                uint32_t cnt = 0;
+                fin.read((char*)&cnt, 4);
+                pts.resize(cnt);
+                for (auto& p : pts) fin.read((char*)p.data(), 12);
+                std::cerr << "[MAP] Завантажено " << cnt << " існуючих точок з " << pts_file << "\n";
+            }
+        }
+
+        float last_x = 0.f, last_y = 0.f;
+        bool  have_last = false;
+
+        // Збереження при Ctrl+C
+        static std::vector<std::array<float,3>>* g_pts_ptr = nullptr;
+        static std::string                        g_pts_file;
+        g_pts_ptr  = &pts;
+        g_pts_file = pts_file;
+        std::signal(SIGINT, [](int) {
+            if (!g_pts_ptr) _exit(0);
+            {
+                // Явний flush+close — _exit() не викликає деструктори
+                std::ofstream fout(g_pts_file, std::ios::binary | std::ios::trunc);
+                uint32_t cnt = (uint32_t)g_pts_ptr->size();
+                fout.write((char*)&cnt, 4);
+                for (auto& p : *g_pts_ptr) fout.write((char*)p.data(), 12);
+                fout.flush();
+                fout.close();
+                std::cerr << "\n[MAP] Збережено " << cnt << " точок → " << g_pts_file << "\n";
+                std::cerr << "[MAP] Тепер збудуй mesh:\n"
+                          << "  ./tools/build_navmesh " << g_pts_file << " navmesh.bin\n";
+            }
+            _exit(0);
+        });
+
+        std::cerr << "[MAP] Веди персонажа вручну навколо перешкод. Ctrl+C щоб зберегти.\n";
+        std::cerr << "[MAP] dist=" << collect_dist << " L2u  |  точок: " << pts.size() << "\n\n";
+
+        while (true) {
+            float px = scanner.rpm_pub<float>(playerBase + OFF_PLAYER_X);
+            float py = scanner.rpm_pub<float>(playerBase + OFF_PLAYER_Y);
+            float pz = scanner.rpm_pub<float>(playerBase + OFF_PLAYER_Z);
+
+            // Базова перевірка валідності (L2 world bounds)
+            bool valid = (px > -327000.f && px < 327000.f &&
+                          py > -327000.f && py < 327000.f &&
+                          pz > -16384.f  && pz < 16384.f  &&
+                          !(px == 0.f && py == 0.f));
+
+            if (valid) {
+                float dx = px - last_x, dy = py - last_y;
+                float dist2 = dx*dx + dy*dy;
+                if (!have_last || dist2 >= collect_dist * collect_dist) {
+                    pts.push_back({px, py, pz});
+                    last_x = px; last_y = py; have_last = true;
+                    std::cerr << "\r[MAP] #" << std::setw(4) << pts.size()
+                              << "  X=" << std::setw(8) << (int)px
+                              << " Y=" << std::setw(8) << (int)py
+                              << " Z=" << std::setw(6) << (int)pz
+                              << "          " << std::flush;
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        return 0;
+    }
+
+    // ─── --scan-pos: знайти реальний XYZ offset гравця у PlayerBase ──────────
+    // Алгоритм:
+    //   1. blindScan() → PlayerBase
+    //   2. Region scan → мобиKnownList → центроїд (середня XY мобів)
+    //   3. Скануємо pb+0x10..0x160 крок 4 як float
+    //   4. Виводимо ті що близько до центроїду мобів (±5000 L2u)
+    //   5. Повторюємо 3 рази з паузою 2с щоб побачити динаміку (чи змінюються)
+    if (scan_pos) {
+        Config cfg; cfg.Load(config_path);
+        pid_t pid = findL2Pid();
+        if (!pid) { std::cerr << "[SCAN] l2.exe не знайдено\n"; return 1; }
+
+        OffsetScanner scanner(pid);
+        scanner.loadOffsets(cfg.knownlist_offsets_file);
+
+        std::cerr << "[SCAN] blindScan()...\n";
+        uintptr_t pb = scanner.blindScan();
+        if (!pb) { std::cerr << "[SCAN] PlayerBase не знайдено\n"; return 1; }
+        std::cerr << "[SCAN] PlayerBase=0x" << std::hex << pb << std::dec << "\n\n";
+
+        // Region scan → centroid мобів
+        auto getMobCentroid = [&](float& cx, float& cy, float& cz) -> int {
+            const uintptr_t SCAN_BASE = 0x3F0000, SCAN_END = 0x440000;
+            const size_t CHUNK = 65536;
+            const float WORLD_MIN = -327000.f, WORLD_MAX = 327000.f;
+            const float Z_MIN = -16384.f, Z_MAX = 16384.f;
+            std::vector<uint8_t> buf(CHUNK);
+            cx = cy = cz = 0.f;
+            int cnt = 0;
+            for (uintptr_t a = SCAN_BASE; a < SCAN_END; a += CHUNK) {
+                size_t sz = std::min((size_t)(SCAN_END - a), CHUNK);
+                if (!scanner.readBytesPublic(a, buf.data(), sz)) continue;
+                for (size_t i = 0; i + 12 <= sz; i += 4) {
+                    float x, y, z;
+                    memcpy(&x, buf.data()+i,   4);
+                    memcpy(&y, buf.data()+i+4, 4);
+                    memcpy(&z, buf.data()+i+8, 4);
+                    if (x < WORLD_MIN || x > WORLD_MAX) continue;
+                    if (y < WORLD_MIN || y > WORLD_MAX) continue;
+                    if (z < Z_MIN    || z > Z_MAX)      continue;
+                    float dx = x - cx/(cnt?cnt:1);
+                    float dy = y - cy/(cnt?cnt:1);
+                    if (cnt > 0 && sqrtf(dx*dx+dy*dy) > 4000.f) continue;
+                    cx += x; cy += y; cz += z;
+                    cnt++;
+                    if (cnt >= 20) break;
+                }
+                if (cnt >= 20) break;
+            }
+            if (cnt > 0) { cx /= cnt; cy /= cnt; cz /= cnt; }
+            return cnt;
+        };
+
+        float mob_cx = 0, mob_cy = 0, mob_cz = 0;
+        int mob_cnt = getMobCentroid(mob_cx, mob_cy, mob_cz);
+        if (mob_cnt < 3) {
+            std::cerr << "[SCAN] Мало мобів у region scan (" << mob_cnt
+                      << "). Запусти в зоні фарму!\n";
+            return 1;
+        }
+        std::cerr << "[SCAN] Центроїд " << mob_cnt << " мобів: X=" << (int)mob_cx
+                  << " Y=" << (int)mob_cy << " Z=" << (int)mob_cz << "\n";
+        std::cerr << "[SCAN] Шукаємо offsets у pb+0x10..0x160 близько до центроїду (±5000 L2u)\n\n";
+
+        const float NEAR = 5000.f;
+        for (int pass = 0; pass < 3; pass++) {
+            std::cerr << "=== Pass " << (pass+1) << "/3 ===\n";
+            std::cerr << std::left << std::setw(10) << "Offset"
+                      << std::setw(14) << "float"
+                      << std::setw(14) << "int32"
+                      << "  ← близько до X/Y/Z?\n";
+            std::cerr << std::string(52, '-') << "\n";
+            for (unsigned off = 0x10; off <= 0x160; off += 4) {
+                float  fv = scanner.rpm_pub<float>(pb + off);
+                int32_t iv; memcpy(&iv, &fv, 4);
+                bool near_x = fabsf(fv - mob_cx) < NEAR;
+                bool near_y = fabsf(fv - mob_cy) < NEAR;
+                bool near_z = fabsf(fv - mob_cz) < NEAR && fabsf(mob_cz) > 100.f;
+                if (near_x || near_y || near_z) {
+                    std::cerr << "  +0x" << std::hex << std::setw(4) << std::left << off
+                              << "  " << std::dec << std::setw(12) << (int)fv
+                              << "  " << std::setw(12) << iv
+                              << "  ← " << (near_x?"X ":"") << (near_y?"Y ":"") << (near_z?"Z":"")
+                              << "\n";
+                }
+            }
+            std::cerr << "\n";
+            if (pass < 2) std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+
+        std::cerr << "[SCAN] Готово. Порівняй з очікуваною позицією X=" << (int)mob_cx
+                  << " Y=" << (int)mob_cy << "\n";
+        std::cerr << "[SCAN] Знайдений offset → задай OFF_PLAYER_X в offsets_config.h і --map\n";
         return 0;
     }
 
@@ -1003,6 +1350,7 @@ int main(int argc, char* argv[]) {
         MemReader mem_reader;
 
         ApplyConfig(cfg, hands, eyes, brain, &mem_reader);
+        brain.LoadNavMeshPoints(); // завантажує існуючі точки з попередніх сесій
 
         // ── Threading: CPU affinity + workers ──────────────────────────────────
         VisionWorker  vision_worker;
@@ -1293,8 +1641,8 @@ int main(int argc, char* argv[]) {
                 if (kl_now_v - kl_validity_check >= std::chrono::seconds(30)) {
                     kl_validity_check = kl_now_v;
                     uintptr_t cur_base = brain.GetPlayerBase();
-                    float vx = kl_scanner->rpm_pub<float>(cur_base + 0x24);
-                    float vy = kl_scanner->rpm_pub<float>(cur_base + 0x28);
+                    float vx = kl_scanner->rpm_pub<float>(cur_base + OFF_PLAYER_X);
+                    float vy = kl_scanner->rpm_pub<float>(cur_base + OFF_PLAYER_Y);
                     bool base_valid = (std::isfinite(vx) && std::fabsf(vx) > 500.f &&
                                        std::isfinite(vy) && std::fabsf(vy) > 500.f);
                     if (!base_valid) {

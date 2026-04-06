@@ -91,6 +91,11 @@ public:
     // Оновлює playerX/Y/Z. Повертає true якщо координати валідні.
     bool refreshPlayerXYZ();
 
+    // Прочитати клієнтську XYZ (OFF_PLAYER_X_CLIENT = 0x78) — для NavMesh.
+    // Оновлюється при click-to-move прибутті; НЕ використовувати для kill detection!
+    // Повертає true якщо координати валідні і персонаж у зоні фарму (|X|>30000).
+    bool refreshPlayerXYZClient();
+
 private:
     KnownListReader          m_reader;
     pid_t                    m_pid;

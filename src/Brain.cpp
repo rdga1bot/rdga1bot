@@ -52,6 +52,14 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
     m_obj_manager.add(std::make_unique<AttackObjective>());
     // LootObjective активується тільки через Switch з AttackObjective
     m_obj_manager.add(std::make_unique<LootObjective>());
+
+    // BehaviorTree: ініціалізуємо якщо увімкнено
+    m_use_bt = m_cfg.use_behavior_tree;
+    if (m_use_bt) {
+        m_bot_bt.init(m_cfg);
+        Log("[BT] BotBehaviorTree: " +
+            std::to_string(m_bot_bt.nodeCount()) + " вузлів");
+    }
 }
 
 void Brain::ReloadConfig(const Config& new_cfg) {
@@ -180,12 +188,21 @@ void Brain::Process(bool debug) {
     gs.log_fn = [this](const std::string& msg) { Log(msg); };
     updateGameState(gs);
     gs.is_dead = is_dead_now;  // передаємо поточний стан смерті
-    m_obj_manager.tick(gs);
 
-    // Детекція переходу стану
-    const std::string new_obj = m_obj_manager.currentName();
-    if (new_obj != m_prev_obj_name) {
-        m_prev_obj_name = new_obj;
+    if (m_use_bt) {
+        std::string branch = m_bot_bt.tick(gs);
+        if (m_heartbeat_tick % 50 == 1)
+            Log("[BT] " + branch + " avg=" + std::to_string(m_bot_bt.avgTimeUs()) + "µs");
+        if (branch != m_prev_obj_name) {
+            m_prev_obj_name = branch;
+        }
+    } else {
+        m_obj_manager.tick(gs);
+        // Детекція переходу стану
+        const std::string new_obj = m_obj_manager.currentName();
+        if (new_obj != m_prev_obj_name) {
+            m_prev_obj_name = new_obj;
+        }
     }
 
     // Після Done DeadObjective: reset hp_zero_count
@@ -350,6 +367,29 @@ bool Brain::IsBlacklisted(int objectID) const {
     return false;
 }
 
+// ── LoadNavMeshPoints ─────────────────────────────────────────────────────────
+void Brain::LoadNavMeshPoints() {
+    if (!m_cfg.navmesh_cfg.collect_points) return;
+    const std::string& path = m_cfg.navmesh_cfg.points_file;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return;
+    uint32_t n = 0;
+    f.read((char*)&n, 4);
+    if (n == 0 || n > 100000) return;
+    m_nav_points.resize(n);
+    f.read((char*)m_nav_points.data(), n * 12);
+    // Заповнюємо grid щоб нові точки не дублювали наявні
+    const float cell = m_cfg.navmesh_cfg.collect_dist > 0.f
+                     ? m_cfg.navmesh_cfg.collect_dist : 30.f;
+    for (const auto& p : m_nav_points) {
+        int64_t ix = (int64_t)std::floor(p.x / cell);
+        int64_t iy = (int64_t)std::floor(p.y / cell);
+        uint64_t key = (uint64_t)(ix + 0x80000) | ((uint64_t)(iy + 0x80000) << 32);
+        m_nav_grid_cells.insert(key);
+    }
+    std::cerr << "[NAVMESH] Завантажено " << n << " точок з " << path << "\n";
+}
+
 // ── SaveNavMeshPoints ─────────────────────────────────────────────────────────
 void Brain::SaveNavMeshPoints() const {
     if (!m_cfg.navmesh_cfg.collect_points || m_nav_points.empty()) return;
@@ -372,27 +412,71 @@ void Brain::SaveNavMeshPoints() const {
 void Brain::TryRecordNavPoint() {
     if (!m_cfg.navmesh_cfg.collect_points) return;
 
-    float px = 0.f, py = 0.f, pz = 0.f;
-    bool have_pos = false;
+    const float dist2 = m_cfg.navmesh_cfg.collect_dist * m_cfg.navmesh_cfg.collect_dist;
 
+    // Спочатку — позиція гравця з MemReader (якщо Enabled=true)
     if (m_mem_player.valid) {
-        px = m_mem_player.x; py = m_mem_player.y; pz = m_mem_player.z;
-        have_pos = true;
-    } else if (m_world && m_player_base) {
-        have_pos = m_world->refreshPlayerXYZ();
-        if (have_pos) { px = m_world->playerX; py = m_world->playerY; pz = m_world->playerZ; }
+        float dx = m_mem_player.x - m_nav_last_x;
+        float dy = m_mem_player.y - m_nav_last_y;
+        if (dx*dx + dy*dy >= dist2) {
+            m_nav_points.push_back({m_mem_player.x, m_mem_player.y, m_mem_player.z});
+            m_nav_last_x = m_mem_player.x;
+            m_nav_last_y = m_mem_player.y;
+            std::cerr << "[NAVMESH] +player #" << m_nav_points.size()
+                      << " x=" << (int)m_mem_player.x
+                      << " y=" << (int)m_mem_player.y
+                      << " z=" << (int)m_mem_player.z << "\n";
+        }
+        return;
     }
 
-    if (!have_pos) return;
+    // Mob positions: основне джерело NavMesh точок під час фарму.
+    // Бот рухається до мобів → mob XYZ = реальні досяжні місця в підземеллі.
+    // Grid-based дедуплікація (клітина = collect_dist): кожна область записується раз.
+    // Запускається завжди — не залежить від доступності позиції гравця.
+    if (m_world) {
+        const auto mobs = m_world->mobs(); // snapshot під lock
+        const float cell = m_cfg.navmesh_cfg.collect_dist > 0.f
+                         ? m_cfg.navmesh_cfg.collect_dist : 30.f;
+        for (const auto& mob : mobs) {
+            if (!mob.isAlive()) continue;
+            int64_t ix = (int64_t)std::floor(mob.x / cell);
+            int64_t iy = (int64_t)std::floor(mob.y / cell);
+            uint64_t key = (uint64_t)(ix + 0x80000) | ((uint64_t)(iy + 0x80000) << 32);
+            if (m_nav_grid_cells.count(key)) continue;
+            m_nav_grid_cells.insert(key);
+            m_nav_points.push_back({mob.x, mob.y, mob.z});
+            std::cerr << "[NAVMESH] +mob #" << m_nav_points.size()
+                      << " x=" << (int)mob.x
+                      << " y=" << (int)mob.y
+                      << " z=" << (int)mob.z << "\n";
+        }
+    }
 
-    float dx = px - m_nav_last_x;
-    float dy = py - m_nav_last_y;
-    if (dx*dx + dy*dy >= m_cfg.navmesh_cfg.collect_dist * m_cfg.navmesh_cfg.collect_dist) {
-        m_nav_points.push_back({px, py, pz});
-        m_nav_last_x = px;
-        m_nav_last_y = py;
-        std::cerr << "[NAVMESH] +точка #" << m_nav_points.size()
-                  << " x=" << (int)px << " y=" << (int)py << " z=" << (int)pz << "\n";
+    // Додатково: клієнтська позиція гравця (pb+OFF_PLAYER_X_CLIENT = 0x78).
+    // Оновлюється при click-to-move прибутті. НЕ для kill detection!
+    if (m_world && m_world->refreshPlayerXYZClient()) {
+        float px = m_world->playerX;
+        float py = m_world->playerY;
+        float pz = m_world->playerZ;
+        if (std::fabsf(px) > 30000.f || std::fabsf(py) > 30000.f) {
+            float dx = px - m_nav_last_x;
+            float dy = py - m_nav_last_y;
+            if (dx*dx + dy*dy >= dist2) {
+                int64_t ix = (int64_t)std::floor(px / (m_cfg.navmesh_cfg.collect_dist > 0 ? m_cfg.navmesh_cfg.collect_dist : 30.f));
+                int64_t iy = (int64_t)std::floor(py / (m_cfg.navmesh_cfg.collect_dist > 0 ? m_cfg.navmesh_cfg.collect_dist : 30.f));
+                uint64_t key = (uint64_t)(ix + 0x80000) | ((uint64_t)(iy + 0x80000) << 32);
+                if (!m_nav_grid_cells.count(key)) {
+                    m_nav_grid_cells.insert(key);
+                    m_nav_points.push_back({px, py, pz});
+                    m_nav_last_x = px; m_nav_last_y = py;
+                    std::cerr << "[NAVMESH] +player #" << m_nav_points.size()
+                              << " x=" << (int)px << " y=" << (int)py << "\n";
+                } else {
+                    m_nav_last_x = px; m_nav_last_y = py;
+                }
+            }
+        }
     }
 }
 
@@ -528,12 +612,18 @@ void Brain::SetAsyncNPCs(const std::vector<Eyes::NPC>& npcs,
 
 void Brain::SetGeoPath(const std::vector<std::pair<float,float>>& path,
                         uint64_t path_id) {
-    m_obj_manager.deliverGeoPath(path, path_id);
+    if (m_use_bt)
+        m_bot_bt.deliverGeoPath(path, path_id);
+    else
+        m_obj_manager.deliverGeoPath(path, path_id);
     if (!path.empty())
         Log("[GEO-W] Шлях отримано: " + std::to_string(path.size()) + " точок",
             LogLevel::Debug);
 }
 
 std::optional<PathRequest> Brain::GetPendingPathRequest() {
+    if (m_use_bt)
+        return m_bot_bt.takePendingPathRequest();
     return m_obj_manager.takePendingPathRequest();
 }
+

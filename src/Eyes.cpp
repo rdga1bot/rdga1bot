@@ -642,7 +642,11 @@ int Eyes::CalcBarPercentValue(
         }
     }
 
-    return cols * 100 / bar.cols;
+    // Guard: якщо є хоч 1px кольору бару — повертаємо мінімум 1%, не 0.
+    // Без цього: 1px HP при ~1% → 1*100/150 = 0 (integer division)
+    // → me.hp = 0 → false Death detection після 10 тіків.
+    int pct = cols * 100 / bar.cols;
+    return (pct == 0 && cols > 0) ? 1 : pct;
 }
 
 bool Eyes::IsGroundAhead() const {

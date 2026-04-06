@@ -255,6 +255,9 @@ public:
 
     bool IsSpoiler() const { return char_class == "Spoiler"; }
 
+    // [BehaviorTree]
+    bool use_behavior_tree = false;  // true = BotBehaviorTree замість ObjectiveManager
+
     bool Load(const std::string& path);
     bool Save(const std::string& path) const;
     bool Validate() const; // перевірка конфігурації, виводить попередження

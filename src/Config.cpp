@@ -427,6 +427,9 @@ bool Config::Load(const std::string& path) {
     threading.geodata_thread = GetBool("Threading","GeodataThread", threading.geodata_thread);
     threading.geodata_core   = GetInt ("Threading","GeodataCore",   threading.geodata_core);
 
+    // [BehaviorTree]
+    use_behavior_tree = GetBool("BehaviorTree", "Enabled", use_behavior_tree);
+
     // [Colors_MyBars]
     colors.my_hp_from_hsv = GetScalar("Colors_MyBars", "HPFromHSV",  colors.my_hp_from_hsv);
     colors.my_hp_to_hsv   = GetScalar("Colors_MyBars", "HPToHSV",    colors.my_hp_to_hsv);
@@ -681,6 +684,9 @@ bool Config::Save(const std::string& path) const {
     f << "VisionCore    = " << threading.vision_core    << "\n";
     f << "GeodataThread = " << (threading.geodata_thread ? "true":"false") << "\n";
     f << "GeodataCore   = " << threading.geodata_core   << "\n";
+    f << "\n";
+    f << "[BehaviorTree]\n";
+    f << "Enabled = " << (use_behavior_tree ? "true" : "false") << "\n";
     f << "\n";
     f << "[Vision]\n";
     f << "UseRobustBarDetection = " << (use_robust_bar ? "true" : "false") << "\n";

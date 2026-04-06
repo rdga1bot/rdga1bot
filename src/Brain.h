@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <unordered_set>
 #include "Eyes.h"
 #include "Hands.h"
 #include "Config.h"
@@ -21,6 +22,7 @@
 #include "game_state.h"
 #include "objective_manager.h"
 #include "farm_objectives.h"
+#include "BotBehaviorTree.h"
 
 class Brain {
 public:
@@ -31,7 +33,14 @@ public:
     void Process(bool debug = false);
 
     // Поточна активна ціль (замінює State enum)
-    std::string GetState() const { return m_obj_manager.currentName(); }
+    std::string GetState() const {
+        return m_use_bt ? m_bot_bt.currentBranch() : m_obj_manager.currentName();
+    }
+
+    // Активна гілка (для Dashboard)
+    std::string GetActiveBranch() const {
+        return m_use_bt ? m_bot_bt.currentBranch() : m_obj_manager.currentName();
+    }
 
     const Stats& GetStats() const { return m_stats; }
     const std::optional<Eyes::Me>& Me() const { return m_me; }
@@ -68,6 +77,7 @@ public:
     // NavMesh: зберегти зібрані точки (викликається при виході)
     void SaveNavMeshPoints() const;
     // Збір NavMesh точки — викликати з main loop на КОЖНІЙ ітерації (навіть hands busy)
+    void LoadNavMeshPoints();   // завантажує існуючі точки + заповнює grid
     void TryRecordNavPoint();
 
     // VisionWorker інтеграція
@@ -140,6 +150,8 @@ private:
     struct NavPoint { float x, y, z; };
     std::vector<NavPoint> m_nav_points;
     float m_nav_last_x = 0.f, m_nav_last_y = 0.f;
+    // Grid-based дедупліяція: set зайнятих клітин (ix,iy) щоб не дублювати позиції
+    std::unordered_set<uint64_t> m_nav_grid_cells;
 
     // Async vision результат (від VisionWorker)
     std::optional<std::vector<Eyes::NPC>>        m_async_npcs;
@@ -166,6 +178,10 @@ private:
     // Objectives
     ObjectiveManager m_obj_manager;
     std::string m_prev_obj_name; // для детекції переходів (RecordDeath тощо)
+
+    // BehaviorTree (альтернативний планувальник)
+    BotBehaviorTree m_bot_bt;
+    bool            m_use_bt = false;
 
     // Diagnostics
     int m_detect_me_fail_count = 0;
@@ -195,11 +211,18 @@ private:
         const std::vector<L2Character>& mobs, float playerX, float playerY);
 
     bool HasTarget() const { return m_target.has_value() && m_target->hp > 0; }
-    bool InRespawnGrace()  const { return m_obj_manager.isInGrace(); }
+    bool InRespawnGrace()  const {
+        if (m_use_bt) return m_bot_bt.inGrace();
+        return m_obj_manager.isInGrace();
+    }
     double SecsSinceLastKill() const {
+        if (m_use_bt)
+            return std::chrono::duration<double>(Clock::now() - m_bot_bt.lastKillTime()).count();
         return std::chrono::duration<double>(Clock::now() - m_obj_manager.getLastKillTime()).count();
     }
     double SecsSinceLastBuff() const {
+        if (m_use_bt)
+            return std::chrono::duration<double>(Clock::now() - m_bot_bt.lastBuff()).count();
         return std::chrono::duration<double>(Clock::now() - m_obj_manager.getLastBuff()).count();
     }
     static float NormalizeAngle(float angle);

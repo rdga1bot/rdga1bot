@@ -42,6 +42,12 @@ C++ бот для автоматизації фарму в Lineage II.
 - CPU affinity для main thread + воркерів (опціонально, `CPUAffinity`)
 - Всі воркери `Enabled=false` за замовчуванням — зворотна сумісність збережена
 
+**BehaviorTree (MR20)**
+- Stackless BT VM: `BTNode` (24 bytes), `BTState` (8 bytes), плоскі масиви — без heap, без рекурсії
+- Гілки: Dead → Rest → Zone → Buff → Loot → Attack → Target (Selector root)
+- A/B switch: `[BehaviorTree] Enabled=true` → BotBehaviorTree замість ObjectiveManager
+- `thread_local s_self` — static Action/Condition функції безпечно звертаються до стану
+
 **Антидетект**
 - RandomDelay: нормальний розподіл затримок між атаками, поворотами, ходьбою
 - Конфігурується через `[Delays]` в INI (mean±std мс, `Enabled=false` за замовчуванням)
@@ -133,6 +139,9 @@ AttackStdMs  = 75.0
 [WeightedTargeting]
 Enabled = false            # true = зважений вибір цілі (потребує KnownList)
 
+[BehaviorTree]
+Enabled = false            # true = BotBehaviorTree замість ObjectiveManager
+
 [Navigation]
 Enabled = false            # memory-based навігація (потребує калібровки heading)
 
@@ -179,24 +188,28 @@ MainCore      = 1
 ## Архітектура
 
 ```
-Brain.cpp/.h        — FSM: IDLE/TARGETING/ATTACKING/LOOTING/DEAD/BUFFING
-Eyes.cpp/.h         — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа, NPC
-Hands.h             — дії: XTest keyboard/mouse, рух стрілками
-Config.cpp/.h       — INI парсер + валідація + interactive TUI
-Dashboard.cpp/.h    — ncurses TUI dashboard (3 колонки: бари / стат / mem info)
-Capture_Linux.cpp   — XShm screen capture
-Intercept_Linux.cpp — XTest backend (XTestFakeKeyEvent)
-Window_Linux.cpp    — X11 window finding (кешований)
-MemReader.cpp/.h    — читання HP/MP/CP/XYZ гравця з пам'яті Wine
-OffsetScanner       — blindScan(), calibrateHeadingOffset(), findNameOffset()
-KnownListReader     — region scan мобів, readName(), findMobByName()
-WorldState          — thread-safe агрегатор KnownList для Brain
-Geodata.cpp/.h      — L2J геодата: Load(), CanMoveTo(), IsWallBetween(), A* FindPath()
-RandomDelay.h       — нормальний розподіл затримок (антидетект)
+Brain.cpp/.h         — диспетчер: ObjectiveManager або BotBehaviorTree (A/B switch)
+Eyes.cpp/.h          — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа, NPC
+Hands.h              — дії: XTest keyboard/mouse, рух стрілками
+Config.cpp/.h        — INI парсер + валідація + interactive TUI
+Dashboard.cpp/.h     — ncurses TUI dashboard (3 колонки: бари / стат / mem info)
+BehaviorTree.h/.cpp  — stackless BT VM (BTNode 24B, BTState 8B, плоскі масиви)
+BotBehaviorTree.h/.cpp — Farm BT: Dead/Rest/Zone/Buff/Loot/Attack/Target гілки
+objective_manager.h/.cpp — ObjectiveManager (legacy, паралельний A/B switch)
+farm_objectives.h    — Objective підкласи (legacy, паралельний A/B switch)
+Capture_Linux.cpp    — XShm screen capture
+Intercept_Linux.cpp  — XTest backend (XTestFakeKeyEvent)
+Window_Linux.cpp     — X11 window finding (кешований)
+MemReader.cpp/.h     — читання HP/MP/CP/XYZ гравця з пам'яті Wine
+OffsetScanner        — blindScan(), calibrateHeadingOffset(), findNameOffset()
+KnownListReader      — region scan мобів, readName(), findMobByName()
+WorldState           — thread-safe агрегатор KnownList для Brain
+Geodata.cpp/.h       — L2J геодата: Load(), CanMoveTo(), IsWallBetween(), A* FindPath()
+RandomDelay.h        — нормальний розподіл затримок (антидетект)
 vision_worker.h/.cpp — async DetectNPCs+DetectMinimap (VisionWorker, окремий потік)
 geodata_worker.h/.cpp — async A* FindPath (GeodataWorker, окремий потік)
-Notify.cpp/.h       — Telegram через fork+curl
-Stats.cpp/.h        — статистика сесії, JSON лог
+Notify.cpp/.h        — Telegram через fork+curl
+Stats.cpp/.h         — статистика сесії, JSON лог
 ```
 
 ## Вимоги

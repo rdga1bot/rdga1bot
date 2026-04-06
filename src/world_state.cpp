@@ -14,15 +14,34 @@ bool WorldState::refreshPlayerXYZ() {
     if (!pb) return false;
 
     float x = 0.f, y = 0.f, z = 0.f;
-    ProcessMemory::Read(m_pid, pb + 0x24, &x, 4);
-    ProcessMemory::Read(m_pid, pb + 0x28, &y, 4);
-    ProcessMemory::Read(m_pid, pb + 0x2C, &z, 4);
+    ProcessMemory::Read(m_pid, pb + OFF_PLAYER_X, &x, 4);
+    ProcessMemory::Read(m_pid, pb + OFF_PLAYER_Y, &y, 4);
+    ProcessMemory::Read(m_pid, pb + OFF_PLAYER_Z, &z, 4);
 
     // Валідність: L2 world bounds і не NaN/Inf
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
     if (x < -327680.f || x > 327680.f) return false;
     if (y < -262144.f || y > 262144.f) return false;
     if (x == 0.f && y == 0.f) return false;
+
+    playerX = x; playerY = y; playerZ = z;
+    return true;
+}
+
+bool WorldState::refreshPlayerXYZClient() {
+    uintptr_t pb;
+    { std::lock_guard<std::mutex> lk(m_mutex); pb = m_playerBase; }
+    if (!pb) return false;
+
+    float x = 0.f, y = 0.f, z = 0.f;
+    ProcessMemory::Read(m_pid, pb + OFF_PLAYER_X_CLIENT, &x, 4);
+    ProcessMemory::Read(m_pid, pb + OFF_PLAYER_Y_CLIENT, &y, 4);
+    ProcessMemory::Read(m_pid, pb + OFF_PLAYER_Z_CLIENT, &z, 4);
+
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
+    if (std::fabsf(x) < 30000.f || std::fabsf(y) < 30000.f) return false;
+    if (x < -327680.f || x > 327680.f) return false;
+    if (y < -262144.f || y > 262144.f) return false;
 
     playerX = x; playerY = y; playerZ = z;
     return true;

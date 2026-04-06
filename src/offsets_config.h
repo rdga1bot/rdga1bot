@@ -6,9 +6,18 @@
 // Перевизначаються runtime через OffsetScanner::loadOffsets("offsets.json").
 
 // PlayerBase offsets (структура гравця — інша від загальних об'єктів!)
-constexpr uintptr_t OFF_PLAYER_X     = 0x24;   // float — world X (підтверджено blindScan)
+// Відкалібровано 2026-04-06 через --find-pos + --watch-pos:
+//   0x24 = серверна позиція (стабільна, оновлюється при підтвердженні сервером)
+//   0x78 = клієнтська позиція (Δ-3171 за 3.2с після кліку — але стрибає до ~0 під час анімацій!)
+// ⚠ OFF_PLAYER_X МУСИТЬ = 0x24 — використовується readMobsRegionScan для дистанційного фільтра.
+//   Якщо 0x78, px тимчасово ~0 → всі моби поза дистанцією → alive=0 → fake kills!
+constexpr uintptr_t OFF_PLAYER_X     = 0x24;   // float — world X (серверна, стабільна)
 constexpr uintptr_t OFF_PLAYER_Y     = 0x28;   // float — world Y
 constexpr uintptr_t OFF_PLAYER_Z     = 0x2C;   // float — world Z
+// Клієнтська позиція (для NavMesh TryRecordNavPoint — НЕ для kill detection!)
+constexpr uintptr_t OFF_PLAYER_X_CLIENT = 0x78;
+constexpr uintptr_t OFF_PLAYER_Y_CLIENT = 0x7C;
+constexpr uintptr_t OFF_PLAYER_Z_CLIENT = 0x80;
 constexpr uintptr_t OFF_KNOWN_LIST   = 0x120;  // ptr → (для Kamael — НЕ масив об'єктів!)
 constexpr uintptr_t OFF_KNOWN_COUNT  = 0x124;  // (не використовується в region scan)
 
