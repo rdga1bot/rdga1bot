@@ -67,6 +67,8 @@ public:
 
     // NavMesh: зберегти зібрані точки (викликається при виході)
     void SaveNavMeshPoints() const;
+    // Збір NavMesh точки — викликати з main loop на КОЖНІЙ ітерації (навіть hands busy)
+    void TryRecordNavPoint();
 
     // VisionWorker інтеграція
     void SetAsyncNPCs(const std::vector<Eyes::NPC>& npcs,

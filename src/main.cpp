@@ -1151,6 +1151,9 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // NavMesh: збір точок кожну ітерацію (навіть hands busy — щоб фіксувати рух)
+            brain.TryRecordNavPoint();
+
             // ─── Fix #4: пропускаємо захоплення кадру якщо дії в польоті ──
             if (!hands.IsReady()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));

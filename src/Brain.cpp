@@ -260,31 +260,8 @@ void Brain::updateGameState(GameState& gs) {
     // NavMesh
     gs.navmesh = m_navmesh_builder.get();
 
-    // NavMesh: збір точок під час руху
-    // Джерело XYZ: MemReader (якщо valid) або PlayerBase через WorldState
-    if (m_cfg.navmesh_cfg.collect_points) {
-        float px = 0.f, py = 0.f, pz = 0.f;
-        bool have_pos = false;
-
-        if (m_mem_player.valid) {
-            px = m_mem_player.x; py = m_mem_player.y; pz = m_mem_player.z;
-            have_pos = true;
-        } else if (m_world && m_player_base) {
-            have_pos = m_world->refreshPlayerXYZ();
-            if (have_pos) { px = m_world->playerX; py = m_world->playerY; pz = m_world->playerZ; }
-        }
-
-        if (have_pos) {
-            float dx = px - m_nav_last_x;
-            float dy = py - m_nav_last_y;
-            if (dx*dx + dy*dy >= m_cfg.navmesh_cfg.collect_dist *
-                                 m_cfg.navmesh_cfg.collect_dist) {
-                m_nav_points.push_back({px, py, pz});
-                m_nav_last_x = px;
-                m_nav_last_y = py;
-            }
-        }
-    }
+    // NavMesh: збір точок перенесено в TryRecordNavPoint() — викликається з main loop
+    // кожну ітерацію (навіть hands busy), щоб не пропускати рух під час дій
 
     // Callbacks
     gs.navigate_to_mob = [this](const L2Character& mob) {
@@ -387,6 +364,34 @@ void Brain::SaveNavMeshPoints() const {
     f.write((const char*)m_nav_points.data(), n * 12);
     std::cerr << "[NAVMESH] Збережено " << n << " точок у "
               << m_cfg.navmesh_cfg.points_file << "\n";
+}
+
+// ── TryRecordNavPoint ─────────────────────────────────────────────────────────
+// Викликати з main loop на КОЖНІЙ ітерації (навіть коли hands busy),
+// щоб фіксувати рух під час WalkForward/RotateLeft/AttackSkill тощо.
+void Brain::TryRecordNavPoint() {
+    if (!m_cfg.navmesh_cfg.collect_points) return;
+
+    float px = 0.f, py = 0.f, pz = 0.f;
+    bool have_pos = false;
+
+    if (m_mem_player.valid) {
+        px = m_mem_player.x; py = m_mem_player.y; pz = m_mem_player.z;
+        have_pos = true;
+    } else if (m_world && m_player_base) {
+        have_pos = m_world->refreshPlayerXYZ();
+        if (have_pos) { px = m_world->playerX; py = m_world->playerY; pz = m_world->playerZ; }
+    }
+
+    if (!have_pos) return;
+
+    float dx = px - m_nav_last_x;
+    float dy = py - m_nav_last_y;
+    if (dx*dx + dy*dy >= m_cfg.navmesh_cfg.collect_dist * m_cfg.navmesh_cfg.collect_dist) {
+        m_nav_points.push_back({px, py, pz});
+        m_nav_last_x = px;
+        m_nav_last_y = py;
+    }
 }
 
 // ── NavigateToMob ─────────────────────────────────────────────────────────────
