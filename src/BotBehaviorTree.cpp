@@ -381,8 +381,9 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
             gs.log("[Buffs] Баффер не знайдено (score="
                 + std::to_string((int)(tab_score * 100)) + "%) — ALT+B retry "
                 + std::to_string(self.m_buff_retries) + "/3");
-            gs.eyes.SaveFrame("tmp/buff_stage1_retry"
-                + std::to_string(self.m_buff_retries) + ".png");
+            if (gs.cfg.debug)  // SaveFrame тільки в debug режимі — повільно (~750ms)
+                gs.eyes.SaveFrame("tmp/buff_stage1_retry"
+                    + std::to_string(self.m_buff_retries) + ".png");
             sendAltB();
             gs.hands.Delay(1000);
             gs.hands.Send();
@@ -396,7 +397,7 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
                 std::to_string(tab_pt->x) + "," + std::to_string(tab_pt->y));
             cx = tab_pt->x; cy = tab_pt->y;
         } else {
-            gs.eyes.SaveFrame("tmp/buff_debug_Баффер.png");
+            if (gs.cfg.debug) gs.eyes.SaveFrame("tmp/buff_debug_Баффер.png");
             gs.log("[Buffs] Баффер не знайдено (score=" +
                 std::to_string((int)(tab_score * 100)) + "%) → fallback (" +
                 std::to_string(gs.cfg.buff_tab_x) + "," +
@@ -436,7 +437,7 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
                 std::to_string(prof_pt->x) + "," + std::to_string(prof_pt->y));
             cx = prof_pt->x; cy = prof_pt->y;
         } else {
-            gs.eyes.SaveFrame("tmp/buff_debug_tty.png");
+            if (gs.cfg.debug) gs.eyes.SaveFrame("tmp/buff_debug_tty.png");
             gs.log("[Buffs] tty не знайдено (score=" +
                 std::to_string((int)(prof_score * 100)) + "%) → fallback (" +
                 std::to_string(fb_x) + "," + std::to_string(fb_y) + ")");
