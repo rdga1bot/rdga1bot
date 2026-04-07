@@ -107,8 +107,14 @@ BTStatus BehaviorTree::tick(GameState& gs, uint32_t nowMs) {
             }
             if (result == BTStatus::Failure) {
                 st.currentChild++; // наступний дочірній
+            } else {
+                // Running = новий тік (вхід з батька або root).
+                // ОБОВ'ЯЗКОВО скидаємо до 0 — реактивний Selector:
+                // умови вищого пріоритету (Dead/Buff/Attack) перевіряються кожен тік.
+                // Без цього Selector застрягає на Running-Action (actTarget) і
+                // condHasTarget ніколи не перевіряється після успішного F2.
+                st.currentChild = 0;
             }
-            // Running = перший вхід або продовжуємо
             if (st.currentChild >= nd.childCount) {
                 st.currentChild = 0;
                 pc = nd.parent; result = BTStatus::Failure; continue;

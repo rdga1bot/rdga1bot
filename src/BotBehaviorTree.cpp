@@ -155,10 +155,14 @@ bool BotBehaviorTree::condZoneViolated(GameState& gs) {
 }
 
 bool BotBehaviorTree::condNeedsBuff(GameState& gs) {
-    if (!gs.cfg.buff_enabled || gs.is_dead || gs.has_target || gs.in_grace)
+    if (!gs.cfg.buff_enabled || gs.is_dead || gs.in_grace)
         return false;
     if (!s_self) return false;
-    // Cooldown: >= 2с після останнього kill (Stage 0 actBuff чекатиме 15с на combat state)
+    // Якщо баф вже у процесі (stage > 0) — продовжуємо незалежно від has_target.
+    // actBuff сам закриє ALT+B і скине stage якщо є таргет.
+    if (s_self->m_buff_stage > 0) return true;
+    // Новий баф: не запускаємо якщо є таргет або cooldown активний
+    if (gs.has_target) return false;
     if (secsSince(s_self->m_last_kill_time) < 2.0) return false;
     return gs.buff_needed();
 }

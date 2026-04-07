@@ -135,7 +135,8 @@ void Brain::Process(bool debug) {
 
     // Перевірка смерті (HP=0 протягом 10 тіків = ~1с)
     // Не тригеримо в Buff стані: HP bar може тимчасово не детектуватись.
-    const std::string cur_obj = m_obj_manager.currentName();
+    const std::string cur_obj = m_use_bt ? m_bot_bt.currentBranch()
+                                          : m_obj_manager.currentName();
     bool is_dead_now = false;
     if (cur_obj != "Dead" && cur_obj != "Buff") {
         if (me.hp == 0 && !InRespawnGrace()) {
