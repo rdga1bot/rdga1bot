@@ -258,6 +258,22 @@ public:
     // [BehaviorTree]
     bool use_behavior_tree = false;  // true = BotBehaviorTree замість ObjectiveManager
 
+    // [Learning] — Huber Q-Learning (опціонально, Enabled=false = без змін у поведінці)
+    struct LearningConfig {
+        bool        enabled           = false;
+        float       learning_rate     = 0.1f;
+        float       discount_factor   = 0.95f;
+        float       epsilon_start     = 1.0f;
+        float       epsilon_min       = 0.05f;
+        float       epsilon_decay     = 0.995f;
+        float       huber_delta       = 1.345f;
+        int         update_frequency  = 10;
+        int         save_frequency    = 50;
+        int         buffer_size       = 1000;
+        int         batch_size        = 32;
+        std::string weights_file      = "./weights.json";
+    } learning;
+
     bool Load(const std::string& path);
     bool Save(const std::string& path) const;
     bool Validate() const; // перевірка конфігурації, виводить попередження

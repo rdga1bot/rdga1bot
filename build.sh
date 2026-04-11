@@ -23,7 +23,7 @@ fi
 NCURSES_FLAGS="$(pkg-config --cflags ncursesw 2>/dev/null || echo '')"
 NCURSES_LIBS="$(pkg-config --libs ncursesw 2>/dev/null || echo '-lncursesw')"
 
-CFLAGS="-std=c++17 -O2 -I$SRC $(pkg-config --cflags x11 xtst xext $OPENCV_PKG) $NCURSES_FLAGS"
+CFLAGS="-std=c++17 -O2 -I$SRC -I$DIR/third_party/eigen -DEIGEN_NO_DEBUG $(pkg-config --cflags x11 xtst xext $OPENCV_PKG) $NCURSES_FLAGS"
 LDFLAGS="$(pkg-config --libs x11 xtst xext $OPENCV_PKG) $NCURSES_LIBS -lpthread"
 
 SRCS="
@@ -53,6 +53,8 @@ SRCS="
   $SRC/navmesh_worker.cpp
   $SRC/BehaviorTree.cpp
   $SRC/BotBehaviorTree.cpp
+  $SRC/LinearQModel.cpp
+  $SRC/LearningWorker.cpp
 "
 
 # Detour sources (тільки якщо src/recast/Detour існує)

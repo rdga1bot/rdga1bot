@@ -332,6 +332,19 @@ void Dashboard::DrawStatus(const Brain& brain, const Eyes::Me& me,
             wattroff(m_win_status, COLOR_PAIR(COLOR_DIM));
         }
     }
+
+    // RL статус (тільки якщо увімкнено)
+    if (brain.GetBotBT().isLearningEnabled()) {
+        wattron(m_win_status, COLOR_PAIR(COLOR_BUFF) | A_BOLD);
+        char rl_buf[64];
+        snprintf(rl_buf, sizeof(rl_buf),
+                 "[RL] eps=%.2f loss=%.3f upd=%d",
+                 brain.GetBotBT().getRLEpsilon(),
+                 brain.GetBotBT().getRLLastLoss(),
+                 brain.GetBotBT().getRLUpdateCount());
+        mvwprintw(m_win_status, 3, rx, "%s", rl_buf);
+        wattroff(m_win_status, COLOR_PAIR(COLOR_BUFF) | A_BOLD);
+    }
 }
 
 // ─── DrawLog ───────────────────────────────────────────────────────────────

@@ -20,6 +20,16 @@ struct Stats {
     void RecordMPPotion()          { mp_potions++; }
     void RecordTargetingFailure()  { targeting_failures++; }
 
+    // RL reward tracking
+    float last_reward       = 0.f;
+    float cumulative_reward = 0.f;
+    int   episode_kills     = 0;
+    int   episode_steps     = 0;
+
+    void resetEpisode()       { episode_kills = 0; episode_steps = 0; }
+    void recordEpisodeKill()  { episode_kills++; kills++; }
+    void recordEpisodeStep()  { episode_steps++; }
+
     int UptimeSec() const;
     std::string UptimeStr() const;
     void PrintSummary() const;

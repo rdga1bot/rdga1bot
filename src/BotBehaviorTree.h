@@ -5,12 +5,18 @@
 #include "RandomDelay.h"
 #include "l2_objects.h"
 #include "geodata_worker.h"
+#include "LinearQModel.h"
+#include "ExperienceBuffer.h"
+#include "LearningWorker.h"
+#include "FeatureExtractor.h"
+#include "RewardCalculator.h"
 #include <chrono>
 #include <memory>
 #include <deque>
 #include <optional>
 #include <string>
 #include <cmath>
+#include <random>
 #include <opencv2/opencv.hpp>
 
 // ── BotBehaviorTree ───────────────────────────────────────────────────────────
@@ -34,6 +40,7 @@ public:
     using TP    = Clock::time_point;
 
     BotBehaviorTree();
+    ~BotBehaviorTree();
 
     // Ініціалізація дерева. Викликати один раз при старті.
     void init(const Config& cfg);
@@ -66,6 +73,31 @@ public:
     // GeoPath delivery (для Brain dispatch)
     void deliverGeoPath(const std::vector<std::pair<float,float>>& path, uint64_t id);
     std::optional<PathRequest> takePendingPathRequest();
+
+    // ── RL публічний API ─────────────────────────────────────────────────────
+    bool isLearningEnabled()  const { return m_rl_model != nullptr; }
+    float getRLEpsilon()      const { return m_rl_epsilon; }
+    float getRLLastLoss()     const {
+        return m_rl_worker ? m_rl_worker->lastLoss() : 0.f;
+    }
+    int   getRLUpdateCount()  const {
+        return m_rl_worker ? m_rl_worker->updateCount() : 0;
+    }
+    LinearQModel::Action getRLSuggestedAction() const {
+        return m_rl_suggested_action;
+    }
+    Eigen::VectorXf getRLQValues(const Eigen::VectorXf& f) const {
+        return m_rl_model ? m_rl_model->getQValues(f)
+                          : Eigen::VectorXf::Zero(LinearQModel::NUM_ACTIONS);
+    }
+
+    // Сигнальні методи — викликати з actLoot, actDead, actBuff, actTarget
+    void notifyKillRL()   { m_rl_sig_kill   = true; m_rl_kills_since_save++; }
+    void notifyDeathRL()  { m_rl_sig_death  = true; }
+    void notifyBuffRL()   { m_rl_sig_buff_done = true; }
+
+    void initRL(const Config& cfg);
+    void shutdownRL();
 
 private:
     BehaviorTree m_bt;
@@ -150,6 +182,31 @@ private:
     struct Crumb { float x, y, z; };
     std::deque<Crumb> m_breadcrumbs;
     bool              m_backtracking = false;
+
+    // ── RL компоненти (null якщо [Learning] Enabled=false) ───────────────────
+    std::shared_ptr<LinearQModel>     m_rl_model;
+    std::shared_ptr<ExperienceBuffer> m_rl_buffer;
+    std::unique_ptr<LearningWorker>   m_rl_worker;
+
+    // ── RL стан між тіками ────────────────────────────────────────────────────
+    LinearQModel::Action  m_rl_suggested_action  = LinearQModel::Action::TargetNearest;
+    float                 m_rl_action_confidence = 0.f;
+    Eigen::VectorXf       m_rl_last_features;
+    LinearQModel::Action  m_rl_last_action       = LinearQModel::Action::TargetNearest;
+    bool                  m_rl_has_prev          = false;
+    float                 m_rl_epsilon           = 1.0f;
+    int                   m_rl_ticks_since_update  = 0;
+    int                   m_rl_kills_since_save    = 0;
+    std::mt19937          m_rl_rng{std::random_device{}()};
+
+    // ── RL сигнали за тік (скидаються на початку кожного tick) ───────────────
+    bool  m_rl_sig_kill             = false;
+    bool  m_rl_sig_death            = false;
+    bool  m_rl_sig_targeting_failed = false;
+    bool  m_rl_sig_buff_done        = false;
+
+    void rlPreTick (GameState& gs);
+    void rlPostTick(GameState& gs);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     static double secsSince(TP t) {

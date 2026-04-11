@@ -430,6 +430,20 @@ bool Config::Load(const std::string& path) {
     // [BehaviorTree]
     use_behavior_tree = GetBool("BehaviorTree", "Enabled", use_behavior_tree);
 
+    // [Learning]
+    learning.enabled         = GetBool  ("Learning","Enabled",        learning.enabled);
+    learning.learning_rate   = (float)GetDouble("Learning","LearningRate",  learning.learning_rate);
+    learning.discount_factor = (float)GetDouble("Learning","DiscountFactor",learning.discount_factor);
+    learning.epsilon_start   = (float)GetDouble("Learning","EpsilonStart",  learning.epsilon_start);
+    learning.epsilon_min     = (float)GetDouble("Learning","EpsilonMin",    learning.epsilon_min);
+    learning.epsilon_decay   = (float)GetDouble("Learning","EpsilonDecay",  learning.epsilon_decay);
+    learning.huber_delta     = (float)GetDouble("Learning","HuberDelta",    learning.huber_delta);
+    learning.update_frequency= GetInt   ("Learning","UpdateFrequency", learning.update_frequency);
+    learning.save_frequency  = GetInt   ("Learning","SaveFrequency",   learning.save_frequency);
+    learning.buffer_size     = GetInt   ("Learning","BufferSize",      learning.buffer_size);
+    learning.batch_size      = GetInt   ("Learning","BatchSize",       learning.batch_size);
+    learning.weights_file    = Get      ("Learning","WeightsFile",     learning.weights_file);
+
     // [Colors_MyBars]
     colors.my_hp_from_hsv = GetScalar("Colors_MyBars", "HPFromHSV",  colors.my_hp_from_hsv);
     colors.my_hp_to_hsv   = GetScalar("Colors_MyBars", "HPToHSV",    colors.my_hp_to_hsv);
@@ -687,6 +701,21 @@ bool Config::Save(const std::string& path) const {
     f << "\n";
     f << "[BehaviorTree]\n";
     f << "Enabled = " << (use_behavior_tree ? "true" : "false") << "\n";
+    f << "\n";
+    f << "[Learning]\n";
+    f << "# Reinforcement Learning (Huber Q-Learning). Enabled=false = без змін у поведінці.\n";
+    f << "Enabled          = " << (learning.enabled ? "true" : "false") << "\n";
+    f << "LearningRate     = " << learning.learning_rate   << "\n";
+    f << "DiscountFactor   = " << learning.discount_factor << "\n";
+    f << "EpsilonStart     = " << learning.epsilon_start   << "\n";
+    f << "EpsilonMin       = " << learning.epsilon_min     << "\n";
+    f << "EpsilonDecay     = " << learning.epsilon_decay   << "\n";
+    f << "HuberDelta       = " << learning.huber_delta     << "\n";
+    f << "UpdateFrequency  = " << learning.update_frequency<< "\n";
+    f << "SaveFrequency    = " << learning.save_frequency  << "\n";
+    f << "BufferSize       = " << learning.buffer_size     << "\n";
+    f << "BatchSize        = " << learning.batch_size      << "\n";
+    f << "WeightsFile      = " << learning.weights_file    << "\n";
     f << "\n";
     f << "[Vision]\n";
     f << "UseRobustBarDetection = " << (use_robust_bar ? "true" : "false") << "\n";

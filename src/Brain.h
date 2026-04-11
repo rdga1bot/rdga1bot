@@ -33,6 +33,8 @@ public:
     // Поточна активна гілка BT (для Dashboard і логу)
     std::string GetState()        const { return m_bot_bt.currentBranch(); }
     std::string GetActiveBranch() const { return m_bot_bt.currentBranch(); }
+    BotBehaviorTree& GetBotBT()         { return m_bot_bt; }
+    const BotBehaviorTree& GetBotBT() const { return m_bot_bt; }
 
     const Stats& GetStats() const { return m_stats; }
     const std::optional<Eyes::Me>& Me() const { return m_me; }
