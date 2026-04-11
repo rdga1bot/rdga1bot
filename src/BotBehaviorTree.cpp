@@ -716,80 +716,33 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
     auto& self = *s_self;
     self.m_active_branch = "Target";
 
+    // [1] hands_ready
     if (!gs.hands_ready) {
         self.m_tgt_not_ready_count++;
-        if (self.m_tgt_not_ready_count == 20 || self.m_tgt_not_ready_count % 100 == 0) {
+        if (self.m_tgt_not_ready_count == 20 || self.m_tgt_not_ready_count % 100 == 0)
             gs.log("[WARNING] TARGETING: IsReady=false вже " +
                 std::to_string(self.m_tgt_not_ready_count) + " тіків — Input thread завис?");
-        }
         return BTStatus::Running;
     }
     self.m_tgt_not_ready_count = 0;
 
-    // ── Ініціалізація при вході (аналог onEnter) ──────────────────────────────
+    // [2] Ініціалізація
     if (!self.m_tgt_active) {
         self.resetTargetState(gs);
         self.m_tgt_active = true;
     }
 
-    // ── Breadcrumbs: запис позиції ─────────────────────────────────────────────
+    // [3] Breadcrumbs запис
     if (gs.coords_valid)
         self.addCrumb(gs.player_x, gs.player_y, gs.player_z, gs.cfg.breadcrumbs);
 
-    // ── Мертвий таргет (hp=0) ──────────────────────────────────────────────────
-    // (has_target=false але target.hp==0 означає мертва ціль)
-    if (gs.target.has_value() && gs.target->hp == 0) {
-        if (self.m_tgt_pokemon_targeted) {
-            gs.log("[Pokemon] sweep (чекаємо анімацію)...");
-            gs.hands.Delay(1500);
-            gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-            self.m_tgt_pokemon_targeted = false;
-            self.m_tgt_dead_esc_count = 0;
-            gs.hands.Send(100);
-            return BTStatus::Running;
-        }
-        self.m_tgt_dead_esc_count++;
-        if (self.m_tgt_dead_esc_count == 1) {
-            gs.log("[TARGETING] Мертвий таргет hp=0 ×1 → чекаємо підтвердження...");
-            gs.hands.Send(250);
-            return BTStatus::Running;
-        }
-        gs.log("[TARGETING] Мертвий таргет hp=0 → ESC ×" +
-            std::to_string(self.m_tgt_dead_esc_count - 1));
-        if (self.m_tgt_dead_esc_count <= 6) {
-            gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
-            gs.hands.Send(100);
-            return BTStatus::Running;
-        }
-        // Після 5 спроб — fallthrough до F2/macro
-        self.m_tgt_dead_esc_count = 0;
-        self.m_tgt_dead_cycles_total++;
-        if (self.m_tgt_dead_cycles_total >= gs.cfg.targeting_tuning.dead_cycles_macro_switch
-            && !gs.cfg.target_macro_keys.empty()) {
-            gs.log("[TARGETING] Dead-target loop ×" +
-                std::to_string(self.m_tgt_dead_cycles_total) + " → /target макрос");
-            self.m_tgt_macro_attempts++;
-            gs.hands.TargetMacro(self.m_tgt_macro_idx);
-            self.m_tgt_macro_idx = (self.m_tgt_macro_idx + 1) %
-                                   (int)gs.cfg.target_macro_keys.size();
-            gs.hands.Send(300);
-            return BTStatus::Running;
-        }
-        gs.log("[TARGETING] Мертвий таргет не зникає після 5 ESC → пробуємо F2");
-    } else {
-        self.m_tgt_dead_esc_count = 0;
-        if (gs.target.has_value() && gs.target->hp > 0)
-            self.m_tgt_dead_cycles_total = 0;
-    }
+    // [4] Мертвий таргет
+    if (auto r = self.tgtHandleDeadTarget(gs)) return *r;
 
     self.m_tgt_macro_attempts++;
 
-    // ── Мінімапа: повернутись до найближчого моба перед F2 ────────────────────
-    const int kMinimapDxThreshold = gs.cfg.targeting_tuning.minimap_dx_threshold;
-    const int kMinimapRotateLimit = gs.cfg.targeting_tuning.minimap_rotate_limit;
-
+    // [5] map_ref + мінімапа ротація
     const auto& minimap_dots = gs.minimap_dots;
-
     const Eyes::MinimapDot* map_ref = nullptr;
     bool map_ref_selected = false;
     for (const auto& d : minimap_dots) {
@@ -797,88 +750,169 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
     }
     if (!map_ref && !minimap_dots.empty()) map_ref = &minimap_dots[0];
 
-    if (map_ref && self.m_tgt_minimap_rotate_count < kMinimapRotateLimit) {
+    self.tgtHandleMinimap(gs, map_ref, map_ref_selected);
+
+    // [6] F2 + macro + pokemon
+    self.tgtSendF2AndMacro(gs);
+
+    // [7] Navigation (stuck + breadcrumbs + memory)
+    if (auto r = self.tgtHandleNavigation(gs, map_ref)) return *r;
+
+    // [7b] GeoPath (NavMesh + Geodata waypoints + WalkForward)
+    if (auto r = self.tgtHandleGeoPath(gs, map_ref)) return *r;
+
+    // [8] Patrol / Rotate / Розвідка
+    self.tgtHandlePatrolAndRotate(gs, map_ref);
+
+    gs.hands.Send(150);
+    return BTStatus::Running;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// actTarget ПІДФУНКЦІЇ
+// ─────────────────────────────────────────────────────────────────────────────
+
+std::optional<BTStatus> BotBehaviorTree::tgtHandleDeadTarget(GameState& gs) {
+    if (!gs.target.has_value() || gs.target->hp != 0) {
+        m_tgt_dead_esc_count = 0;
+        if (gs.target.has_value() && gs.target->hp > 0)
+            m_tgt_dead_cycles_total = 0;
+        return std::nullopt;
+    }
+
+    if (m_tgt_pokemon_targeted) {
+        gs.log("[Pokemon] sweep (чекаємо анімацію)...");
+        gs.hands.Delay(1500);
+        gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+        m_tgt_pokemon_targeted = false;
+        m_tgt_dead_esc_count = 0;
+        gs.hands.Send(100);
+        return BTStatus::Running;
+    }
+    m_tgt_dead_esc_count++;
+    if (m_tgt_dead_esc_count == 1) {
+        gs.log("[TARGETING] Мертвий таргет hp=0 ×1 → чекаємо підтвердження...");
+        gs.hands.Send(250);
+        return BTStatus::Running;
+    }
+    gs.log("[TARGETING] Мертвий таргет hp=0 → ESC ×" +
+        std::to_string(m_tgt_dead_esc_count - 1));
+    if (m_tgt_dead_esc_count <= 6) {
+        gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+        gs.hands.Send(100);
+        return BTStatus::Running;
+    }
+    // Після 5 спроб — fallthrough до F2/macro
+    m_tgt_dead_esc_count = 0;
+    m_tgt_dead_cycles_total++;
+    if (m_tgt_dead_cycles_total >= gs.cfg.targeting_tuning.dead_cycles_macro_switch
+        && !gs.cfg.target_macro_keys.empty()) {
+        gs.log("[TARGETING] Dead-target loop ×" +
+            std::to_string(m_tgt_dead_cycles_total) + " → /target макрос");
+        m_tgt_macro_attempts++;
+        gs.hands.TargetMacro(m_tgt_macro_idx);
+        m_tgt_macro_idx = (m_tgt_macro_idx + 1) % (int)gs.cfg.target_macro_keys.size();
+        gs.hands.Send(300);
+        return BTStatus::Running;
+    }
+    gs.log("[TARGETING] Мертвий таргет не зникає після 5 ESC → пробуємо F2");
+    return std::nullopt;
+}
+
+void BotBehaviorTree::tgtHandleMinimap(GameState& gs,
+        const Eyes::MinimapDot* map_ref, bool map_ref_selected) {
+    const int kMinimapDxThreshold = gs.cfg.targeting_tuning.minimap_dx_threshold;
+    const int kMinimapRotateLimit = gs.cfg.targeting_tuning.minimap_rotate_limit;
+
+    if (map_ref && m_tgt_minimap_rotate_count < kMinimapRotateLimit) {
         const int dx = map_ref->dx;
         const int dy = map_ref->dy;
         const char* who = map_ref_selected ? "Вибраний" : "Найближчий";
         if (dx < -kMinimapDxThreshold) {
-            gs.hands.RotateLeft(RandMs(self.m_tgt_rd_rotate.get(), gs, 120));
-            self.m_tgt_minimap_rotate_count++;
+            gs.hands.RotateLeft(RandMs(m_tgt_rd_rotate.get(), gs, 120));
+            m_tgt_minimap_rotate_count++;
             gs.log(std::string("[MAP] ") + who + " моб ліворуч (dx=" +
                 std::to_string(dx) + ", rot=" +
-                std::to_string(self.m_tgt_minimap_rotate_count) + ") → RotateLeft");
+                std::to_string(m_tgt_minimap_rotate_count) + ") → RotateLeft");
         } else if (dx > kMinimapDxThreshold) {
-            gs.hands.RotateRight(RandMs(self.m_tgt_rd_rotate.get(), gs, 120));
-            self.m_tgt_minimap_rotate_count++;
+            gs.hands.RotateRight(RandMs(m_tgt_rd_rotate.get(), gs, 120));
+            m_tgt_minimap_rotate_count++;
             gs.log(std::string("[MAP] ") + who + " моб праворуч (dx=" +
                 std::to_string(dx) + ", rot=" +
-                std::to_string(self.m_tgt_minimap_rotate_count) + ") → RotateRight");
+                std::to_string(m_tgt_minimap_rotate_count) + ") → RotateRight");
         } else {
-            self.m_tgt_minimap_rotate_count = 0;
+            m_tgt_minimap_rotate_count = 0;
             if (dy > 30) {
-                gs.hands.RotateRight(RandMs(self.m_tgt_rd_rotate.get(), gs, 700));
+                gs.hands.RotateRight(RandMs(m_tgt_rd_rotate.get(), gs, 700));
                 gs.log(std::string("[MAP] ") + who + " моб позаду (dy=" +
                     std::to_string(dy) + ") → розворот 180°");
             }
         }
-    } else if (map_ref && self.m_tgt_minimap_rotate_count >= kMinimapRotateLimit) {
-        self.m_tgt_minimap_rotate_count = 0;
+    } else if (map_ref && m_tgt_minimap_rotate_count >= kMinimapRotateLimit) {
+        m_tgt_minimap_rotate_count = 0;
         gs.log("[MAP] Ліміт ротацій → WalkForward до моба (dx=" +
             std::to_string(map_ref->dx) + ")");
         if (gs.eyes.IsGroundAhead()) {
-            gs.hands.WalkForward(RandMs(self.m_tgt_rd_walk.get(), gs, 600));
-            self.m_tgt_nav_prev_was_walk = true;
+            gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 600));
+            m_tgt_nav_prev_was_walk = true;
         }
-    } else if (minimap_dots.empty()) {
-        self.m_tgt_minimap_rotate_count = 0;
+    } else if (!map_ref) {
+        m_tgt_minimap_rotate_count = 0;
     }
+}
 
+void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
     // Основний метод: F2 /nexttarget
     gs.hands.NextTarget();
 
     // Скидаємо unreachable flag якщо мінімапа показала мобів
-    if (!minimap_dots.empty() && self.m_attack_was_unreachable) {
-        self.m_attack_was_unreachable = false;
+    if (!gs.minimap_dots.empty() && m_attack_was_unreachable) {
+        m_attack_was_unreachable = false;
         gs.log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable flag");
     }
 
     // /target макроси: тільки після N невдалих F2
-    const int  kMacroFallbackAfterUnreach = gs.cfg.targeting_tuning.macro_fallback_unreach;
-    const int  kMacroFallbackAfter = gs.cfg.targeting_tuning.macro_fallback_after > 0
-                                     ? gs.cfg.targeting_tuning.macro_fallback_after : 10;
+    const int kMacroFallbackAfterUnreach = gs.cfg.targeting_tuning.macro_fallback_unreach;
+    const int kMacroFallbackAfter = gs.cfg.targeting_tuning.macro_fallback_after > 0
+                                    ? gs.cfg.targeting_tuning.macro_fallback_after : 10;
     const bool macro_fallback = !gs.cfg.target_macro_keys.empty()
-                                && self.m_tgt_macro_attempts > (self.m_attack_was_unreachable
+                                && m_tgt_macro_attempts > (m_attack_was_unreachable
                                     ? kMacroFallbackAfterUnreach : kMacroFallbackAfter)
-                                && self.m_tgt_macro_attempts % 2 == 0;
+                                && m_tgt_macro_attempts % 2 == 0;
     if (macro_fallback) {
         gs.hands.Delay(80);
-        gs.hands.TargetMacro(self.m_tgt_macro_idx);
-        self.m_tgt_macro_idx = (self.m_tgt_macro_idx + 1) %
-                               (int)gs.cfg.target_macro_keys.size();
+        gs.hands.TargetMacro(m_tgt_macro_idx);
+        m_tgt_macro_idx = (m_tgt_macro_idx + 1) % (int)gs.cfg.target_macro_keys.size();
     }
 
     // Pokemon макрос: ОДИН РАЗ на початку TARGETING циклу
-    if (gs.cfg.has_pokemon_key && !self.m_tgt_pokemon_fired && self.m_tgt_macro_attempts == 1) {
-        self.m_tgt_pokemon_fired = true;
+    if (gs.cfg.has_pokemon_key && !m_tgt_pokemon_fired && m_tgt_macro_attempts == 1) {
+        m_tgt_pokemon_fired = true;
         gs.hands.Delay(50);
         gs.hands.PressKeyboardKey(gs.cfg.pokemon_key);
-        self.m_tgt_pokemon_targeted = true;
+        m_tgt_pokemon_targeted = true;
         gs.log("[Pokemon] макрос");
     }
+}
 
-    // ── Navigation stuck detection ─────────────────────────────────────────────
+std::optional<BTStatus> BotBehaviorTree::tgtHandleNavigation(GameState& gs,
+        const Eyes::MinimapDot* map_ref) {
+    (void)map_ref;
+
+    // ── Navigation stuck detection ────────────────────────────────────────────
     if (gs.cfg.nav_stuck_detection) {
         const bool is_moving = gs.eyes.IsCharacterMoving();
 
-        if (self.m_tgt_nav_prev_was_walk) {
-            self.m_tgt_nav_prev_was_walk = false;
+        if (m_tgt_nav_prev_was_walk) {
+            m_tgt_nav_prev_was_walk = false;
 
-            if (self.m_tgt_running_to_mob) {
-                const double run_secs = secsSince(self.m_tgt_run_started);
+            if (m_tgt_running_to_mob) {
+                const double run_secs = secsSince(m_tgt_run_started);
                 if (run_secs >= 15.0) {
-                    const int rotation_ms = std::min(900 + (self.m_tgt_nav_stuck_recoveries / 2) * 450, 1800);
+                    const int rotation_ms = std::min(
+                        900 + (m_tgt_nav_stuck_recoveries / 2) * 450, 1800);
                     gs.hands.WalkBack(300);
-                    if (self.m_tgt_nav_stuck_recoveries % 2 == 0) {
+                    if (m_tgt_nav_stuck_recoveries % 2 == 0) {
                         gs.hands.RotateRight(rotation_ms);
                         gs.log("[NAV] Біг " + std::to_string((int)run_secs) +
                             "с без таргету → WalkBack + RotateRight(" +
@@ -889,9 +923,9 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
                             "с без таргету → WalkBack + RotateLeft(" +
                             std::to_string(rotation_ms) + "мс)");
                     }
-                    self.m_tgt_nav_stuck_recoveries++;
-                    self.m_tgt_run_started = now();
-                    self.m_tgt_nav_prev_was_walk = true;
+                    m_tgt_nav_stuck_recoveries++;
+                    m_tgt_run_started = now();
+                    m_tgt_nav_prev_was_walk = true;
                 }
             } else {
                 const float flow    = gs.cfg.nav_flow_detection
@@ -900,41 +934,42 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
                     ? gs.eyes.GetMinimapFlow() : -1.0f;
                 const bool actually_moved = is_moving || (flow > 1.5f) || (mm_flow > 0.3f);
                 if (!actually_moved) {
-                    self.m_tgt_walk_stuck_count++;
+                    m_tgt_walk_stuck_count++;
                     gs.log("[NAV] Не рухаємось після WalkForward ×" +
-                        std::to_string(self.m_tgt_walk_stuck_count) +
+                        std::to_string(m_tgt_walk_stuck_count) +
                         (flow >= 0 ? " flow=" + std::to_string(flow).substr(0,4) : ""));
-                    if (self.m_tgt_walk_stuck_count >= gs.cfg.nav_stuck_threshold) {
-                        self.m_tgt_walk_stuck_count = 0;
-                        const int rotation_ms = std::min(900 + (self.m_tgt_nav_stuck_recoveries / 2) * 450, 1800);
+                    if (m_tgt_walk_stuck_count >= gs.cfg.nav_stuck_threshold) {
+                        m_tgt_walk_stuck_count = 0;
+                        const int rotation_ms = std::min(
+                            900 + (m_tgt_nav_stuck_recoveries / 2) * 450, 1800);
                         gs.hands.WalkBack(300);
-                        if (self.m_tgt_nav_stuck_recoveries % 2 == 0) {
+                        if (m_tgt_nav_stuck_recoveries % 2 == 0) {
                             gs.hands.RotateRight(rotation_ms);
                             gs.log("[NAV] Застряг ×" +
-                                std::to_string(self.m_tgt_nav_stuck_recoveries + 1) +
+                                std::to_string(m_tgt_nav_stuck_recoveries + 1) +
                                 " → WalkBack + RotateRight(" +
                                 std::to_string(rotation_ms) + "мс)");
                         } else {
                             gs.hands.RotateLeft(rotation_ms);
                             gs.log("[NAV] Застряг ×" +
-                                std::to_string(self.m_tgt_nav_stuck_recoveries + 1) +
+                                std::to_string(m_tgt_nav_stuck_recoveries + 1) +
                                 " → WalkBack + RotateLeft(" +
                                 std::to_string(rotation_ms) + "мс)");
                         }
                         gs.hands.WalkForward(500);
-                        self.m_tgt_nav_prev_was_walk = true;
-                        self.m_tgt_nav_stuck_recoveries++;
+                        m_tgt_nav_prev_was_walk = true;
+                        m_tgt_nav_stuck_recoveries++;
 
                         // Breadcrumbs: ініціація backtrack
                         if (gs.cfg.breadcrumbs.enabled && gs.coords_valid
-                            && !self.m_backtracking
-                            && self.m_tgt_nav_stuck_recoveries >= gs.cfg.breadcrumbs.stuck_threshold) {
-                            auto bc = self.findBacktrackCrumb(gs.player_x, gs.player_y,
-                                                               gs.cfg.breadcrumbs.backtrack_range);
+                            && !m_backtracking
+                            && m_tgt_nav_stuck_recoveries >= gs.cfg.breadcrumbs.stuck_threshold) {
+                            auto bc = findBacktrackCrumb(gs.player_x, gs.player_y,
+                                                         gs.cfg.breadcrumbs.backtrack_range);
                             if (bc.has_value()) {
-                                self.m_backtracking = true;
+                                m_backtracking = true;
                                 gs.log("[BREADCRUMB] Застряг ×" +
-                                    std::to_string(self.m_tgt_nav_stuck_recoveries) +
+                                    std::to_string(m_tgt_nav_stuck_recoveries) +
                                     " → backtrack до (" +
                                     std::to_string((int)bc->x) + "," +
                                     std::to_string((int)bc->y) + ")");
@@ -942,8 +977,8 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
                         }
                     }
                 } else {
-                    self.m_tgt_walk_stuck_count = 0;
-                    self.m_tgt_nav_stuck_recoveries = 0;
+                    m_tgt_walk_stuck_count = 0;
+                    m_tgt_nav_stuck_recoveries = 0;
                     if (flow > 0)
                         gs.log("[NAV] Рух ок, flow=" + std::to_string(flow).substr(0,4));
                 }
@@ -951,29 +986,29 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
         }
     }
 
-    // ── Breadcrumbs: виконання повернення ─────────────────────────────────────
-    if (self.m_backtracking && gs.coords_valid && gs.navigate_to_mob) {
-        auto bc = self.findBacktrackCrumb(gs.player_x, gs.player_y,
-                                          gs.cfg.breadcrumbs.backtrack_range);
+    // ── Breadcrumbs: виконання повернення ────────────────────────────────────
+    if (m_backtracking && gs.coords_valid && gs.navigate_to_mob) {
+        auto bc = findBacktrackCrumb(gs.player_x, gs.player_y,
+                                     gs.cfg.breadcrumbs.backtrack_range);
         if (bc.has_value()) {
             L2Character dummy{};
             dummy.x = bc->x; dummy.y = bc->y; dummy.z = bc->z;
             dummy.hp = 100.f; dummy.hpMax = 100.f;
             if (!gs.navigate_to_mob(dummy)) {
-                self.m_backtracking = false;
-                self.m_tgt_nav_stuck_recoveries = 0;
+                m_backtracking = false;
+                m_tgt_nav_stuck_recoveries = 0;
                 gs.log("[BREADCRUMB] Точку досягнуто → відновлюємо пошук");
             } else {
                 gs.hands.Send(200);
                 return BTStatus::Running;
             }
         } else {
-            self.m_backtracking = false;
+            m_backtracking = false;
             gs.log("[BREADCRUMB] Крихти вичерпано");
         }
     }
 
-    // ── Memory навігація (пріоритет над мінімапою якщо увімкнено) ─────────────
+    // ── Memory навігація ──────────────────────────────────────────────────────
     if (gs.cfg.navigation.enabled && !gs.kl_mobs.empty()) {
         auto kl_mobs = gs.kl_mobs;
         kl_mobs.erase(std::remove_if(kl_mobs.begin(), kl_mobs.end(),
@@ -1000,24 +1035,31 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
                     return BTStatus::Running;
                 }
                 // Запит шляху через GeodataWorker
-                if (!self.m_tgt_geo_path_ready && !self.m_tgt_pending_path.has_value()
+                if (!m_tgt_geo_path_ready && !m_tgt_pending_path.has_value()
                     && gs.geodata && gs.geodata->IsLoaded(nearest->x, nearest->y)
                     && gs.coords_valid) {
                     PathRequest req;
                     req.sx = gs.player_x; req.sy = gs.player_y; req.sz = gs.player_z;
                     req.ex = nearest->x;  req.ey = nearest->y;  req.ez = nearest->z;
                     req.maxRange = gs.cfg.knownlist_max_range;
-                    req.id = ++self.m_tgt_path_req_id;
-                    self.m_tgt_pending_path = req;
+                    req.id = ++m_tgt_path_req_id;
+                    m_tgt_pending_path = req;
                 }
             }
         }
     }
 
-    // ── NavMesh FindPath ───────────────────────────────────────────────────────
+    return std::nullopt;
+}
+
+std::optional<BTStatus> BotBehaviorTree::tgtHandleGeoPath(GameState& gs,
+        const Eyes::MinimapDot* map_ref) {
+    const int kMinimapDxThreshold = gs.cfg.targeting_tuning.minimap_dx_threshold;
+
+    // ── NavMesh FindPath ──────────────────────────────────────────────────────
     if (gs.navmesh && gs.navmesh->IsValid()
         && gs.coords_valid && !gs.kl_mobs.empty()
-        && !self.m_tgt_geo_path_ready) {
+        && !m_tgt_geo_path_ready) {
         const L2Character* tgt = nullptr;
         float best_d2 = 1e12f;
         for (const auto& mob : gs.kl_mobs) {
@@ -1031,76 +1073,82 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
                 gs.player_x, gs.player_y, gs.player_z,
                 tgt->x,      tgt->y,      tgt->z);
             if (!nm_path.empty()) {
-                self.m_tgt_geo_path       = nm_path;
-                self.m_tgt_geo_path_idx   = 0;
-                self.m_tgt_geo_path_id    = ++self.m_tgt_path_req_id;
-                self.m_tgt_geo_path_ready = true;
+                m_tgt_geo_path       = nm_path;
+                m_tgt_geo_path_idx   = 0;
+                m_tgt_geo_path_id    = ++m_tgt_path_req_id;
+                m_tgt_geo_path_ready = true;
                 gs.log("[NAVMESH] Шлях: " + std::to_string(nm_path.size()) + " точок");
             }
         }
     }
 
-    // ── Geodata waypoint following ─────────────────────────────────────────────
-    if (gs.cfg.navigation.enabled && self.m_tgt_geo_path_ready
-        && self.m_tgt_geo_path_idx < self.m_tgt_geo_path.size() && gs.coords_valid) {
-        auto [wx, wy] = self.m_tgt_geo_path[self.m_tgt_geo_path_idx];
+    // ── Geodata waypoint following ────────────────────────────────────────────
+    if (gs.cfg.navigation.enabled && m_tgt_geo_path_ready
+        && m_tgt_geo_path_idx < m_tgt_geo_path.size() && gs.coords_valid) {
+        auto [wx, wy] = m_tgt_geo_path[m_tgt_geo_path_idx];
         float dx_wp = wx - gs.player_x;
         float dy_wp = wy - gs.player_y;
         float dist_wp = std::sqrt(dx_wp * dx_wp + dy_wp * dy_wp);
         if (dist_wp < 300.f) {
-            self.m_tgt_geo_path_idx++;
-            gs.log("[GEO] Waypoint " + std::to_string(self.m_tgt_geo_path_idx) +
-                "/" + std::to_string(self.m_tgt_geo_path.size()) + " досягнуто");
+            m_tgt_geo_path_idx++;
+            gs.log("[GEO] Waypoint " + std::to_string(m_tgt_geo_path_idx) +
+                "/" + std::to_string(m_tgt_geo_path.size()) + " досягнуто");
         } else {
             L2Character wp{};
             wp.x = wx; wp.y = wy; wp.z = gs.player_z;
             wp.hp = 100.f; wp.hpMax = 100.f;
             if (gs.navigate_to_mob && gs.navigate_to_mob(wp)) {
-                gs.log("[GEO] → waypoint " + std::to_string(self.m_tgt_geo_path_idx) +
+                gs.log("[GEO] → waypoint " + std::to_string(m_tgt_geo_path_idx) +
                     " dist=" + std::to_string((int)dist_wp));
                 gs.hands.Send(150);
                 return BTStatus::Running;
             }
         }
-        if (self.m_tgt_geo_path_idx >= self.m_tgt_geo_path.size()) {
-            self.m_tgt_geo_path_ready = false;
+        if (m_tgt_geo_path_idx >= m_tgt_geo_path.size()) {
+            m_tgt_geo_path_ready = false;
             gs.log("[GEO] Шлях пройдено");
         }
     }
 
-    // ── WalkForward якщо моб прямо попереду (dy < -15) ─────────────────────────
+    // ── WalkForward якщо моб прямо попереду (dy < -15) ───────────────────────
     if (map_ref && std::abs(map_ref->dx) <= kMinimapDxThreshold
-        && map_ref->dy < -15 && !self.m_tgt_nav_prev_was_walk && gs.eyes.IsGroundAhead()) {
-        gs.hands.WalkForward(RandMs(self.m_tgt_rd_walk.get(), gs, 700));
-        self.m_tgt_nav_prev_was_walk = true;
+        && map_ref->dy < -15 && !m_tgt_nav_prev_was_walk && gs.eyes.IsGroundAhead()) {
+        gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 700));
+        m_tgt_nav_prev_was_walk = true;
         gs.log("[MAP] Моб прямо попереду (dy=" + std::to_string(map_ref->dy) +
             ") → WalkForward");
     }
 
-    // ── Fallback ротація / Patrol / Розвідка ──────────────────────────────────
+    return std::nullopt;
+}
+
+void BotBehaviorTree::tgtHandlePatrolAndRotate(GameState& gs,
+        const Eyes::MinimapDot* map_ref) {
+    const auto& minimap_dots = gs.minimap_dots;
     const bool minimap_empty = minimap_dots.empty();
-    const bool long_search   = (self.m_tgt_macro_attempts >= 20)
-                               && (self.m_tgt_macro_attempts % 10 == 0);
-    if (self.m_tgt_macro_attempts % 5 == 0 && (minimap_empty || long_search)) {
+    const bool long_search   = (m_tgt_macro_attempts >= 20)
+                               && (m_tgt_macro_attempts % 10 == 0);
+
+    if (m_tgt_macro_attempts % 5 == 0 && (minimap_empty || long_search)) {
         gs.hands.Delay(50);
-        self.m_tgt_step_count++;
+        m_tgt_step_count++;
         gs.stats.RecordTargetingFailure();
-        if (s_self) s_self->m_rl_sig_targeting_failed = true;
+        m_rl_sig_targeting_failed = true;
 
         const bool patrol_ready = gs.cfg.patrol_enabled
             && !gs.cfg.patrol_path.empty()
-            && self.m_tgt_macro_attempts >= gs.cfg.patrol_trigger_attempts
-            && self.m_tgt_macro_attempts % 5 == 0;
+            && m_tgt_macro_attempts >= gs.cfg.patrol_trigger_attempts
+            && m_tgt_macro_attempts % 5 == 0;
 
         if (patrol_ready) {
             const auto& step = gs.cfg.patrol_path[
-                self.m_tgt_patrol_step_idx % (int)gs.cfg.patrol_path.size()];
-            int pat_step_display = self.m_tgt_patrol_step_idx % (int)gs.cfg.patrol_path.size() + 1;
+                m_tgt_patrol_step_idx % (int)gs.cfg.patrol_path.size()];
+            int pat_step_display = m_tgt_patrol_step_idx % (int)gs.cfg.patrol_path.size() + 1;
             int pat_total = (int)gs.cfg.patrol_path.size();
             switch (step.dir) {
                 case Config::PatrolStep::Dir::Forward:
                     gs.hands.WalkForward(step.ms);
-                    self.m_tgt_nav_prev_was_walk = true;
+                    m_tgt_nav_prev_was_walk = true;
                     gs.log("[PATROL] Крок " + std::to_string(pat_step_display) +
                         "/" + std::to_string(pat_total) +
                         " → Forward(" + std::to_string(step.ms) + "мс)");
@@ -1124,49 +1172,49 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
                         " → RotateRight(" + std::to_string(step.ms) + "мс)");
                     break;
             }
-            self.m_tgt_patrol_step_idx++;
+            m_tgt_patrol_step_idx++;
         } else {
-            if ((self.m_tgt_macro_attempts / 5) % 2 == 0)
-                gs.hands.RotateRight(RandMs(self.m_tgt_rd_rotate.get(), gs, 350));
+            if ((m_tgt_macro_attempts / 5) % 2 == 0)
+                gs.hands.RotateRight(RandMs(m_tgt_rd_rotate.get(), gs, 350));
             else
-                gs.hands.RotateLeft(RandMs(self.m_tgt_rd_rotate.get(), gs, 350));
-            const bool explore_trigger = (!patrol_ready && !self.m_tgt_nav_prev_was_walk
+                gs.hands.RotateLeft(RandMs(m_tgt_rd_rotate.get(), gs, 350));
+            const bool explore_trigger = (!patrol_ready && !m_tgt_nav_prev_was_walk
                 && gs.eyes.IsGroundAhead()
-                && ((minimap_empty && self.m_tgt_macro_attempts % 15 == 0)
-                    || (!minimap_empty && self.m_tgt_macro_attempts % 20 == 0)));
+                && ((minimap_empty && m_tgt_macro_attempts % 15 == 0)
+                    || (!minimap_empty && m_tgt_macro_attempts % 20 == 0)));
             if (explore_trigger) {
                 gs.hands.WalkForward(1200);
-                self.m_tgt_nav_prev_was_walk = true;
-                gs.log("[TARGETING] Спроба " + std::to_string(self.m_tgt_macro_attempts) +
+                m_tgt_nav_prev_was_walk = true;
+                gs.log("[TARGETING] Спроба " + std::to_string(m_tgt_macro_attempts) +
                     " — розвідка вперед (" +
                     (minimap_empty ? "мінімапа порожня" : "dot недосяжний") + ")");
             } else {
-                gs.log("[TARGETING] Спроба " + std::to_string(self.m_tgt_macro_attempts) +
+                gs.log("[TARGETING] Спроба " + std::to_string(m_tgt_macro_attempts) +
                     " — ротація (мінімапа порожня)");
             }
         }
-    } else if (self.m_tgt_macro_attempts % 5 == 0) {
+    } else if (m_tgt_macro_attempts % 5 == 0) {
         gs.stats.RecordTargetingFailure();
-        if (s_self) s_self->m_rl_sig_targeting_failed = true;
-        gs.log("[TARGETING] Спроба " + std::to_string(self.m_tgt_macro_attempts) + " — шукаємо...");
+        m_rl_sig_targeting_failed = true;
+        gs.log("[TARGETING] Спроба " + std::to_string(m_tgt_macro_attempts) + " — шукаємо...");
     }
 
     // Попередження при довгому пошуку
     const int kWarnAt = gs.cfg.targeting_tuning.long_search_warn_at;
-    if (kWarnAt > 0 && self.m_tgt_macro_attempts > kWarnAt && self.m_tgt_macro_attempts % kWarnAt == 0) {
+    if (kWarnAt > 0 && m_tgt_macro_attempts > kWarnAt
+        && m_tgt_macro_attempts % kWarnAt == 0) {
         std::string dots_info = minimap_dots.empty()
             ? "мінімапа порожня"
             : ("dots=" + std::to_string(minimap_dots.size()) +
                " dx=" + std::to_string(minimap_dots[0].dx));
         std::string kl_info = (gs.kl_alive_count > 0)
             ? " KL_alive=" + std::to_string(gs.kl_alive_count) : "";
-        gs.log("[TARGETING] Довгий пошук ×" + std::to_string(self.m_tgt_macro_attempts) +
+        gs.log("[TARGETING] Довгий пошук ×" + std::to_string(m_tgt_macro_attempts) +
             " — " + dots_info + kl_info +
-            " rot=" + std::to_string(self.m_tgt_minimap_rotate_count));
+            " rot=" + std::to_string(m_tgt_minimap_rotate_count));
     }
 
-    gs.hands.Send(150);
-    return BTStatus::Running;
+    (void)map_ref; // map_ref доступний для майбутніх розширень
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

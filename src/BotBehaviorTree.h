@@ -248,6 +248,18 @@ private:
     void addCrumb(float x, float y, float z, const Config::BreadcrumbConfig& cfg);
     std::optional<Crumb> findBacktrackCrumb(float px, float py, float range) const;
 
+    // ── actTarget підфункції ──────────────────────────────────────────────────
+    std::optional<BTStatus> tgtHandleDeadTarget  (GameState& gs);
+    void                    tgtHandleMinimap      (GameState& gs,
+                                const Eyes::MinimapDot* map_ref, bool map_ref_selected);
+    void                    tgtSendF2AndMacro     (GameState& gs);
+    std::optional<BTStatus> tgtHandleNavigation   (GameState& gs,
+                                const Eyes::MinimapDot* map_ref);
+    std::optional<BTStatus> tgtHandleGeoPath      (GameState& gs,
+                                const Eyes::MinimapDot* map_ref);
+    void                    tgtHandlePatrolAndRotate(GameState& gs,
+                                const Eyes::MinimapDot* map_ref);
+
     // RandMs helper
     static int RandMs(RandomDelay* rd, const GameState& gs, int fixed_ms) {
         if (gs.cfg.delays.enabled && rd) return rd->Get();
