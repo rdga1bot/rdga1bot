@@ -71,7 +71,15 @@ void BotBehaviorTree::init(const Config& cfg) {
     uint16_t cnd_atk  = bt.addCondition(&condHasTarget);
     uint16_t act_atk  = bt.addAction   (&actAttack);
 
-    uint16_t act_tgt  = bt.addAction   (&actTarget);
+    // Target піддерево (MR28)
+    uint16_t tgt_root     = bt.addSelector();
+    uint16_t act_tgt_init = bt.addAction(&actTgtInit);
+    uint16_t act_tgt_dead = bt.addAction(&actTgtDeadTarget);
+    uint16_t act_tgt_map  = bt.addAction(&actTgtMinimap);
+    uint16_t act_tgt_f2   = bt.addAction(&actTgtF2AndMacro);
+    uint16_t act_tgt_nav  = bt.addAction(&actTgtNavigation);
+    uint16_t act_tgt_geo  = bt.addAction(&actTgtGeoPath);
+    uint16_t act_tgt_pat  = bt.addAction(&actTgtPatrol);
 
     // ── Фаза 2: root отримує прямих нащадків (усі gілки підряд) ─────────────
     bt.addChild(root, seq_dead);
@@ -80,7 +88,7 @@ void BotBehaviorTree::init(const Config& cfg) {
     if (seq_buff != NONE) bt.addChild(root, seq_buff);
     bt.addChild(root, seq_loot);
     bt.addChild(root, seq_atk);
-    bt.addChild(root, act_tgt);   // fallback
+    bt.addChild(root, tgt_root);  // Target піддерево (MR28)
 
     // ── Фаза 3: кожна гілка отримує своїх нащадків ───────────────────────────
     bt.addChild(seq_dead, cnd_dead);
@@ -103,6 +111,15 @@ void BotBehaviorTree::init(const Config& cfg) {
 
     bt.addChild(seq_atk, cnd_atk);
     bt.addChild(seq_atk, act_atk);
+
+    // Target піддерево — BFS: всі прямі нащадки tgt_root після інших sequences
+    bt.addChild(tgt_root, act_tgt_init);
+    bt.addChild(tgt_root, act_tgt_dead);
+    bt.addChild(tgt_root, act_tgt_map);
+    bt.addChild(tgt_root, act_tgt_f2);
+    bt.addChild(tgt_root, act_tgt_nav);
+    bt.addChild(tgt_root, act_tgt_geo);
+    bt.addChild(tgt_root, act_tgt_pat);
 
     std::cerr << "[BT] Ініціалізовано: " << bt.nodeCount() << " вузлів\n";
 
@@ -711,12 +728,21 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
     return BTStatus::Running;
 }
 
+// actTarget — замінено піддеревом tgt_root в MR28. Не використовується.
 BTStatus BotBehaviorTree::actTarget(GameState& gs) {
+    (void)gs;
+    return BTStatus::Failure;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TARGET ПІДДЕРЕВО (MR28) — статичні BT callback вузли
+// ─────────────────────────────────────────────────────────────────────────────
+
+BTStatus BotBehaviorTree::actTgtInit(GameState& gs) {
     if (!s_self) return BTStatus::Failure;
     auto& self = *s_self;
     self.m_active_branch = "Target";
 
-    // [1] hands_ready
     if (!gs.hands_ready) {
         self.m_tgt_not_ready_count++;
         if (self.m_tgt_not_ready_count == 20 || self.m_tgt_not_ready_count % 100 == 0)
@@ -726,46 +752,73 @@ BTStatus BotBehaviorTree::actTarget(GameState& gs) {
     }
     self.m_tgt_not_ready_count = 0;
 
-    // [2] Ініціалізація
     if (!self.m_tgt_active) {
         self.resetTargetState(gs);
         self.m_tgt_active = true;
     }
 
-    // [3] Breadcrumbs запис
     if (gs.coords_valid)
         self.addCrumb(gs.player_x, gs.player_y, gs.player_z, gs.cfg.breadcrumbs);
 
-    // [4] Мертвий таргет
-    if (auto r = self.tgtHandleDeadTarget(gs)) return *r;
+    return BTStatus::Failure; // передати до actTgtDeadTarget
+}
+
+BTStatus BotBehaviorTree::actTgtDeadTarget(GameState& gs) {
+    if (!s_self) return BTStatus::Failure;
+    auto r = s_self->tgtHandleDeadTarget(gs);
+    return r.value_or(BTStatus::Failure);
+}
+
+BTStatus BotBehaviorTree::actTgtMinimap(GameState& gs) {
+    if (!s_self) return BTStatus::Failure;
+    auto& self = *s_self;
 
     self.m_tgt_macro_attempts++;
 
-    // [5] map_ref + мінімапа ротація
+    // Обчислюємо і зберігаємо map_ref для downstream вузлів
     const auto& minimap_dots = gs.minimap_dots;
-    const Eyes::MinimapDot* map_ref = nullptr;
-    bool map_ref_selected = false;
+    self.m_tgt_map_ref          = nullptr;
+    self.m_tgt_map_ref_selected = false;
     for (const auto& d : minimap_dots) {
-        if (d.selected) { map_ref = &d; map_ref_selected = true; break; }
+        if (d.selected) {
+            self.m_tgt_map_ref          = &d;
+            self.m_tgt_map_ref_selected = true;
+            break;
+        }
     }
-    if (!map_ref && !minimap_dots.empty()) map_ref = &minimap_dots[0];
+    if (!self.m_tgt_map_ref && !minimap_dots.empty())
+        self.m_tgt_map_ref = &minimap_dots[0];
 
-    self.tgtHandleMinimap(gs, map_ref, map_ref_selected);
+    self.tgtHandleMinimap(gs, self.m_tgt_map_ref, self.m_tgt_map_ref_selected);
+    return BTStatus::Failure; // передати до actTgtF2AndMacro
+}
 
-    // [6] F2 + macro + pokemon
-    self.tgtSendF2AndMacro(gs);
+BTStatus BotBehaviorTree::actTgtF2AndMacro(GameState& gs) {
+    if (!s_self) return BTStatus::Failure;
+    s_self->tgtSendF2AndMacro(gs);
+    return BTStatus::Failure; // передати до actTgtNavigation
+}
 
-    // [7] Navigation (stuck + breadcrumbs + memory)
-    if (auto r = self.tgtHandleNavigation(gs, map_ref)) return *r;
+BTStatus BotBehaviorTree::actTgtNavigation(GameState& gs) {
+    if (!s_self) return BTStatus::Failure;
+    auto& self = *s_self;
+    auto r = self.tgtHandleNavigation(gs, self.m_tgt_map_ref);
+    return r.value_or(BTStatus::Failure);
+}
 
-    // [7b] GeoPath (NavMesh + Geodata waypoints + WalkForward)
-    if (auto r = self.tgtHandleGeoPath(gs, map_ref)) return *r;
+BTStatus BotBehaviorTree::actTgtGeoPath(GameState& gs) {
+    if (!s_self) return BTStatus::Failure;
+    auto& self = *s_self;
+    auto r = self.tgtHandleGeoPath(gs, self.m_tgt_map_ref);
+    return r.value_or(BTStatus::Failure);
+}
 
-    // [8] Patrol / Rotate / Розвідка
-    self.tgtHandlePatrolAndRotate(gs, map_ref);
-
+BTStatus BotBehaviorTree::actTgtPatrol(GameState& gs) {
+    if (!s_self) return BTStatus::Failure;
+    auto& self = *s_self;
+    self.tgtHandlePatrolAndRotate(gs, self.m_tgt_map_ref);
     gs.hands.Send(150);
-    return BTStatus::Running;
+    return BTStatus::Running; // останній вузол — завжди Running
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

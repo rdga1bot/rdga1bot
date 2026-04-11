@@ -167,6 +167,10 @@ private:
     int   m_tgt_not_ready_count    = 0;
     bool  m_attack_was_unreachable = false; // зберігається між циклами
 
+    // Спільний стан між вузлами піддерева Target (обчислюється в actTgtMinimap)
+    const Eyes::MinimapDot* m_tgt_map_ref         = nullptr;
+    bool                    m_tgt_map_ref_selected = false;
+
     // Geo path
     std::vector<std::pair<float,float>> m_tgt_geo_path;
     size_t   m_tgt_geo_path_idx   = 0;
@@ -237,7 +241,16 @@ private:
     static BTStatus actBuff    (GameState& gs);
     static BTStatus actLoot    (GameState& gs);
     static BTStatus actAttack  (GameState& gs);
-    static BTStatus actTarget  (GameState& gs);
+    static BTStatus actTarget  (GameState& gs); // замінено піддеревом в MR28
+
+    // ── Target піддерево (MR28) ──────────────────────────────────────────────
+    static BTStatus actTgtInit       (GameState& gs); // ініціалізація + breadcrumb
+    static BTStatus actTgtDeadTarget (GameState& gs); // мертвий таргет hp=0
+    static BTStatus actTgtMinimap    (GameState& gs); // ротація мінімапою
+    static BTStatus actTgtF2AndMacro (GameState& gs); // F2 + macro + pokemon
+    static BTStatus actTgtNavigation (GameState& gs); // stuck + nav + geodata req
+    static BTStatus actTgtGeoPath    (GameState& gs); // navmesh + geo waypoints
+    static BTStatus actTgtPatrol     (GameState& gs); // patrol + rotate + explore
 
     // Helpers
     void resetAttackState(GameState& gs);
