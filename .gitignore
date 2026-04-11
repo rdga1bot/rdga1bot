@@ -46,3 +46,8 @@ tools/build_navmesh
 # NavMesh artifacts
 *.pts
 *.bin
+
+# MemPalace
+memory/palace/
+memory/venv/
+*.mempalaceignore
