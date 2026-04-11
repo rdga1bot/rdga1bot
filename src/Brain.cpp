@@ -33,33 +33,9 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
 
     InitRandomDelays();
 
-    // Objectives: логування через Brain::Log
-    m_obj_manager.setLogCallback([this](const std::string& msg) {
-        Log(msg, LogLevel::Info);
-    });
-
-    // Реєстрація Objectives (порядок = пріоритет)
-    m_obj_manager.add(std::make_unique<DeadObjective>());
-    // RestObjective: активна якщо HP або MP нижче порогу
-    if (m_cfg.mp_threshold > 0)
-        m_obj_manager.add(std::make_unique<RestObjective>());
-    // ZoneObjective: активна якщо персонаж вийшов з зони
-    if (m_cfg.zone_enabled)
-        m_obj_manager.add(std::make_unique<ZoneObjective>(
-            m_cfg.zone_x, m_cfg.zone_y, m_cfg.zone_radius));
-    m_obj_manager.add(std::make_unique<BuffObjective>());
-    m_obj_manager.add(std::make_unique<TargetObjective>());
-    m_obj_manager.add(std::make_unique<AttackObjective>());
-    // LootObjective активується тільки через Switch з AttackObjective
-    m_obj_manager.add(std::make_unique<LootObjective>());
-
-    // BehaviorTree: ініціалізуємо якщо увімкнено
-    m_use_bt = m_cfg.use_behavior_tree;
-    if (m_use_bt) {
-        m_bot_bt.init(m_cfg);
-        Log("[BT] BotBehaviorTree: " +
-            std::to_string(m_bot_bt.nodeCount()) + " вузлів");
-    }
+    // BotBehaviorTree: єдиний планувальник
+    m_bot_bt.init(m_cfg);
+    Log("[BT] BotBehaviorTree: " + std::to_string(m_bot_bt.nodeCount()) + " вузлів");
 }
 
 void Brain::ReloadConfig(const Config& new_cfg) {
@@ -70,7 +46,6 @@ void Brain::ReloadConfig(const Config& new_cfg) {
 
 void Brain::Init() {
     Log("[Brain] Ініціалізація...\n");
-    // ObjectiveManager вибере перший canRun=true objective автоматично
 }
 
 // ── Process ───────────────────────────────────────────────────────────────────
@@ -136,8 +111,7 @@ void Brain::Process(bool debug) {
     // Перевірка смерті (HP≤1% протягом 10 тіків = ~1с)
     // ≤1 замість ==0: мертвий персонаж може читатись як 1% (1px бару видимий)
     // Не тригеримо в Buff стані: HP bar може тимчасово не детектуватись.
-    const std::string cur_obj = m_use_bt ? m_bot_bt.currentBranch()
-                                          : m_obj_manager.currentName();
+    const std::string cur_obj = m_bot_bt.currentBranch();
     bool is_dead_now = false;
     if (cur_obj != "Dead" && cur_obj != "Buff") {
         if (me.hp <= 1 && !InRespawnGrace()) {
@@ -191,21 +165,11 @@ void Brain::Process(bool debug) {
     updateGameState(gs);
     gs.is_dead = is_dead_now;  // передаємо поточний стан смерті
 
-    if (m_use_bt) {
-        std::string branch = m_bot_bt.tick(gs);
-        if (m_heartbeat_tick % 50 == 1)
-            Log("[BT] " + branch + " avg=" + std::to_string(m_bot_bt.avgTimeUs()) + "µs");
-        if (branch != m_prev_obj_name) {
-            m_prev_obj_name = branch;
-        }
-    } else {
-        m_obj_manager.tick(gs);
-        // Детекція переходу стану
-        const std::string new_obj = m_obj_manager.currentName();
-        if (new_obj != m_prev_obj_name) {
-            m_prev_obj_name = new_obj;
-        }
-    }
+    std::string branch = m_bot_bt.tick(gs);
+    if (m_heartbeat_tick % 50 == 1)
+        Log("[BT] " + branch + " avg=" + std::to_string(m_bot_bt.avgTimeUs()) + "µs");
+    if (branch != m_prev_obj_name)
+        m_prev_obj_name = branch;
 
     // Після Done DeadObjective: reset hp_zero_count
     if (m_prev_obj_name != "Dead") {
@@ -614,18 +578,13 @@ void Brain::SetAsyncNPCs(const std::vector<Eyes::NPC>& npcs,
 
 void Brain::SetGeoPath(const std::vector<std::pair<float,float>>& path,
                         uint64_t path_id) {
-    if (m_use_bt)
-        m_bot_bt.deliverGeoPath(path, path_id);
-    else
-        m_obj_manager.deliverGeoPath(path, path_id);
+    m_bot_bt.deliverGeoPath(path, path_id);
     if (!path.empty())
         Log("[GEO-W] Шлях отримано: " + std::to_string(path.size()) + " точок",
             LogLevel::Debug);
 }
 
 std::optional<PathRequest> Brain::GetPendingPathRequest() {
-    if (m_use_bt)
-        return m_bot_bt.takePendingPathRequest();
-    return m_obj_manager.takePendingPathRequest();
+    return m_bot_bt.takePendingPathRequest();
 }
 

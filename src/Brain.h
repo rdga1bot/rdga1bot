@@ -20,8 +20,6 @@
 #include "navmesh_builder.h"
 #include "navmesh_worker.h"
 #include "game_state.h"
-#include "objective_manager.h"
-#include "farm_objectives.h"
 #include "BotBehaviorTree.h"
 
 class Brain {
@@ -32,15 +30,9 @@ public:
     void Init();
     void Process(bool debug = false);
 
-    // Поточна активна ціль (замінює State enum)
-    std::string GetState() const {
-        return m_use_bt ? m_bot_bt.currentBranch() : m_obj_manager.currentName();
-    }
-
-    // Активна гілка (для Dashboard)
-    std::string GetActiveBranch() const {
-        return m_use_bt ? m_bot_bt.currentBranch() : m_obj_manager.currentName();
-    }
+    // Поточна активна гілка BT (для Dashboard і логу)
+    std::string GetState()        const { return m_bot_bt.currentBranch(); }
+    std::string GetActiveBranch() const { return m_bot_bt.currentBranch(); }
 
     const Stats& GetStats() const { return m_stats; }
     const std::optional<Eyes::Me>& Me() const { return m_me; }
@@ -98,11 +90,6 @@ public:
     // Встановити callback для логу (викликається з кожного Log())
     void SetLogCallback(std::function<void(const std::string&)> cb) {
         m_log_callback = std::move(cb);
-    }
-
-    // Objectives: ім'я активної цілі (для Dashboard і логу)
-    std::string GetCurrentObjective() const {
-        return m_obj_manager.currentName();
     }
 
     // NavigateToMob: залишається в Brain (використовує m_mem_player, m_geodata)
@@ -175,13 +162,9 @@ private:
     };
     std::vector<BlacklistedMob> m_blacklist;
 
-    // Objectives
-    ObjectiveManager m_obj_manager;
-    std::string m_prev_obj_name; // для детекції переходів (RecordDeath тощо)
-
-    // BehaviorTree (альтернативний планувальник)
+    // BehaviorTree планувальник
     BotBehaviorTree m_bot_bt;
-    bool            m_use_bt = false;
+    std::string     m_prev_obj_name; // для детекції переходів (RecordDeath тощо)
 
     // Diagnostics
     int m_detect_me_fail_count = 0;
@@ -211,19 +194,12 @@ private:
         const std::vector<L2Character>& mobs, float playerX, float playerY);
 
     bool HasTarget() const { return m_target.has_value() && m_target->hp > 0; }
-    bool InRespawnGrace()  const {
-        if (m_use_bt) return m_bot_bt.inGrace();
-        return m_obj_manager.isInGrace();
-    }
+    bool InRespawnGrace()    const { return m_bot_bt.inGrace(); }
     double SecsSinceLastKill() const {
-        if (m_use_bt)
-            return std::chrono::duration<double>(Clock::now() - m_bot_bt.lastKillTime()).count();
-        return std::chrono::duration<double>(Clock::now() - m_obj_manager.getLastKillTime()).count();
+        return std::chrono::duration<double>(Clock::now() - m_bot_bt.lastKillTime()).count();
     }
     double SecsSinceLastBuff() const {
-        if (m_use_bt)
-            return std::chrono::duration<double>(Clock::now() - m_bot_bt.lastBuff()).count();
-        return std::chrono::duration<double>(Clock::now() - m_obj_manager.getLastBuff()).count();
+        return std::chrono::duration<double>(Clock::now() - m_bot_bt.lastBuff()).count();
     }
     static float NormalizeAngle(float angle);
 

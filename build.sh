@@ -49,7 +49,6 @@ SRCS="
   $SRC/Geodata.cpp
   $SRC/vision_worker.cpp
   $SRC/geodata_worker.cpp
-  $SRC/objective_manager.cpp
   $SRC/navmesh_builder.cpp
   $SRC/navmesh_worker.cpp
   $SRC/BehaviorTree.cpp
