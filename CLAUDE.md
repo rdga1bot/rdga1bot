@@ -7,11 +7,13 @@
 - Папка: ~/l2bot/rdga1bot/
 - Build: bash build.sh && ./launch.sh
 
-## Поточний стан
-- MR20a/b/c виконано — BotBehaviorTree (Stackless VM, ~9KB, 0 heap, ~2µs/тік)
-- A/B switch: [BehaviorTree] Enabled=true → BotBehaviorTree (активний)
-- farm_objectives.h + objective_manager.* — ще присутні, НЕ видалено
-- Наступні пріоритети: тест BT фарму → MR20c cleanup → розбивка actTarget
+## Поточний стан (2026-04-12)
+- **BotBehaviorTree** — єдиний планувальник (ObjectiveManager видалено в MR20c)
+- **MR23-25 виконано** — Huber Q-Learning інтегровано в BotBehaviorTree
+  - `[Learning] Enabled=false` (за замовчуванням) — поведінка ідентична попередній
+  - При `Enabled=true` — LearningWorker async IRLS thread + epsilon-greedy RL policy
+- **QA Monitor** — Python daemon (`qa/qa_monitor.py`), IsolationForest аномалії, MemPalace bridge
+- Наступні пріоритети: live BT тест з грою → actTarget рефакторинг (~470 рядків → subfunctions)
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
@@ -21,16 +23,24 @@
 - ScrollLock = зупинка бота
 - Нові фічі: завжди feature flag в INI (Enabled=false за замовчуванням)
 - Мінімальні цільові зміни — не робити broad rewrites
+- BT tick() сигнатура: `std::string tick(GameState& gs)` — НЕ міняти
+- m_children[] масив — НЕ переставляти під час виконання (ламає BTState)
 
 ## Ключові файли
-- src/Brain.cpp             — координатор (сприйняття + потіони + dispatch)
-- src/BotBehaviorTree.h/.cpp — Farm BT (активний планувальник)
-- src/BehaviorTree.h/.cpp   — Stackless VM
-- src/game_state.h          — GameState struct
-- src/farm_objectives.h     — ObjectiveManager objectives (legacy)
-- src/offsets_config.h      — ElmoreLab Kamael offsets (відкалібровано)
-- build.sh                  — компіляція (g++, без cmake)
-- rdga1bot.example.ini      — всі опції з коментарями
+- src/Brain.cpp               — координатор (сприйняття + потіони + dispatch)
+- src/BotBehaviorTree.h/.cpp  — Farm BT + RL інтеграція (активний планувальник)
+- src/BehaviorTree.h/.cpp     — Stackless VM (BTNode 24B, BTState 8B)
+- src/game_state.h            — GameState struct
+- src/LinearQModel.h/.cpp     — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій
+- src/LearningWorker.h/.cpp   — async IRLS thread (аналог GeodataWorker)
+- src/FeatureExtractor.h      — 10 ознак GameState → Eigen::VectorXf
+- src/ExperienceBuffer.h      — циклічний буфер Experience
+- src/RewardCalculator.h      — reward function
+- src/offsets_config.h        — ElmoreLab Kamael offsets (відкалібровано)
+- third_party/eigen/          — Eigen 3.4.0 header-only
+- build.sh                    — компіляція (g++, без cmake)
+- rdga1bot.example.ini        — всі опції з коментарями
+- qa/qa_monitor.py            — QA daemon (IsolationForest + MemPalace bridge)
 
 ## НЕ включати в білд
 Runloop.cpp, Options.cpp — legacy від l2cvbot
@@ -43,5 +53,5 @@ Runloop.cpp, Options.cpp — legacy від l2cvbot
 
 ## Детальний контекст (читай за потребою)
 - Архітектура + BT дерево + Config INI: cat CLAUDE_ARCH.md
-- Історія MR1-MR20c:                   cat CLAUDE_HISTORY.md
+- Історія MR1-MR25:                    cat CLAUDE_HISTORY.md
 - Memory offsets + технічні факти:     cat CLAUDE_OFFSETS.md

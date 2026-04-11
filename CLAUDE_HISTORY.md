@@ -1,0 +1,33 @@
+# rdga1bot — Історія MR
+
+## СТАТУС ТЕСТУВАННЯ
+### ✅ Варіант А (без гри) — ПРОЙДЕНО (2026-03-21)
+### ✅ Варіант В (повний FSM цикл) — ПРОЙДЕНО (2026-03-22)
+### ✅ Варіант Б (з грою) — ПРОЙДЕНО (2026-03-21)
+
+## СТАТУС ГОТОВНОСТІ (2026-03-22)
+### Підтверджено тестами (Flatpak Lutris + GE-Proton):
+- XTest → Wine/L2 працює ✓
+- XShm захоплення вікна працює ✓
+- Window finding за WindowTitle = Lineage II працює ✓
+
+## ВИКОНАНІ MR
+### ✅ MR9+MR10: Тест фарму (2026-04-04) — 133 kills/10хв, 0 deaths
+### ✅ MR11: Objectives Architecture (2026-04-04)
+### ✅ MR12: Перенос Handle* → Objective підкласи (2026-04-05)
+### ✅ MR13: Нові Objectives — Rest і Zone (2026-04-05)
+### ✅ MR14: Архітектурні виправлення Objectives (2026-04-05)
+### ✅ MR15: Видалення on_mob_unreachable callback (2026-04-05)
+### ✅ MR16: HP reading fix ElmoreLab Kamael (2026-04-05)
+### ✅ MR17: Оптимізація — Levenshtein, minimap throttle, JPS+ (2026-04-05)
+### ✅ MR18: Breadcrumbs + NavMesh Recast/Detour (2026-04-06)
+### ✅ MR19: MinimapNavEnabled=false, HpStableSkipBelow=5, KillLowHpTimeoutS=8
+### ✅ MR20a: BehaviorTree VM — BTNode 24B, BTState 8B, без heap (2026-04-07)
+### ✅ MR20b: BotBehaviorTree — Dead/Rest/Zone/Buff/Loot/Attack/Target (2026-04-07)
+### ✅ MR20c: actTarget — повна міграція TargetObjective (2026-04-07)
+### ✅ Фікси після MR20 (2026-04-11): dead detect hp<=1%, save navmesh on exit, offsets cache
+### ✅ MR20c cleanup (2026-04-12): видалено ObjectiveManager + farm_objectives.h + objective.h (-1703 рядки)
+### ✅ QA Monitor (2026-04-12): Python daemon, IsolationForest аномалії, MemPalace bridge, replay 22 сесій / 57799 kills baseline
+### ✅ MR23 (2026-04-12): Eigen 3.4.0, LearningConfig, FeatureExtractor (10 features), ExperienceBuffer, LinearQModel (IRLS+Huber), RewardCalculator
+### ✅ MR24 (2026-04-12): LearningWorker — async IRLS thread (аналог GeodataWorker)
+### ✅ MR25 (2026-04-12): RL інтеграція в BotBehaviorTree — initRL/shutdownRL, rlPreTick/rlPostTick, condNeedsBuff override, kill/death/buff/fail сигнали, Dashboard RL рядок

@@ -16,10 +16,10 @@ C++ бот для автоматизації фарму в Lineage II.
 **Навігація**
 - Мінімапа Rotating Radar: детекція червоних/фіолетових точок мобів, ротація до цілі
 - WalkForward по мінімапі (dy-based) + прогресивна ротація при застряганні
-- Optical flow (Lucas-Kanade) на мінімапі — flow-stuck detection
 - Патруль PatrolPath (`F2000,R500,...`) при порожній мінімапі
-- Memory-based навігація: координати XYZ + heading (опціонально, `[Navigation] Enabled=true`)
-- Геодата L2J формат: A* pathfinding по `.geo` файлах (опціонально, `[Geodata] Enabled=true`)
+- Memory-based навігація: координати XYZ + heading (`[Navigation] Enabled=true`)
+- Геодата L2J формат: A* pathfinding по `.geo` файлах (`[Geodata] Enabled=true`)
+- NavMesh Recast/Detour: `[NavMesh] Enabled=true` + зібрані точки руху
 
 **Детекція**
 - OpenCV XShm screen capture (lazy HSV конвертація, ~30-60 FPS)
@@ -31,22 +31,28 @@ C++ бот для автоматизації фарму в Lineage II.
 - `process_vm_readv` — без root, без Cheat Engine, без Windows API
 - `blindScan()` — автономний пошук PlayerBase без відомих offsets
 - Region scan heap: XYZ triplet scan → тип/HP/isDead/ім'я/level
-- Fallback `readAllAsChars()` якщо `objTypeOff` не відкалібровано
 - Thread-safe WorldState (snapshot copy під mutex, bgLoop scan кожну 1с)
 - Зважений вибір цілі: `[WeightedTargeting]` — scoring по відстані/HP/freshness
 - `--dump-objects` / `--calibrate [--name "X"]` — калібровка без Cheat Engine
 
-**Мультипоточність**
-- VisionWorker: async DetectNPCs + DetectMinimap у окремому потоці (Core 2, `[Threading] VisionThread`)
-- GeodataWorker: async A* FindPath у окремому потоці (Core 3, `[Threading] GeodataThread`)
-- CPU affinity для main thread + воркерів (опціонально, `CPUAffinity`)
-- Всі воркери `Enabled=false` за замовчуванням — зворотна сумісність збережена
-
-**BehaviorTree (MR20)**
+**BehaviorTree планувальник (MR20)**
 - Stackless BT VM: `BTNode` (24 bytes), `BTState` (8 bytes), плоскі масиви — без heap, без рекурсії
 - Гілки: Dead → Rest → Zone → Buff → Loot → Attack → Target (Selector root)
-- A/B switch: `[BehaviorTree] Enabled=true` → BotBehaviorTree замість ObjectiveManager
 - `thread_local s_self` — static Action/Condition функції безпечно звертаються до стану
+
+**Huber Q-Learning / RL (MR23-25, `[Learning] Enabled=false` за замовчуванням)**
+- Лінійна Q-функція: `Q(s,a) = W[:,a]^T * phi(s)`, 10 ознак × 6 дій
+- IRLS з Huber-вагами — стійко до рідкісних смертей (викиди в reward)
+- Async LearningWorker: IRLS в окремому потоці, не блокує main loop
+- Epsilon-greedy exploration: `epsilon` від 1.0 до 0.05, decay після кожної смерті
+- Ваги зберігаються в `weights.json`, автоматично завантажуються при старті
+- При `Enabled=false` — **нуль** впливу на поведінку, нуль overhead
+
+**Мультипоточність**
+- VisionWorker: async DetectNPCs + DetectMinimap (Core 2, `[Threading] VisionThread`)
+- GeodataWorker: async A* FindPath (Core 3, `[Threading] GeodataThread`)
+- LearningWorker: async IRLS batch update (`[Learning] Enabled=true`)
+- Всі воркери `Enabled=false` за замовчуванням — зворотна сумісність збережена
 
 **Антидетект**
 - RandomDelay: нормальний розподіл затримок між атаками, поворотами, ходьбою
@@ -55,17 +61,23 @@ C++ бот для автоматизації фарму в Lineage II.
 **Буфінг**
 - ALT+B → template matching (`buff_tab.png`, `buff_profile.png`) → click профілю
 - Fallback на координати якщо шаблон не збігся; retry через 120с
-- Чекання виходу з combat state (~15с) перед відкриттям BBS
+
+**QA Monitor**
+- Python daemon (`qa/qa_monitor.py`): аналіз логів, IsolationForest аномалії
+- Режими: `--analyze-only`, `--replay` (batch), `--live` (daemon під час фарму)
+- MemPalace bridge: ChromaDB векторна БД для cross-сесійного контексту
+- Baseline: 57799 kills, 22 сесії, 190 аномалій
 
 **Автоматика**
-- Авто-зілля HP/MP/CP з кулдауном 5с (опціонально, гра auto-potion пріоритетніша)
+- Авто-зілля HP/MP/CP з кулдауном 5с
 - Dead detection: Enter → 20с → grace 30с → відновлення фарму
 - Telegram сповіщення: смерть + статистика (через fork+curl)
-- Авто-збереження stats кожні N kills
+- Авто-збереження stats кожні N kills + `/tmp/rdga1bot_stats.json` live export
 
 **TUI Dashboard (ncurses)**
 - HP/MP/CP бари персонажа, HP цілі, kills/deaths, K/D ratio
 - Права колонка: режим `[OPENCV]`/`[MEM]`/`[HYBRID]`, XY координати, кількість мобів
+- RL рядок: `[RL] eps=X loss=Y upd=Z` (тільки якщо `[Learning] Enabled=true`)
 - Лог до 200 рядків з підсвіткою переходів стану
 - Пауза (P), скидання барів (R/Space), налаштування (S), calibrate (F12)
 - Глобальна зупинка: ScrollLock (XQueryKeymap, незалежно від фокусу)
@@ -107,15 +119,14 @@ bash build.sh
 ```ini
 [General]
 WindowTitle = Lineage II
-LogLevel = INFO            # DEBUG / INFO / WARNING / ERROR / NONE
+LogLevel = INFO
 
 [Character]
-Class = Treasure Hunter    # Mage, Archer, Spoiler, Treasure Hunter, ...
+Class = Treasure Hunter
 
 [Targeting]
-NextTargetKey = F2         # /nexttarget (основний)
-MacroKeys = F7,F8,F9,F10,F11  # /target МобНейм резерв (F-keys!)
-NearbyYThreshold = 0       # Screen-Y фільтр (0=вимк, 200=підземелля, 450=пустеля)
+NextTargetKey = F2
+MacroKeys = F7,F8,F9,F10,F11
 
 [Attack]
 AttackKeys = F1
@@ -128,35 +139,28 @@ BuffUseAltB = true
 BuffInterval = 600
 
 [KnownList]
-Enabled = true             # memory scan мобів без root
-AutoScan = true            # blindScan() при старті
-
-[Delays]
-Enabled = false            # true = варіативні затримки (антидетект)
-AttackMeanMs = 500.0
-AttackStdMs  = 75.0
-
-[WeightedTargeting]
-Enabled = false            # true = зважений вибір цілі (потребує KnownList)
+Enabled = true
+AutoScan = true
 
 [BehaviorTree]
-Enabled = false            # true = BotBehaviorTree замість ObjectiveManager
+Enabled = true         # обов'язково для нового планувальника
 
-[Navigation]
-Enabled = false            # memory-based навігація (потребує калібровки heading)
+[Learning]
+Enabled = false        # true = Huber Q-Learning (потребує [BehaviorTree] Enabled=true)
+LearningRate = 0.1
+EpsilonStart = 1.0
+WeightsFile = ./weights.json
 
-[Geodata]
-Enabled = false            # A* по .geo файлах (потребує Navigation)
-GeoPath = ./geodata/
+[Delays]
+Enabled = false        # true = антидетект варіативні затримки
+
+[WeightedTargeting]
+Enabled = false        # true = зважений вибір цілі (потребує KnownList)
 
 [Threading]
-Enabled       = false      # master switch
-VisionThread  = false      # DetectNPCs async на Core VisionCore
-VisionCore    = 2
-GeodataThread = false      # FindPath async на Core GeodataCore
-GeodataCore   = 3
-CPUAffinity   = false      # прив'язати main thread до MainCore
-MainCore      = 1
+Enabled = false
+VisionThread = false
+GeodataThread = false
 ```
 
 Повний список параметрів: [`rdga1bot.example.ini`](rdga1bot.example.ini)
@@ -175,10 +179,7 @@ MainCore      = 1
 ## Калібровка KnownList (memory offsets)
 
 ```bash
-# Повний дамп об'єктів для визначення offsets
 ./rdga1bot --dump-objects
-
-# Heading + name offset scan
 ./rdga1bot --calibrate
 ./rdga1bot --calibrate --name "Назва моба"
 ```
@@ -188,28 +189,33 @@ MainCore      = 1
 ## Архітектура
 
 ```
-Brain.cpp/.h         — диспетчер: ObjectiveManager або BotBehaviorTree (A/B switch)
-Eyes.cpp/.h          — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа, NPC
-Hands.h              — дії: XTest keyboard/mouse, рух стрілками
-Config.cpp/.h        — INI парсер + валідація + interactive TUI
-Dashboard.cpp/.h     — ncurses TUI dashboard (3 колонки: бари / стат / mem info)
-BehaviorTree.h/.cpp  — stackless BT VM (BTNode 24B, BTState 8B, плоскі масиви)
-BotBehaviorTree.h/.cpp — Farm BT: Dead/Rest/Zone/Buff/Loot/Attack/Target гілки
-objective_manager.h/.cpp — ObjectiveManager (legacy, паралельний A/B switch)
-farm_objectives.h    — Objective підкласи (legacy, паралельний A/B switch)
-Capture_Linux.cpp    — XShm screen capture
-Intercept_Linux.cpp  — XTest backend (XTestFakeKeyEvent)
-Window_Linux.cpp     — X11 window finding (кешований)
-MemReader.cpp/.h     — читання HP/MP/CP/XYZ гравця з пам'яті Wine
-OffsetScanner        — blindScan(), calibrateHeadingOffset(), findNameOffset()
-KnownListReader      — region scan мобів, readName(), findMobByName()
-WorldState           — thread-safe агрегатор KnownList для Brain
-Geodata.cpp/.h       — L2J геодата: Load(), CanMoveTo(), IsWallBetween(), A* FindPath()
-RandomDelay.h        — нормальний розподіл затримок (антидетект)
-vision_worker.h/.cpp — async DetectNPCs+DetectMinimap (VisionWorker, окремий потік)
-geodata_worker.h/.cpp — async A* FindPath (GeodataWorker, окремий потік)
-Notify.cpp/.h        — Telegram через fork+curl
-Stats.cpp/.h         — статистика сесії, JSON лог
+Brain.cpp/.h           — диспетчер: сприйняття + потіони + BotBehaviorTree dispatch
+Eyes.cpp/.h            — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа, NPC
+Hands.h                — дії: XTest keyboard/mouse, рух стрілками
+Config.cpp/.h          — INI парсер + валідація + interactive TUI
+Dashboard.cpp/.h       — ncurses TUI (3 колонки: бари / стат / mem info + RL рядок)
+BehaviorTree.h/.cpp    — stackless BT VM (BTNode 24B, BTState 8B, плоскі масиви)
+BotBehaviorTree.h/.cpp — Farm BT: Dead/Rest/Zone/Buff/Loot/Attack/Target + RL хуки
+LinearQModel.h/.cpp    — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій, save/load JSON
+LearningWorker.h/.cpp  — async IRLS batch update thread
+FeatureExtractor.h     — phi(s): 10 ознак з GameState → Eigen::VectorXf
+ExperienceBuffer.h     — циклічний буфер Experience{s,a,r,s',done}
+RewardCalculator.h     — reward: kill/death/fail/buff/idle
+third_party/eigen/     — Eigen 3.4.0 header-only (лінійна алгебра)
+Capture_Linux.cpp      — XShm screen capture
+Intercept_Linux.cpp    — XTest backend (XTestFakeKeyEvent)
+Window_Linux.cpp       — X11 window finding (кешований)
+MemReader.cpp/.h       — читання HP/MP/CP/XYZ гравця з пам'яті Wine
+OffsetScanner          — blindScan(), calibrateHeadingOffset(), findNameOffset()
+KnownListReader        — region scan мобів, readName(), findMobByName()
+WorldState             — thread-safe агрегатор KnownList
+Geodata.cpp/.h         — L2J геодата: Load(), CanMoveTo(), A* FindPath()
+RandomDelay.h          — нормальний розподіл затримок (антидетект)
+vision_worker.h/.cpp   — async DetectNPCs+DetectMinimap (Core 2)
+geodata_worker.h/.cpp  — async A* FindPath (Core 3)
+qa/qa_monitor.py       — QA daemon: IsolationForest + MemPalace bridge
+Notify.cpp/.h          — Telegram через fork+curl
+Stats.cpp/.h           — статистика сесії + JSON лог + /tmp live export
 ```
 
 ## Вимоги
@@ -221,3 +227,4 @@ Stats.cpp/.h         — статистика сесії, JSON лог
 - ncurses
 - libx11, libxtst (XTest), libxext (XShm)
 - curl (для Telegram, опціонально)
+- Python 3.x + scikit-learn (для QA Monitor, опціонально)
