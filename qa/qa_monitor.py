@@ -4,6 +4,7 @@ qa_monitor.py — головний daemon QA моніторингу rdga1bot.
 
 Використання:
   python qa/qa_monitor.py --log logs/session_*.log --duration 5h
+  python qa/qa_monitor.py --log logs/session_*.log --duration 5h --with-mempalace
   python qa/qa_monitor.py --replay logs/stats_*.json
   python qa/qa_monitor.py --analyze-only logs/stats_2026-04-07.json
   python qa/qa_monitor.py --analyze-only logs/stats_2026-04-07.json --log logs/session_20260407_194538.log
@@ -36,6 +37,7 @@ from anomaly_engine import AdaptiveAnomalyEngine
 from alert_manager import AlertManager
 from dashboard_gen import DashboardGen
 from screen_capture import ScreenCapture
+from mempalace_bridge import MemPalaceBridge
 
 # ---------------------------------------------------------------------------
 logging.basicConfig(
@@ -344,8 +346,9 @@ class QADaemon:
     RETRAIN_EVERY     = 600
     CHECK_EVERY       = 5
 
-    def __init__(self, args):
-        self.args = args
+    def __init__(self, args, bridge: "MemPalaceBridge | None" = None):
+        self.args   = args
+        self.bridge = bridge
         self.engine    = AdaptiveAnomalyEngine()
         self.alerts    = AlertManager()
         self.dash      = DashboardGen()
@@ -443,6 +446,8 @@ class QADaemon:
                 self.alerts.alert_many(anomalies, total_score)
                 for a in anomalies:
                     logger.warning(f"[QA] {a['severity']} {a['name']}: {a.get('context','')}")
+                    if self.bridge:
+                        self.bridge.log_anomaly(a)
 
     def _current_score(self) -> float:
         return self._score_tracker[-1] if self._score_tracker else 0.0
@@ -514,6 +519,11 @@ def main():
         help="Вимкнути scrot захоплення",
     )
     parser.add_argument(
+        "--with-mempalace",
+        action="store_true",
+        help="Увімкнути MemPalace інтеграцію (anomalies.jsonl + семантичний baseline)",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="DEBUG рівень логування",
@@ -526,6 +536,9 @@ def main():
 
     # Змінюємо CWD на корінь проекту щоб відносні шляхи працювали
     os.chdir(_ROOT_DIR)
+
+    # MemPalace bridge (graceful — не падає якщо вимкнено)
+    bridge = MemPalaceBridge(_ROOT_DIR) if getattr(args, "with_mempalace", False) else None
 
     # ---- Режим 1: analyze-only ----
     if args.analyze_only:
@@ -593,11 +606,14 @@ def main():
         logger.info(f"[QA] Тривалість: {duration_sec}с")
     args.duration_sec = duration_sec
 
-    daemon = QADaemon(args)
+    daemon = QADaemon(args, bridge=bridge)
     try:
         asyncio.run(daemon.run())
     except KeyboardInterrupt:
         logger.info("[QA] Зупинено (Ctrl+C)")
+    finally:
+        if bridge:
+            bridge.trigger_mining()
 
 
 if __name__ == "__main__":

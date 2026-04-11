@@ -1,0 +1,16 @@
+{
+  "name": "rdga1bot-mempalace",
+  "mcp_servers": {
+    "mempalace": {
+      "command": "memory/venv/bin/python3",
+      "args": ["-m", "mempalace.mcp_server"],
+      "env": {
+        "MEMPALACE_PALACE_PATH": "${workspaceFolder}/memory/palace"
+      }
+    }
+  },
+  "hooks": {
+    "onSessionStart": "memory/venv/bin/mempalace --palace memory/palace wake-up --wing rdga1bot-src",
+    "onSessionEnd": "./scripts/mempalace-mine.sh"
+  }
+}

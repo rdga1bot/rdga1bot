@@ -66,4 +66,21 @@ void Stats::SaveToFile() const {
       << "}\n";
 
     std::cout << "[Stats] Збережено в " << filename << "\n";
+
+    // Live stats для QA Monitor (/tmp/rdga1bot_stats.json)
+    {
+        std::ofstream live("/tmp/rdga1bot_stats.json");
+        if (live) {
+            live << "{"
+                 << "\"ts\":"                  << now_t            << ","
+                 << "\"kills\":"               << kills            << ","
+                 << "\"deaths\":"              << deaths           << ","
+                 << "\"attacks\":"             << attacks          << ","
+                 << "\"hp_potions\":"          << hp_potions       << ","
+                 << "\"mp_potions\":"          << mp_potions       << ","
+                 << "\"targeting_failures\":"  << targeting_failures << ","
+                 << "\"uptime_sec\":"          << UptimeSec()
+                 << "}\n";
+        }
+    }
 }
