@@ -983,6 +983,13 @@ printf "status\n" | ./rdga1bot --no-tui --quick
 - **Screen-Y фільтр** перенесено з Target → actAttack (при `m_atk_first_attack=true`), повертає Running (не Failure) щоб наступний тік повторив Target.
 - **Тест** (без гри): `[BT] Buff avg=858µs` ✓ — BT Buff гілка активується і логується коректно.
 
+### ✅ Фікси після MR20 (2026-04-11)
+- **Dead detection hp==0 → hp<=1**: мертвий персонаж може читатись як 1% (1px бару ще видимий). Debounce 10 тіків залишається. ✓
+- **SaveNavMeshPoints() в cleanup**: при `[NavMesh] SaveOnExit=true` → `brain.SaveNavMeshPoints()` викликається при Ctrl+C / SIGTERM. ✓
+- **offsets.json playerBase**: `"playerBase":3326724` — кешоване значення з останнього blindScan (ElmoreLab Kamael 2026-04-11). ✓
+- **perf(buff)**: `SaveFrame()` тепер тільки при `Debug=true` — не зберігає PNG кадри кожен баф без причини. ✓
+- **fix(BT)**: 3 critical bugs — Selector reactive (не скидав дочірні стани при переключенні), condNeedsBuff (завжди true), cur_obj (неправильне ім'я гілки). ✓
+
 ### ⚠ КРИТИЧНА ПРИМІТКА: BT init() порядок
 init() ПОВИНЕН будувати дерево в BFS-порядку (2 фази):
 1. addChild(root, всі прямі нащадки) — спочатку
