@@ -133,13 +133,14 @@ void Brain::Process(bool debug) {
     // Перевірка потіонів (не залежать від стану)
     CheckPotions(me);
 
-    // Перевірка смерті (HP=0 протягом 10 тіків = ~1с)
+    // Перевірка смерті (HP≤1% протягом 10 тіків = ~1с)
+    // ≤1 замість ==0: мертвий персонаж може читатись як 1% (1px бару видимий)
     // Не тригеримо в Buff стані: HP bar може тимчасово не детектуватись.
     const std::string cur_obj = m_use_bt ? m_bot_bt.currentBranch()
                                           : m_obj_manager.currentName();
     bool is_dead_now = false;
     if (cur_obj != "Dead" && cur_obj != "Buff") {
-        if (me.hp == 0 && !InRespawnGrace()) {
+        if (me.hp <= 1 && !InRespawnGrace()) {
             m_hp_zero_count++;
             if (m_hp_zero_count >= 10) is_dead_now = true;
         } else {

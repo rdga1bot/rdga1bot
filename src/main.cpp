@@ -1459,6 +1459,7 @@ int main(int argc, char* argv[]) {
         // Signal handlers — зберігають stats при Ctrl+C / kill
         g_cleanup = [&]() {
             brain.GetStats().SaveToFile();
+            if (cfg.navmesh_cfg.save_on_exit) brain.SaveNavMeshPoints();
             if (use_tui) dashboard.Shutdown();
         };
         std::signal(SIGINT,  signal_handler);
