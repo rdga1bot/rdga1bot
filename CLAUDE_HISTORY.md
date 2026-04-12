@@ -37,3 +37,11 @@
 ### ✅ MR29 (2026-04-12): RL активовано ([Learning] Enabled=true); condNeedsRest + tgtHandlePatrolAndRotate RL overrides (RestNow, Patrol boost)
 ### ✅ NavMesh tools (2026-04-12): scripts/navmesh_preview.py (2D scatter + кластер аналіз), scripts/navmesh_3d.py (Detour binary → Poly3DCollection 3D рендер)
 ### ✅ NavMesh cleanup (2026-04-12): navmesh_points.pts очищено від 343 артефактів (origin junk / NaN), navmesh_loa.pts — тільки LoA кластер (648 точок), navmesh_loa.bin побудовано (304 полігони)
+### ✅ MR30 (2026-04-12): RL log routing → Brain::Log() через LogFn callback (LearningWorker mutex-guarded); weights.json збереження при shutdown (m_rl_weights_file замість hardcoded)
+### ✅ MR31 (2026-04-12): condIsDead додано `!s_self->inGrace()` — запобігає 3 death episodes з однієї смерті через memory lag після respawn
+### ✅ MR32 (2026-04-12): blindScan coordinate filter змінено з `|X|>30000 OR |Y|>30000` на `|X|<1000 AND |Y|<1000` — fix сумісності з ToI (X<30000) та LoA
+### ✅ MR33 (2026-04-12): loadWeights() двопрохідна валідація — перший прохід читає num_features/num_actions, відхиляє несумісний файл зі старт-з-нуля
+### ✅ MR34 (2026-04-12): RL повні overrides для всіх 6 дій (TargetNearest/Weighted/NavMemory/Patrol/RestNow/BuffNow) + softmax confidence ∈ (0,1] замість maxCoeff
+### ✅ MR35 (2026-04-12): Аудит + playerBaseCache fix — main.cpp "Спроба 0" використовує offsets.json playerBaseCache з XYZ валідацією до blindScan
+### ✅ MR36 (2026-04-12): Видалено Options.cpp/.h — 135 рядків dead code (legacy l2cvbot, не в build.sh, не імпортується)
+### ✅ MR37 (2026-04-12): Feature debug log — FeatureLogInterval=300 в [Learning]; rlPreTick() логує [RL-F] з 10 ознаками + eps/conf/action через Brain::Log()

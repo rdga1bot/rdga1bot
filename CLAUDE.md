@@ -13,10 +13,18 @@
 - **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
 - **MR28** — Target Selector піддерево з 7 BT вузлів (~22 вузли загалом)
 - **MR29** — RL активовано (`[Learning] Enabled=true`); condNeedsRest + tgtHandlePatrolAndRotate overrides
+- **MR30** — RL logs → Brain::Log() через LogFn callback; weights.json збереження при shutdown
+- **MR31** — condIsDead: `!inGrace()` запобігає дублюванню notifyDeathRL після respawn memory lag
+- **MR32** — blindScan coordinate filter: `|X|<1000 && |Y|<1000` (fix для ToI/LoA де X<30000)
+- **MR33** — loadWeights() двопрохідна валідація num_features/num_actions перед завантаженням
+- **MR34** — RL повні overrides для всіх 6 дій + softmax confidence ∈ (0,1] (fix від'ємних Q)
+- **MR35** — playerBaseCache з offsets.json використовується до blindScan (Attempt 0)
+- **MR36** — видалено Options.cpp/.h (legacy dead code від l2cvbot)
+- **MR37** — FeatureLogInterval: `[RL-F]` рядок у session log кожні N тіків (default 300)
 - **NavMesh tools** — `scripts/navmesh_preview.py` (2D), `scripts/navmesh_3d.py` (Detour binary → 3D mesh)
 - **NavMesh LoA** — `navmesh_loa.pts` (648 чистих точок), `navmesh_loa.bin` (304 полігони, 985 трикутників)
   - Координатне відображення: L2_X→Recast_X, L2_Z(висота)→Recast_Y(up), L2_Y→Recast_Z
-- **Наступні пріоритети**: live farm з RL активним → спостереження epsilon decay + weights.json
+- **Наступні пріоритети**: live farm → спостерігати `[RL-F]` features + epsilon decay, дебаг KnownList
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
@@ -48,7 +56,7 @@
 - qa/qa_monitor.py            — QA daemon (IsolationForest + MemPalace bridge)
 
 ## НЕ включати в білд
-Runloop.cpp, Options.cpp — legacy від l2cvbot
+Runloop.cpp — legacy від l2cvbot (Options.cpp/.h видалено в MR36)
 
 ## MemPalace — контекст між сесіями
 На початку кожної сесії:
