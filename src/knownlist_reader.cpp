@@ -306,11 +306,16 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                     m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
                 if (typeRaw != 0) continue; // тільки Mob
 
+                // HP validation: реальний L2 об'єкт ЗАВЖДИ має HP >= 0.
+                // Від'ємний HP = довільна пам'ять що випадково пройшла XYZ фільтр.
+                float hp = rpm<float>(objBase + m_off.charHpOff);
+                if (!std::isfinite(hp) || hp < 0.f || hp > 500000.f) continue;
+
                 L2Character ch;
                 ch.memPtr = objBase;
                 ch.type   = L2ObjectType::Mob;
                 ch.x = x; ch.y = y; ch.z = z;
-                ch.hp     = rpm<float>  (objBase + m_off.charHpOff);
+                ch.hp     = hp;
                 ch.hpMax  = rpm<float>  (objBase + m_off.charHpMaxOff);
                 ch.isDead = rpm<int32_t>(objBase + m_off.charIsDeadOff) != 0;
 

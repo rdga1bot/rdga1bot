@@ -155,7 +155,7 @@ uintptr_t OffsetScanner::performBlindScan() {
             // Перевіряємо offset +0x24 і +0x90 (два можливих XYZ поля в L2 об'єкті).
             {
                 bool kl_nearby = false;
-                static constexpr float KL_MAX_DIST2 = 4000.f * 4000.f; // 4000 L2u
+                static constexpr float KL_MAX_DIST2 = 2500.f * 2500.f; // max KnownList range
                 for (uint32_t xoff : {0x24u, 0x90u}) {
                     float ox = rpm<float>(firstObjPtr + xoff);
                     float oy = rpm<float>(firstObjPtr + xoff + 4);
