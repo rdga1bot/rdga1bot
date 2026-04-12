@@ -10,6 +10,7 @@
 #include <future>
 #include <chrono>
 #include <vector>
+#include <map>
 #include <csignal>
 
 static constexpr size_t MAX_REGION_SIZE = 64 * 1024 * 1024; // 64 MB
@@ -255,6 +256,114 @@ uintptr_t OffsetScanner::findKnownListOffset(uintptr_t playerBase,
     if (best == 0xFFFFFFFFu)
         std::cerr << "[OffsetScanner] KnownList offset не знайдено. "
                   << "Вкажіть точні координати найближчого моба.\n";
+    return best;
+}
+
+// ── CE-style reverse pointer scan ────────────────────────────────────────────
+// Аналог "Find what accesses/points to this address" у Cheat Engine.
+// Скануємо всі readable heap-регіони на 4-байтне значення == target (Wine 32-bit).
+std::vector<uintptr_t> OffsetScanner::reversePointerScan(uintptr_t target,
+                                                          size_t limit) const {
+    const uint32_t target32 = static_cast<uint32_t>(target);
+    std::vector<uintptr_t> result;
+
+    for (const auto& region : getReadableRegions()) {
+        std::vector<uint8_t> buf(region.size);
+        if (!readBytes(region.base, buf.data(), region.size)) continue;
+
+        for (size_t i = 0; i + 4 <= buf.size(); i += 4) {
+            uint32_t v;
+            std::memcpy(&v, buf.data() + i, 4);
+            if (v == target32) {
+                result.push_back(region.base + i);
+                if (limit > 0 && result.size() >= limit) return result;
+            }
+        }
+    }
+    return result;
+}
+
+// ── Auto-discover KnownList offset ───────────────────────────────────────────
+// Алгоритм (CE pointer scanner техніка):
+//   1. Для кожного moб addr: reversePointerScan → набір адрес що тримають pointer на моба
+//   2. "Контейнер" = адреса X така що X-N*4..X+N*4 тримають pointers на різних мобів
+//      (тобто це масив/список покажчиків)
+//   3. Перевіряємо playerBase+[0x80..0x300] крок 4:
+//      чи ptr @ offset вказує всередину якогось контейнера
+//   4. Виводимо дамп для аналізу + повертаємо перший знайдений offset.
+uintptr_t OffsetScanner::autoDiscoverKnownList(uintptr_t playerBase,
+                                                const std::vector<uintptr_t>& knownObjAddrs) {
+    if (knownObjAddrs.empty()) {
+        std::cerr << "[discover-klist] Немає mob addresses — стань поряд з мобами\n";
+        return 0;
+    }
+
+    std::cerr << "[discover-klist] Reverse pointer scan для " << knownObjAddrs.size()
+              << " мобів...\n";
+
+    // Крок 1: для кожного моба — знайти всі покажчики на нього
+    // ptr_containers[container_addr] = кількість мобів що мають pointer в цьому контейнері
+    // container = адреса вирівняна на 0x40 (64 bytes) → групуємо близькі покажчики
+    std::map<uintptr_t, int> container_score;
+
+    for (uintptr_t mobAddr : knownObjAddrs) {
+        auto ptrs = reversePointerScan(mobAddr, 64);
+        std::cerr << "  mob=0x" << std::hex << mobAddr << " → " << std::dec
+                  << ptrs.size() << " покажчиків\n";
+        for (uintptr_t ptrAddr : ptrs) {
+            // Округляємо до блоку 0x40 — отримуємо "контейнер"
+            uintptr_t container = ptrAddr & ~(uintptr_t)0x3F;
+            container_score[container]++;
+        }
+    }
+
+    // Крок 2: відбираємо контейнери де score >= 2 (тримають >= 2 різних мобів)
+    // (якщо mob'ів < 2 — беремо score >= 1)
+    const int min_score = (knownObjAddrs.size() >= 2) ? 2 : 1;
+    std::vector<uintptr_t> candidates;
+    std::cerr << "[discover-klist] Контейнери (score >= " << min_score << "):\n";
+    for (const auto& [addr, score] : container_score) {
+        if (score >= min_score) {
+            std::cerr << "  container=0x" << std::hex << addr
+                      << " score=" << std::dec << score << "\n";
+            candidates.push_back(addr);
+        }
+    }
+
+    if (candidates.empty()) {
+        std::cerr << "[discover-klist] Жодного контейнера не знайдено\n";
+        return 0;
+    }
+
+    // Крок 3: скануємо playerBase + [0x80..0x300] на pointer до container (або всередину)
+    std::cerr << "[discover-klist] Пошук offsets від PlayerBase=0x"
+              << std::hex << playerBase << ":\n";
+    uintptr_t best = 0;
+
+    for (uintptr_t off = 0x80; off <= 0x300; off += 4) {
+        uintptr_t val = static_cast<uintptr_t>(rpm<uint32_t>(playerBase + off));
+        if (!isValidPtr(val)) continue;
+        for (uintptr_t cand : candidates) {
+            // val вказує в межах контейнера [cand .. cand+0xFF]
+            if (val >= cand && val < cand + 0x100) {
+                std::cerr << "  >>> offset=0x" << std::hex << off
+                          << " pb[off]=0x" << val
+                          << " → container=0x" << cand << std::dec << "\n";
+                if (!best) {
+                    best = off;
+                    knownListOff = off;
+                }
+            }
+        }
+    }
+
+    if (!best)
+        std::cerr << "[discover-klist] Offset не знайдено. "
+                  << "Спробуй стати ближче до більшої кількості мобів.\n";
+    else
+        std::cerr << "[discover-klist] Знайдено OFF_KNOWN_LIST=0x"
+                  << std::hex << best << " → оновіть offsets_config.h\n" << std::dec;
+
     return best;
 }
 

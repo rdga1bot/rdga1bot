@@ -871,6 +871,7 @@ int main(int argc, char* argv[]) {
     bool map_mode  = false;
     bool find_pos  = false;
     bool scan_pos  = false;
+    bool discover_klist = false;
     uintptr_t override_pb = 0;  // --pb 0xADDR — переназначити PlayerBase для watch-pos/map
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -884,6 +885,7 @@ int main(int argc, char* argv[]) {
         if (a == "--map")             map_mode       = true;
         if (a == "--find-pos")        find_pos       = true;
         if (a == "--scan-pos")        scan_pos       = true;
+        if (a == "--discover-klist")  discover_klist = true;
         if (a == "--pb" && i + 1 < argc) {
             override_pb = (uintptr_t)std::stoull(argv[++i], nullptr, 16);
         }
@@ -894,6 +896,69 @@ int main(int argc, char* argv[]) {
     if (dump_objects) {
         Config cfg; cfg.Load(config_path);
         dumpKnownListObjects(cfg.knownlist_offsets_file);
+        return 0;
+    }
+
+    // ─── --discover-klist: CE-style reverse pointer scan ─────────────────────
+    // Запуск: стань поряд з 3+ мобами у L2 → ./rdga1bot --discover-klist
+    // Знаходить PlayerBase, сканує heap для mob XYZ, потім CE reverse pointer
+    // scan щоб знайти реальний OFF_KNOWN_LIST для Kamael клієнту.
+    // Результат зберігається в offsets.json. Займає ~10-30с.
+    if (discover_klist) {
+        pid_t pid = findL2Pid();
+        if (!pid) { std::cerr << "[discover-klist] L2 процес не знайдено\n"; return 1; }
+        std::cerr << "[discover-klist] PID=" << pid << "\n";
+
+        Config cfg; cfg.Load(config_path);
+        OffsetScanner scanner(pid);
+
+        // Крок 1: PlayerBase — з кешу або blindScan
+        uintptr_t pb = 0;
+        if (!cfg.knownlist_offsets_file.empty()) {
+            scanner.loadOffsets(cfg.knownlist_offsets_file);
+            pb = scanner.playerBaseCache;
+        }
+        if (!pb) {
+            std::cerr << "[discover-klist] PlayerBase не знайдено в кеші → blindScan...\n";
+            pb = scanner.blindScan(30000);
+        }
+        if (!pb) {
+            std::cerr << "[discover-klist] PlayerBase не знайдено. "
+                      << "Запусти --find-pos спочатку.\n";
+            return 1;
+        }
+        std::cerr << "[discover-klist] PlayerBase=0x" << std::hex << pb << std::dec << "\n";
+
+        // Крок 2: region scan для знаходження реальних mob addresses
+        KnownListReader reader(pid, scanner);
+        std::cerr << "[discover-klist] Region scan для мобів (max 2500u)...\n";
+        auto mobs = reader.readMobsRegionScan(pb, 2500.f);
+        if (mobs.empty()) {
+            std::cerr << "[discover-klist] Мобів не знайдено region scan'ом. "
+                      << "Стань ближче до мобів.\n";
+            return 1;
+        }
+        std::cerr << "[discover-klist] Знайдено " << mobs.size() << " мобів:\n";
+        std::vector<uintptr_t> mobAddrs;
+        for (const auto& m : mobs) {
+            std::cerr << "  memPtr=0x" << std::hex << m.memPtr
+                      << " X=" << std::dec << (int)m.x
+                      << " Y=" << (int)m.y
+                      << " HP=" << (int)m.hp << "\n";
+            mobAddrs.push_back(m.memPtr);
+        }
+
+        // Крок 3: CE reverse pointer scan → autoDiscoverKnownList
+        uintptr_t klOff = scanner.autoDiscoverKnownList(pb, mobAddrs);
+        if (klOff) {
+            std::cerr << "[discover-klist] SUCCESS! OFF_KNOWN_LIST=0x"
+                      << std::hex << klOff << "\n"
+                      << "[discover-klist] Оновіть offsets_config.h: "
+                      << "constexpr uintptr_t OFF_KNOWN_LIST = 0x"
+                      << klOff << ";\n" << std::dec;
+            if (!cfg.knownlist_offsets_file.empty())
+                scanner.saveOffsets(cfg.knownlist_offsets_file);
+        }
         return 0;
     }
 

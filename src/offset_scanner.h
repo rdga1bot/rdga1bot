@@ -44,6 +44,23 @@ public:
                                 float expectedX, float expectedY, float expectedZ,
                                 float tolerance = 5.0f);
 
+    // ── CE-style reverse pointer scan ────────────────────────────────────────────
+    // Знаходить всі 4-байтові адреси в heap-пам'яті процесу де зберігається
+    // pointer == target (аналог Cheat Engine "What accesses/points to this address").
+    // limit=0 → без ліміту. Wine 32-bit: порівнюємо як uint32_t.
+    std::vector<uintptr_t> reversePointerScan(uintptr_t target,
+                                               size_t limit = 256) const;
+
+    // ── Auto-discover KnownList offset ───────────────────────────────────────────
+    // Алгоритм (CE pointer scanner техніка):
+    //   1. Для кожної knownObjAddr: reversePointerScan → знаходимо "хто тримає pointer"
+    //   2. Групуємо знайдені pointer-адреси в "контейнери" (суміжні адреси → array/list)
+    //   3. Перевіряємо: playerBase+[0x80..0x300] → чи вказує на один із контейнерів
+    //   4. Повертаємо знайдений offset або 0 при невдачі.
+    // knownObjAddrs — адреси знайдених L2Character.memPtr з region scan.
+    uintptr_t autoDiscoverKnownList(uintptr_t playerBase,
+                                     const std::vector<uintptr_t>& knownObjAddrs);
+
     // Зберегти/завантажити поточні значення offsets у простий JSON.
     // Формат: {"OFF_KNOWN_LIST":288,"OFF_OBJ_TYPE":24,...}
     bool saveOffsets(const std::string& path) const;
