@@ -139,6 +139,39 @@ bool LinearQModel::loadWeights(const std::string& path) {
         std::cerr << "[RL] weights.json не знайдено — старт з нуля\n";
         return false;
     }
+
+    // Перший прохід: валідація num_features / num_actions
+    int file_features = -1, file_actions = -1;
+    {
+        std::string line;
+        while (std::getline(f, line)) {
+            if (line.find("\"num_features\"") != std::string::npos) {
+                auto pos = line.find(':');
+                if (pos != std::string::npos)
+                    try { file_features = std::stoi(line.substr(pos + 1)); } catch (...) {}
+            }
+            if (line.find("\"num_actions\"") != std::string::npos) {
+                auto pos = line.find(':');
+                if (pos != std::string::npos)
+                    try { file_actions = std::stoi(line.substr(pos + 1)); } catch (...) {}
+            }
+            if (line.find("\"weights\"") != std::string::npos) break;
+        }
+    }
+    if (file_features != -1 && file_features != NUM_FEATURES) {
+        std::cerr << "[RL] WARN: weights.json num_features=" << file_features
+                  << " != " << NUM_FEATURES << " — старт з нуля\n";
+        return false;
+    }
+    if (file_actions != -1 && file_actions != NUM_ACTIONS) {
+        std::cerr << "[RL] WARN: weights.json num_actions=" << file_actions
+                  << " != " << NUM_ACTIONS << " — старт з нуля\n";
+        return false;
+    }
+
+    // Другий прохід: завантаження рядків матриці
+    f.clear();
+    f.seekg(0);
     std::string line;
     int row = 0;
     bool in_weights = false;
