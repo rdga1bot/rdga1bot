@@ -35,9 +35,10 @@ C++ бот для автоматизації фарму в Lineage II.
 - Зважений вибір цілі: `[WeightedTargeting]` — scoring по відстані/HP/freshness
 - `--dump-objects` / `--calibrate [--name "X"]` — калібровка без Cheat Engine
 
-**BehaviorTree планувальник (MR20)**
+**BehaviorTree планувальник (MR20, MR27-28)**
 - Stackless BT VM: `BTNode` (24 bytes), `BTState` (8 bytes), плоскі масиви — без heap, без рекурсії
-- Гілки: Dead → Rest → Zone → Buff → Loot → Attack → Target (Selector root)
+- Гілки: Dead → Rest → Zone → Buff → Loot → Attack → Target Selector (7 вузлів, ~22 загалом)
+- Target піддерево (MR28): Init → DeadTarget → Minimap → F2AndMacro → Navigation → GeoPath → Patrol
 - `thread_local s_self` — static Action/Condition функції безпечно звертаються до стану
 
 **Huber Q-Learning / RL (MR23-25, `[Learning] Enabled=false` за замовчуванням)**
@@ -195,7 +196,9 @@ Hands.h                — дії: XTest keyboard/mouse, рух стрілкам
 Config.cpp/.h          — INI парсер + валідація + interactive TUI
 Dashboard.cpp/.h       — ncurses TUI (3 колонки: бари / стат / mem info + RL рядок)
 BehaviorTree.h/.cpp    — stackless BT VM (BTNode 24B, BTState 8B, плоскі масиви)
-BotBehaviorTree.h/.cpp — Farm BT: Dead/Rest/Zone/Buff/Loot/Attack/Target + RL хуки
+BotBehaviorTree.h/.cpp — Farm BT + Target піддерево (MR27/28) + RL хуки
+MemoryValidator.h/.cpp — валідація PlayerState/L2Character/coords (MR26)
+ShadowLogger.h/.cpp    — A/B Memory vs OCR JSONL лог (MR26, ShadowMode=false)
 LinearQModel.h/.cpp    — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій, save/load JSON
 LearningWorker.h/.cpp  — async IRLS batch update thread
 FeatureExtractor.h     — phi(s): 10 ознак з GameState → Eigen::VectorXf
@@ -206,7 +209,7 @@ Capture_Linux.cpp      — XShm screen capture
 Intercept_Linux.cpp    — XTest backend (XTestFakeKeyEvent)
 Window_Linux.cpp       — X11 window finding (кешований)
 MemReader.cpp/.h       — читання HP/MP/CP/XYZ гравця з пам'яті Wine
-OffsetScanner          — blindScan(), calibrateHeadingOffset(), findNameOffset()
+OffsetScanner          — blindScan(timeoutMs), calibrateHeadingOffset(), findNameOffset()
 KnownListReader        — region scan мобів, readName(), findMobByName()
 WorldState             — thread-safe агрегатор KnownList
 Geodata.cpp/.h         — L2J геодата: Load(), CanMoveTo(), A* FindPath()

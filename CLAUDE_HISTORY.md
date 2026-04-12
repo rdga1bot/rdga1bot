@@ -31,3 +31,6 @@
 ### ✅ MR23 (2026-04-12): Eigen 3.4.0, LearningConfig, FeatureExtractor (10 features), ExperienceBuffer, LinearQModel (IRLS+Huber), RewardCalculator
 ### ✅ MR24 (2026-04-12): LearningWorker — async IRLS thread (аналог GeodataWorker)
 ### ✅ MR25 (2026-04-12): RL інтеграція в BotBehaviorTree — initRL/shutdownRL, rlPreTick/rlPostTick, condNeedsBuff override, kill/death/buff/fail сигнали, Dashboard RL рядок
+### ✅ MR26 (2026-04-12): MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B Memory vs OCR JSONL, ShadowMode=false за замовч.)
+### ✅ MR27 (2026-04-12): actTarget (456 рядків) → 6 приватних tgtHandle* instance methods (без зміни поведінки)
+### ✅ MR28 (2026-04-12): Target замінено Selector піддеревом з 7 BT вузлів (actTgtInit..actTgtPatrol), ~22 вузли загалом

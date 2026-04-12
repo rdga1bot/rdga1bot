@@ -14,9 +14,18 @@ Selector root
 ├── Sequence(condNeedsBuff,actBuff)    — ALT+B буфінг (template matching)
 ├── Sequence(condLootPend, actLoot)    — ESC+300мс після kill
 ├── Sequence(condHasTarget,actAttack)  — атака + kill detection
-└── actTarget                          — fallback: пошук нової цілі
+└── Selector (tgt_root, MR28)          — пошук нової цілі (7 вузлів)
+      ├── actTgtInit        — hands_ready + ініціалізація + breadcrumb
+      ├── actTgtDeadTarget  — мертвий таргет hp=0 → ESC/macro
+      ├── actTgtMinimap     — ротація до моба на мінімапі (зберігає m_tgt_map_ref)
+      ├── actTgtF2AndMacro  — F2 nexttarget + macro fallback + pokemon
+      ├── actTgtNavigation  — stuck detection + breadcrumbs + memory nav
+      ├── actTgtGeoPath     — NavMesh + geodata waypoints + WalkForward
+      └── actTgtPatrol      — patrol + rotate + explore (завжди Running)
 ```
 `thread_local BotBehaviorTree* s_self` — static Action/Condition функції звертаються через pointer (single-threaded — безпечно).
+
+Логіка Target Selector: кожен вузол повертає `Failure` (передати далі) або `Running` (чекати). `actTgtMinimap` обчислює `m_tgt_map_ref` — спільний стан для downstream вузлів.
 
 ## BT init() — КРИТИЧНО: BFS порядок
 1. addChild(root, всі seq/action) підряд
@@ -67,6 +76,8 @@ src/LearningWorker.h/.cpp  — async IRLS thread
 src/FeatureExtractor.h     — phi(s): GameState → Eigen::VectorXf (10 dim)
 src/ExperienceBuffer.h     — Experience{state,action,reward,next_state,done}
 src/RewardCalculator.h     — reward function (константи явні)
+src/MemoryValidator.h/.cpp — централізована валідація PlayerState/L2Character (MR26)
+src/ShadowLogger.h/.cpp    — A/B Memory vs OCR → JSONL memory/shadow_logs/ (MR26)
 src/world_state.h/.cpp     — KnownList читання пам'яті
 src/knownlist_reader.h/.cpp — читання мобів з Wine процесу
 src/Geodata.h/.cpp         — L2J .geo + A* + JPS+
@@ -89,6 +100,7 @@ Core -: LearningWorker— async IRLS batch update (без affinity за замо
 ```ini
 [BehaviorTree]  Enabled=true     ← обов'язково
 [Learning]      Enabled=false    ← Huber Q-Learning (MR23-25)
+[MemReader]     ShadowMode=false ← A/B Memory vs OCR лог (MR26)
 [KnownList]     Enabled=false    ← читання мобів з пам'яті
 [NavMesh]       Enabled=false    ← Detour pathfinding
 [Geodata]       Enabled=false    ← L2J .geo pathfinding

@@ -9,11 +9,16 @@
 
 ## Поточний стан (2026-04-12)
 - **BotBehaviorTree** — єдиний планувальник (ObjectiveManager видалено в MR20c)
+- **MR26 виконано** — MemoryValidator + blindScan timeout + Shadow Mode Logger
+  - `ShadowMode=false` (за замовчуванням) — нульовий вплив на поведінку
+  - `BlindScanTimeout=0` — зворотна сумісність збережена
+- **MR27 виконано** — actTarget (456 рядків) → 6 приватних `tgtHandle*` методів
+- **MR28 виконано** — Target як Selector піддерево з 7 BT вузлів (~22 вузли загалом)
 - **MR23-25 виконано** — Huber Q-Learning інтегровано в BotBehaviorTree
   - `[Learning] Enabled=false` (за замовчуванням) — поведінка ідентична попередній
   - При `Enabled=true` — LearningWorker async IRLS thread + epsilon-greedy RL policy
 - **QA Monitor** — Python daemon (`qa/qa_monitor.py`), IsolationForest аномалії, MemPalace bridge
-- Наступні пріоритети: live BT тест з грою → actTarget рефакторинг (~470 рядків → subfunctions)
+- Наступні пріоритети: live BT тест з грою → активація RL після підтвердження стабільності
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
@@ -28,9 +33,11 @@
 
 ## Ключові файли
 - src/Brain.cpp               — координатор (сприйняття + потіони + dispatch)
-- src/BotBehaviorTree.h/.cpp  — Farm BT + RL інтеграція (активний планувальник)
+- src/BotBehaviorTree.h/.cpp  — Farm BT + RL + Target піддерево (MR27/28)
 - src/BehaviorTree.h/.cpp     — Stackless VM (BTNode 24B, BTState 8B)
 - src/game_state.h            — GameState struct
+- src/MemoryValidator.h/.cpp  — валідація PlayerState/L2Character/coords (MR26)
+- src/ShadowLogger.h/.cpp     — A/B Memory vs OCR → JSONL лог (MR26)
 - src/LinearQModel.h/.cpp     — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій
 - src/LearningWorker.h/.cpp   — async IRLS thread (аналог GeodataWorker)
 - src/FeatureExtractor.h      — 10 ознак GameState → Eigen::VectorXf
