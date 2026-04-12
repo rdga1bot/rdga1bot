@@ -69,6 +69,7 @@ class RuleEngine:
         self._bt_avg_us_history: deque = deque()  # останні 20 значень BT avg
 
         self._live_stats_last_ts: Optional[float] = None
+        self._live_stats_ever_fresh: bool = False  # True якщо stats хоч раз був свіжим
         self._last_ingest_ts: float = time.time()  # час останнього ingested запису
 
     # ---- helpers -----------------------------------------------------------
@@ -143,6 +144,7 @@ class RuleEngine:
         live_ts = snap.get("ts")
         if live_ts:
             self._live_stats_last_ts = float(live_ts)
+            self._live_stats_ever_fresh = True
 
     # ---- checks ------------------------------------------------------------
 
@@ -238,11 +240,16 @@ class RuleEngine:
         return []
 
     def _check_bot_frozen(self, now: float) -> List[dict]:
-        """/tmp stats не оновлювався > 15с."""
+        """/tmp stats не оновлювався > 60с.
+        Спрацьовує тільки якщо stats хоч раз був свіжим після старту QA
+        (захист від false positive коли бот не запущений взагалі).
+        """
         if self._live_stats_last_ts is None:
             return []
+        if not self._live_stats_ever_fresh:
+            return []  # stats ніколи не був свіжим — бот не запущений
         age = now - self._live_stats_last_ts
-        if age > 15:
+        if age > 60:
             return [{"name": "bot_frozen",
                      "score": 80,
                      "severity": "CRITICAL",

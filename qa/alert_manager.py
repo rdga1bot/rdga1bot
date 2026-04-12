@@ -46,7 +46,7 @@ class AlertManager:
 
         # Глобальний rate limit: не більше MAX_NOTIFY_PER_WINDOW нотифікацій
         # за NOTIFY_WINDOW_SEC секунд (захист від спаму при багатьох аномаліях одразу)
-        self.MAX_NOTIFY_PER_WINDOW = 3
+        self.MAX_NOTIFY_PER_WINDOW = 1   # max 1 notify-send за вікно (було 3 → спам)
         self.NOTIFY_WINDOW_SEC     = 300
         self._notify_window_start: float = 0.0
         self._notify_count_in_window: int = 0
@@ -114,7 +114,7 @@ class AlertManager:
             subprocess.Popen(
                 ["notify-send",
                  "-u", urgency,
-                 "-t", "8000",
+                 "-t", "5000",   # 5с — швидше зникає
                  title, body],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
