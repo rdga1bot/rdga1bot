@@ -176,7 +176,15 @@ bool BotBehaviorTree::condNeedsRest(GameState& gs) {
     if (!gs.hp_valid || gs.is_dead || gs.in_grace || gs.has_target) return false;
     const bool low_hp = gs.hp > 0 && gs.hp < gs.cfg.hp_threshold;
     const bool low_mp = gs.mp > 0 && gs.mp < gs.cfg.mp_threshold;
-    return low_hp || low_mp;
+    if (low_hp || low_mp) return true;
+
+    // RL override: форсувати відпочинок раніше розкладу (RestNow)
+    if (s_self && s_self->m_rl_model
+        && s_self->m_rl_suggested_action == LinearQModel::Action::RestNow
+        && s_self->m_rl_action_confidence > 0.5f) {
+        return true;
+    }
+    return false;
 }
 
 bool BotBehaviorTree::condZoneViolated(GameState& gs) {
@@ -1188,9 +1196,13 @@ void BotBehaviorTree::tgtHandlePatrolAndRotate(GameState& gs,
         gs.stats.RecordTargetingFailure();
         m_rl_sig_targeting_failed = true;
 
+        // RL override: активувати patrol раніше порогу якщо RL рекомендує
+        const bool rl_patrol_boost = m_rl_model
+            && m_rl_suggested_action == LinearQModel::Action::Patrol
+            && m_rl_action_confidence > 0.5f;
         const bool patrol_ready = gs.cfg.patrol_enabled
             && !gs.cfg.patrol_path.empty()
-            && m_tgt_macro_attempts >= gs.cfg.patrol_trigger_attempts
+            && (m_tgt_macro_attempts >= gs.cfg.patrol_trigger_attempts || rl_patrol_boost)
             && m_tgt_macro_attempts % 5 == 0;
 
         if (patrol_ready) {
