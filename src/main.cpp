@@ -1409,8 +1409,9 @@ int main(int argc, char* argv[]) {
                 kl_scanner = std::make_unique<OffsetScanner>(kl_pid);
                 // Спробуємо завантажити кешовані offsets
                 if (kl_scanner->loadOffsets(cfg.knownlist_offsets_file)) {
-                    // offsets.json вже є — WorldState буде створено після blindScan
-                    // PlayerBase ще не відомий, але offsets завантажені
+                    // offsets.json завантажено — playerBaseCache може містити валідний base.
+                    // Якщо XYZ за кешованою адресою валідні → використаємо без blindScan.
+                    // Якщо ні → blindScan (фон, кожні 30с).
                     std::cerr << "[KnownList] Offsets завантажено, blind scan знайде PlayerBase\n";
                 }
             } else {
@@ -1499,6 +1500,7 @@ int main(int argc, char* argv[]) {
         std::atomic<bool>      kl_scan_running{false};
         std::atomic<uintptr_t> kl_scan_result{0};
         int  kl_scan_attempts = 0;
+        bool kl_cache_tried   = false; // спробували playerBaseCache з offsets.json
         auto kl_last_attempt  =
             std::chrono::steady_clock::now() - std::chrono::seconds(10);
         auto kl_validity_check =
@@ -1652,7 +1654,30 @@ int main(int argc, char* argv[]) {
                     }
                 }
             } else if (cfg.knownlist_enabled && kl_scanner && !brain.HasPlayerBase()) {
-                // Перевіряємо чи фоновий scan завершився
+                // ── Спроба 0: перевірити playerBaseCache з offsets.json ────────────
+                // blindScan ненадійний (Kamael KnownList структура несумісна).
+                // Якщо offsets.json містить валідну адресу — використати її напряму.
+                if (!kl_cache_tried && kl_scanner->playerBaseCache != 0) {
+                    kl_cache_tried = true;
+                    uintptr_t cached = kl_scanner->playerBaseCache;
+                    float cx = kl_scanner->rpm_pub<float>(cached + OFF_PLAYER_X);
+                    float cy = kl_scanner->rpm_pub<float>(cached + OFF_PLAYER_Y);
+                    bool cache_valid = (std::isfinite(cx) && std::fabsf(cx) < 327000.f
+                                     && std::isfinite(cy) && std::fabsf(cy) < 327000.f
+                                     && (std::fabsf(cx) > 100.f || std::fabsf(cy) > 100.f));
+                    if (cache_valid) {
+                        std::cerr << "[KnownList] playerBaseCache=0x" << std::hex << cached
+                                  << " валідний XYZ=(" << (int)cx << "," << (int)cy << ")"
+                                  << std::dec << " — використовуємо без blindScan\n";
+                        kl_scan_result.store(cached);
+                    } else {
+                        std::cerr << "[KnownList] playerBaseCache=0x" << std::hex << cached
+                                  << std::dec << " невалідний — запускаємо blindScan\n";
+                        kl_scanner->playerBaseCache = 0;
+                    }
+                }
+
+                // ── Спроба 1: результат фонового blindScan ────────────────────────
                 if (kl_scan_result.load() != 0) {
                     uintptr_t base = kl_scan_result.exchange(0);
                     brain.SetPlayerBase(base);
@@ -1671,7 +1696,7 @@ int main(int argc, char* argv[]) {
                               << std::dec << " WorldState активовано\n";
                 }
 
-                // Запускаємо новий scan кожні 30с якщо попередній завершився
+                // ── Спроба 2: новий blindScan кожні 30с (якщо кеш не спрацював) ──
                 auto kl_now = std::chrono::steady_clock::now();
                 if (!kl_scan_running.load() &&
                     kl_now - kl_last_attempt >= std::chrono::seconds(30)) {
