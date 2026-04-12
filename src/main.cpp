@@ -912,14 +912,29 @@ int main(int argc, char* argv[]) {
         Config cfg; cfg.Load(config_path);
         OffsetScanner scanner(pid);
 
-        // Крок 1: PlayerBase — з кешу або blindScan
+        // Крок 1: PlayerBase — з кешу (з верифікацією!) або blindScan
         uintptr_t pb = 0;
         if (!cfg.knownlist_offsets_file.empty()) {
             scanner.loadOffsets(cfg.knownlist_offsets_file);
-            pb = scanner.playerBaseCache;
+            uintptr_t cached = scanner.playerBaseCache;
+            if (cached) {
+                // Верифікація: перевіряємо координати поточної сесії
+                float cpx = scanner.rpm_pub<float>(cached + OFF_PLAYER_X);
+                float cpy = scanner.rpm_pub<float>(cached + OFF_PLAYER_Y);
+                bool valid = std::isfinite(cpx) && std::isfinite(cpy)
+                          && (std::fabsf(cpx) > 1000.f || std::fabsf(cpy) > 1000.f);
+                if (valid) {
+                    pb = cached;
+                    std::cerr << "[discover-klist] PlayerBase з кешу: 0x" << std::hex << pb
+                              << " XY=(" << std::dec << (int)cpx << "," << (int)cpy << ")\n";
+                } else {
+                    std::cerr << "[discover-klist] Кешований pb=0x" << std::hex << cached
+                              << " невалідний (X=" << std::dec << cpx << ") → blindScan\n";
+                }
+            }
         }
         if (!pb) {
-            std::cerr << "[discover-klist] PlayerBase не знайдено в кеші → blindScan...\n";
+            std::cerr << "[discover-klist] blindScan (30с)...\n";
             pb = scanner.blindScan(30000);
         }
         if (!pb) {
@@ -927,7 +942,14 @@ int main(int argc, char* argv[]) {
                       << "Запусти --find-pos спочатку.\n";
             return 1;
         }
-        std::cerr << "[discover-klist] PlayerBase=0x" << std::hex << pb << std::dec << "\n";
+        {
+            float dpx = scanner.rpm_pub<float>(pb + OFF_PLAYER_X);
+            float dpy = scanner.rpm_pub<float>(pb + OFF_PLAYER_Y);
+            float dpz = scanner.rpm_pub<float>(pb + OFF_PLAYER_Z);
+            std::cerr << "[discover-klist] PlayerBase=0x" << std::hex << pb
+                      << " XYZ=(" << std::dec << (int)dpx << "," << (int)dpy
+                      << "," << (int)dpz << ")\n";
+        }
 
         // Крок 2: region scan для знаходження реальних mob addresses
         KnownListReader reader(pid, scanner);
