@@ -1071,7 +1071,14 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleNavigation(GameState& gs,
     }
 
     // ── Memory навігація ──────────────────────────────────────────────────────
-    if (gs.cfg.navigation.enabled && !gs.kl_mobs.empty()) {
+    // RL override: NavigateMemory форсує навігацію навіть якщо cfg.navigation.enabled=false
+    const bool rl_nav_forced = m_rl_model
+        && m_rl_suggested_action == LinearQModel::Action::NavigateMemory
+        && m_rl_action_confidence > 0.5f
+        && !gs.kl_mobs.empty()
+        && gs.coords_valid && gs.navigate_to_mob;
+
+    if ((gs.cfg.navigation.enabled || rl_nav_forced) && !gs.kl_mobs.empty()) {
         auto kl_mobs = gs.kl_mobs;
         kl_mobs.erase(std::remove_if(kl_mobs.begin(), kl_mobs.end(),
             [&gs](const L2Character& mob) {
@@ -1079,11 +1086,28 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleNavigation(GameState& gs,
             }), kl_mobs.end());
         if (!kl_mobs.empty()) {
             std::optional<L2Character> nearest;
-            if (gs.cfg.weighted_target.enabled && gs.select_target) {
+            if (rl_nav_forced && !gs.cfg.navigation.enabled) {
+                // NavigateMemory override: завжди найближчий (не зважений)
+                gs.log("[RL] NavigateMemory override → nav до найближчого моба");
+                if (gs.find_nearest_mob)
+                    nearest = gs.find_nearest_mob(kl_mobs, gs.player_x, gs.player_y,
+                                                  gs.cfg.weighted_target.max_range);
+            } else if (gs.cfg.weighted_target.enabled && gs.select_target) {
                 nearest = gs.select_target(kl_mobs, gs.player_x, gs.player_y);
             } else if (gs.find_nearest_mob) {
                 nearest = gs.find_nearest_mob(kl_mobs, gs.player_x, gs.player_y,
                                               gs.cfg.weighted_target.max_range);
+            }
+            // RL: підтвердження TargetNearest / TargetWeighted (BT вже виконує цю дію)
+            if (m_rl_model && nearest.has_value()) {
+                const bool is_nearest  = m_rl_suggested_action == LinearQModel::Action::TargetNearest;
+                const bool is_weighted = m_rl_suggested_action == LinearQModel::Action::TargetWeighted;
+                if (is_nearest || is_weighted) {
+                    const std::string who = nearest->name.empty()
+                        ? ("ID=" + std::to_string(nearest->objectID)) : nearest->name;
+                    gs.log("[RL] " + std::string(is_nearest ? "TargetNearest" : "TargetWeighted")
+                        + " підтверджено → " + who);
+                }
             }
             if (nearest.has_value() && gs.navigate_to_mob) {
                 bool navigated = gs.navigate_to_mob(*nearest);
@@ -1203,10 +1227,16 @@ void BotBehaviorTree::tgtHandlePatrolAndRotate(GameState& gs,
             && m_rl_action_confidence > 0.5f;
         const bool patrol_ready = gs.cfg.patrol_enabled
             && !gs.cfg.patrol_path.empty()
-            && (m_tgt_macro_attempts >= gs.cfg.patrol_trigger_attempts || rl_patrol_boost)
-            && m_tgt_macro_attempts % 5 == 0;
+            && (
+                (m_tgt_macro_attempts >= gs.cfg.patrol_trigger_attempts
+                 && m_tgt_macro_attempts % 5 == 0)
+                || rl_patrol_boost  // RL override: без % 5 обмеження
+            );
 
         if (patrol_ready) {
+            if (rl_patrol_boost)
+                gs.log("[RL] Patrol override → patrol крок " +
+                    std::to_string(m_tgt_patrol_step_idx % (int)gs.cfg.patrol_path.size() + 1));
             const auto& step = gs.cfg.patrol_path[
                 m_tgt_patrol_step_idx % (int)gs.cfg.patrol_path.size()];
             int pat_step_display = m_tgt_patrol_step_idx % (int)gs.cfg.patrol_path.size() + 1;
@@ -1405,7 +1435,14 @@ void BotBehaviorTree::rlPreTick(GameState& gs) {
         m_rl_model->selectAction(phi, m_rl_epsilon, m_rl_rng);
 
     Eigen::VectorXf q_vals    = m_rl_model->getQValues(phi);
-    m_rl_action_confidence    = q_vals.maxCoeff();
+    // Softmax confidence: частка обраної дії → завжди в (0,1]
+    // Уникає проблеми від'ємних Q-значень (maxCoeff < 0 → override ніколи не спрацьовував)
+    {
+        Eigen::VectorXf shifted = q_vals.array() - q_vals.maxCoeff();
+        Eigen::VectorXf sm = shifted.array().exp();
+        sm /= sm.sum();
+        m_rl_action_confidence = sm((int)action);
+    }
     m_rl_suggested_action     = action;
 
     m_rl_last_features = phi;
