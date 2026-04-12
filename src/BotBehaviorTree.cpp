@@ -874,7 +874,9 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleDeadTarget(GameState& gs) {
         m_tgt_macro_attempts++;
         gs.hands.TargetMacro(m_tgt_macro_idx);
         m_tgt_macro_idx = (m_tgt_macro_idx + 1) % (int)gs.cfg.target_macro_keys.size();
-        gs.hands.Send(300);
+        // 1000ms: сервер повинен встигнути обробити /target і оновити таргет.
+        // 300ms було замало → chain ×3→×4→×5 в логах.
+        gs.hands.Send(1000);
         return BTStatus::Running;
     }
     gs.log("[TARGETING] Мертвий таргет не зникає після 5 ESC → пробуємо F2");

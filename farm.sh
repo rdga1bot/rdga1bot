@@ -25,9 +25,11 @@ echo "" | tee -a "$LOG_FILE"
 echo "=== Stats (останній запис) ===" | tee -a "$LOG_FILE"
 STATS_FILE="logs/stats_$(date +%Y-%m-%d).json"
 if [ -f "$STATS_FILE" ]; then
-    tail -1 "$STATS_FILE" | python3 -c "
+    tail -20 "$STATS_FILE" | python3 -c "
 import json, sys
-d = json.loads(sys.stdin.read())
+# Беремо останній запис з максимальними kills (захист від stale/фонових процесів)
+entries = [json.loads(l) for l in sys.stdin if l.strip()]
+d = max(entries, key=lambda x: x.get('kills', 0)) if entries else {}
 kills = d.get('kills', 0)
 deaths = d.get('deaths', 0)
 uptime = d.get('uptime_sec', 0)
