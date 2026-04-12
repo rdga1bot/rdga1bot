@@ -11,6 +11,7 @@
 #include "FeatureExtractor.h"
 #include "RewardCalculator.h"
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <deque>
 #include <optional>
@@ -36,11 +37,16 @@
 
 class BotBehaviorTree {
 public:
-    using Clock = std::chrono::steady_clock;
-    using TP    = Clock::time_point;
+    using Clock  = std::chrono::steady_clock;
+    using TP     = Clock::time_point;
+    using LogFn  = std::function<void(const std::string&)>;
 
     BotBehaviorTree();
     ~BotBehaviorTree();
+
+    // Встановити лог-функцію (перенаправляє [RL] повідомлення у Brain::Log).
+    // Викликати ДО init().
+    void setLogFn(LogFn fn) { m_log_fn = std::move(fn); }
 
     // Ініціалізація дерева. Викликати один раз при старті.
     void init(const Config& cfg);
@@ -187,10 +193,14 @@ private:
     std::deque<Crumb> m_breadcrumbs;
     bool              m_backtracking = false;
 
+    // ── Лог-функція (перенаправляє у Brain::Log) ─────────────────────────────
+    LogFn m_log_fn;
+
     // ── RL компоненти (null якщо [Learning] Enabled=false) ───────────────────
     std::shared_ptr<LinearQModel>     m_rl_model;
     std::shared_ptr<ExperienceBuffer> m_rl_buffer;
     std::unique_ptr<LearningWorker>   m_rl_worker;
+    std::string                       m_rl_weights_file;
 
     // ── RL стан між тіками ────────────────────────────────────────────────────
     LinearQModel::Action  m_rl_suggested_action  = LinearQModel::Action::TargetNearest;

@@ -34,6 +34,7 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
     InitRandomDelays();
 
     // BotBehaviorTree: єдиний планувальник
+    m_bot_bt.setLogFn([this](const std::string& msg){ Log(msg); });
     m_bot_bt.init(m_cfg);
     Log("[BT] BotBehaviorTree: " + std::to_string(m_bot_bt.nodeCount()) + " вузлів");
 

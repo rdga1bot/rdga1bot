@@ -121,7 +121,8 @@ void BotBehaviorTree::init(const Config& cfg) {
     bt.addChild(tgt_root, act_tgt_geo);
     bt.addChild(tgt_root, act_tgt_pat);
 
-    std::cerr << "[BT] Ініціалізовано: " << bt.nodeCount() << " вузлів\n";
+    if (m_log_fn) m_log_fn("[BT] Ініціалізовано: " + std::to_string(bt.nodeCount()) + " вузлів");
+    else std::cerr << "[BT] Ініціалізовано: " << bt.nodeCount() << " вузлів\n";
 
     // RL ініціалізація (після побудови дерева)
     initRL(cfg);
@@ -1355,11 +1356,15 @@ void BotBehaviorTree::initRL(const Config& cfg) {
     const auto& lc = cfg.learning;
     if (!lc.enabled) return;
 
+    m_rl_weights_file = lc.weights_file;
+
     m_rl_model  = std::make_shared<LinearQModel>(lc.huber_delta);
     m_rl_buffer = std::make_shared<ExperienceBuffer>(lc.buffer_size);
     m_rl_worker = std::make_unique<LearningWorker>(
         m_rl_model, m_rl_buffer,
         lc.batch_size, lc.learning_rate, lc.discount_factor);
+
+    if (m_log_fn) m_rl_worker->setLogFn(m_log_fn);
 
     m_rl_model->loadWeights(lc.weights_file);
 
@@ -1368,7 +1373,8 @@ void BotBehaviorTree::initRL(const Config& cfg) {
     m_rl_last_features = Eigen::VectorXf::Zero(LinearQModel::NUM_FEATURES);
 
     m_rl_worker->start(/*core_id=*/-1);
-    std::cerr << "[RL] LearningWorker запущено. epsilon=" << m_rl_epsilon << "\n";
+    if (m_log_fn) m_log_fn("[RL] LearningWorker запущено. epsilon=" + std::to_string(m_rl_epsilon));
+    else std::cerr << "[RL] LearningWorker запущено. epsilon=" << m_rl_epsilon << "\n";
 }
 
 void BotBehaviorTree::shutdownRL() {
@@ -1377,7 +1383,9 @@ void BotBehaviorTree::shutdownRL() {
         m_rl_worker.reset();
     }
     if (m_rl_model) {
-        m_rl_model->saveWeights("./weights.json");
+        const std::string path = m_rl_weights_file.empty() ? "./weights.json" : m_rl_weights_file;
+        m_rl_model->saveWeights(path);
+        if (m_log_fn) m_log_fn("[RL] Ваги збережено: " + path);
         m_rl_model.reset();
     }
     m_rl_buffer.reset();
@@ -1438,7 +1446,8 @@ void BotBehaviorTree::rlPostTick(GameState& gs) {
         m_rl_epsilon = std::max(
             lc.epsilon_min,
             m_rl_epsilon * lc.epsilon_decay);
-        std::cerr << "[RL] Епізод завершено. epsilon=" << m_rl_epsilon << "\n";
+        if (m_log_fn) m_log_fn("[RL] Епізод завершено. epsilon=" + std::to_string(m_rl_epsilon));
+        else std::cerr << "[RL] Епізод завершено. epsilon=" << m_rl_epsilon << "\n";
     }
 
     if (m_rl_kills_since_save >= lc.save_frequency) {

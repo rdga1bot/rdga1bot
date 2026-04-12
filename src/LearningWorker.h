@@ -5,7 +5,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <string>
 
 // LearningWorker: виконує LinearQModel::updateBatch() в окремому потоці.
 // Аналог GeodataWorker — не блокує main loop.
@@ -26,6 +28,10 @@ public:
     void start(int core_id = -1);
     void stop();
     bool isRunning() const { return m_running.load(); }
+
+    // Встановити лог-функцію для повідомлень з worker thread.
+    // Thread-safe: викликати до start() або після stop().
+    void setLogFn(std::function<void(const std::string&)> fn);
 
     void pushExperience(Experience exp);
     void requestUpdate();
@@ -51,6 +57,9 @@ private:
 
     mutable std::mutex      m_qval_mutex;
     Eigen::VectorXf         m_last_q_values;
+
+    mutable std::mutex                       m_log_mutex;
+    std::function<void(const std::string&)>  m_log_fn;
 
     std::mt19937 m_rng{std::random_device{}()};
 };

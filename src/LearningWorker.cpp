@@ -29,9 +29,14 @@ void LearningWorker::start(int core_id) {
     if (core_id >= 0) {
         cpu_set_t cs; CPU_ZERO(&cs); CPU_SET((size_t)core_id, &cs);
         pthread_setaffinity_np(m_thread.native_handle(), sizeof(cs), &cs);
-        std::cerr << "[RL-W] Started on Core " << core_id << "\n";
-    } else {
-        std::cerr << "[RL-W] Started (no affinity)\n";
+    }
+    {
+        std::lock_guard<std::mutex> lk(m_log_mutex);
+        const std::string msg = core_id >= 0
+            ? "[RL-W] Started on Core " + std::to_string(core_id)
+            : "[RL-W] Started (no affinity)";
+        if (m_log_fn) m_log_fn(msg);
+        else std::cerr << msg << "\n";
     }
 #endif
 }
@@ -41,6 +46,11 @@ void LearningWorker::stop() {
     { std::lock_guard<std::mutex> lk(m_mutex); m_running = false; }
     m_cv.notify_all();
     if (m_thread.joinable()) m_thread.join();
+}
+
+void LearningWorker::setLogFn(std::function<void(const std::string&)> fn) {
+    std::lock_guard<std::mutex> lk(m_log_mutex);
+    m_log_fn = std::move(fn);
 }
 
 void LearningWorker::pushExperience(Experience exp) {
@@ -74,8 +84,11 @@ void LearningWorker::workerLoop() {
         m_model->updateBatch(batch, m_learning_rate, m_discount_factor);
 
         if (m_model->updateCount() % 10 == 0) {
-            std::cerr << "[RL-W] update #" << m_model->updateCount()
-                      << " loss=" << m_model->lastLoss() << "\n";
+            std::lock_guard<std::mutex> lk(m_log_mutex);
+            const std::string msg = "[RL-W] update #" + std::to_string(m_model->updateCount())
+                                  + " loss=" + std::to_string(m_model->lastLoss());
+            if (m_log_fn) m_log_fn(msg);
+            else std::cerr << msg << "\n";
         }
     }
 }
