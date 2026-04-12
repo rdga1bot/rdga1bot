@@ -38,6 +38,14 @@ venv/
 # Misc
 compile_commands.json
 tmp/
+*.bak
+*.bak-*
+new_chat_context_*.md
+qa_tmp.txt
+
+# Prompt files (робочі, не для git)
+claude_code_prompt_*.md
+claude_code_prompt_*.txt
 
 # Recast/Detour (клонується локально через build.sh / CLAUDE.md)
 src/recast/

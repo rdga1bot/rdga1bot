@@ -34,3 +34,6 @@
 ### ✅ MR26 (2026-04-12): MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B Memory vs OCR JSONL, ShadowMode=false за замовч.)
 ### ✅ MR27 (2026-04-12): actTarget (456 рядків) → 6 приватних tgtHandle* instance methods (без зміни поведінки)
 ### ✅ MR28 (2026-04-12): Target замінено Selector піддеревом з 7 BT вузлів (actTgtInit..actTgtPatrol), ~22 вузли загалом
+### ✅ MR29 (2026-04-12): RL активовано ([Learning] Enabled=true); condNeedsRest + tgtHandlePatrolAndRotate RL overrides (RestNow, Patrol boost)
+### ✅ NavMesh tools (2026-04-12): scripts/navmesh_preview.py (2D scatter + кластер аналіз), scripts/navmesh_3d.py (Detour binary → Poly3DCollection 3D рендер)
+### ✅ NavMesh cleanup (2026-04-12): navmesh_points.pts очищено від 343 артефактів (origin junk / NaN), navmesh_loa.pts — тільки LoA кластер (648 точок), navmesh_loa.bin побудовано (304 полігони)

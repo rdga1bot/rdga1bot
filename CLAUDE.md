@@ -9,16 +9,14 @@
 
 ## Поточний стан (2026-04-12)
 - **BotBehaviorTree** — єдиний планувальник (ObjectiveManager видалено в MR20c)
-- **MR26 виконано** — MemoryValidator + blindScan timeout + Shadow Mode Logger
-  - `ShadowMode=false` (за замовчуванням) — нульовий вплив на поведінку
-  - `BlindScanTimeout=0` — зворотна сумісність збережена
-- **MR27 виконано** — actTarget (456 рядків) → 6 приватних `tgtHandle*` методів
-- **MR28 виконано** — Target як Selector піддерево з 7 BT вузлів (~22 вузли загалом)
-- **MR23-25 виконано** — Huber Q-Learning інтегровано в BotBehaviorTree
-  - `[Learning] Enabled=false` (за замовчуванням) — поведінка ідентична попередній
-  - При `Enabled=true` — LearningWorker async IRLS thread + epsilon-greedy RL policy
-- **QA Monitor** — Python daemon (`qa/qa_monitor.py`), IsolationForest аномалії, MemPalace bridge
-- Наступні пріоритети: live BT тест з грою → активація RL після підтвердження стабільності
+- **MR26** — MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B JSONL, ShadowMode=false)
+- **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
+- **MR28** — Target Selector піддерево з 7 BT вузлів (~22 вузли загалом)
+- **MR29** — RL активовано (`[Learning] Enabled=true`); condNeedsRest + tgtHandlePatrolAndRotate overrides
+- **NavMesh tools** — `scripts/navmesh_preview.py` (2D), `scripts/navmesh_3d.py` (Detour binary → 3D mesh)
+- **NavMesh LoA** — `navmesh_loa.pts` (648 чистих точок), `navmesh_loa.bin` (304 полігони, 985 трикутників)
+  - Координатне відображення: L2_X→Recast_X, L2_Z(висота)→Recast_Y(up), L2_Y→Recast_Z
+- **Наступні пріоритети**: live farm з RL активним → спостереження epsilon decay + weights.json
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
