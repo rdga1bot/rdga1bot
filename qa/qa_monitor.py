@@ -364,6 +364,17 @@ class QADaemon:
     async def run(self):
         """Запускає всі асинхронні задачі."""
         log_path = getattr(self.args, "log", None)
+        if log_path and not os.path.exists(log_path):
+            # Файл не знайдено — шукаємо найновіший session_*.log поруч
+            alt = _find_most_recent_log(os.path.dirname(log_path) or None)
+            if alt:
+                logger.warning(f"[QA] '{log_path}' не знайдено → використовуємо {os.path.basename(alt)}")
+                log_path = alt
+            else:
+                raise FileNotFoundError(
+                    f"'{log_path}' не знайдено і жодного session_*.log в logs/ немає.\n"
+                    f"Використай: python qa/qa_monitor.py --log logs/session_<дата>.log"
+                )
         if log_path:
             self.tailer.open(log_path, seek_end=False)
         else:
