@@ -140,9 +140,10 @@ uintptr_t OffsetScanner::performBlindScan() {
             if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // Відсіюємо garbage (0,0) структури: хоча б одна з X або Y > 1000.
-            // Порогові 30000 не підходять для LoA (X ∈ [-13511, 3955]).
-            if (std::fabsf(px) < 1000.f && std::fabsf(py) < 1000.f) continue;
+            // Обидві координати X та Y мають бути ненульовими.
+            // Y=0 → гравець ніколи не стоїть на осі симетрії (або стала адреса).
+            // X=1098,Y=0 — false positive у Wine .data секції.
+            if (std::fabsf(px) < 200.f || std::fabsf(py) < 200.f) continue;
             // Z не може бути точно 0 або степінь двійки (сміттєвий float)
             if (std::fabsf(pz) < 10.f) continue;
             // Координати не мають бути рівними між собою

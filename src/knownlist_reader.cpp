@@ -208,12 +208,15 @@ void KnownListReader::refreshScanCache() const {
         char perms[8] = {};
         char name[256] = {};
         std::sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s", &start, &end, perms, name);
-        if (perms[0] != 'r' || perms[1] != 'w') continue; // тільки read+write (heap)
+        if (perms[0] != 'r' || perms[1] != 'w') continue; // тільки read+write
         if (perms[2] == 'x') continue;            // пропускаємо executable (код)
         if (start < 0x10000u) continue;            // пропускаємо нульову сторінку
         if (start >= 0x70000000u) continue;        // пропускаємо Wine DLL space
-        // пропускаємо іменовані файлові відображення (Wine DLL, SO libraries)
-        if (name[0] == '/') continue;
+        // НЕ пропускаємо файлові відображення! l2.exe data section (0x3F0000-0x500000)
+        // це файлове відображення, але саме там живуть game objects.
+        // Пропускаємо лише системні SO-бібліотеки.
+        if (name[0] == '/' && (std::strstr(name, ".so") || std::strstr(name, "ld-")))
+            continue;
         size_t sz = end - start;
         if (sz < (size_t)(m_off.objXOff + 12)) continue; // надто маленький
         if (sz > 32u * 1024 * 1024) continue;     // пропускаємо > 32MB (VRAM/system)
