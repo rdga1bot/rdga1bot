@@ -1502,13 +1502,15 @@ void BotBehaviorTree::rlPostTick(GameState& gs) {
     if (m_rl_ticks_since_update >= lc.update_frequency) {
         m_rl_ticks_since_update = 0;
         m_rl_worker->requestUpdate();
+        // Decay epsilon кожен update step (кожні UpdateFrequency тіків).
+        // Раніше decay був тільки на смерть → epsilon не спадав за сесію.
+        m_rl_epsilon = std::max(lc.epsilon_min, m_rl_epsilon * lc.epsilon_decay);
     }
 
     if (done) {
-        m_rl_epsilon = std::max(
-            lc.epsilon_min,
-            m_rl_epsilon * lc.epsilon_decay);
-        if (m_log_fn) m_log_fn("[RL] Епізод завершено. epsilon=" + std::to_string(m_rl_epsilon));
+        // Додатковий decay на смерть (кінець епізоду = більший штраф на exploration)
+        m_rl_epsilon = std::max(lc.epsilon_min, m_rl_epsilon * lc.epsilon_decay);
+        if (m_log_fn) m_log_fn("[RL] Епізод завершено (смерть). epsilon=" + std::to_string(m_rl_epsilon));
         else std::cerr << "[RL] Епізод завершено. epsilon=" << m_rl_epsilon << "\n";
     }
 

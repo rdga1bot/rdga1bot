@@ -1645,9 +1645,11 @@ int main(int argc, char* argv[]) {
                     kl_validity_check = kl_now_v;
                     uintptr_t cur_base = brain.GetPlayerBase();
                     float vx = kl_scanner->rpm_pub<float>(cur_base + OFF_PLAYER_X);
-                    float vy = kl_scanner->rpm_pub<float>(cur_base + OFF_PLAYER_Y);
-                    bool base_valid = (std::isfinite(vx) && std::fabsf(vx) > 500.f &&
-                                       std::isfinite(vy) && std::fabsf(vy) > 500.f);
+                    float vz = kl_scanner->rpm_pub<float>(cur_base + OFF_PLAYER_Z);
+                    // OR-логіка: достатньо X>500 або Z>500.
+                    // Y (0x28) може бути ~0 в певних зонах (LoA/ToI) → AND-перевірка хибно скидала базу.
+                    bool base_valid = (std::isfinite(vx) && std::isfinite(vz) &&
+                                       (std::fabsf(vx) > 500.f || std::fabsf(vz) > 500.f));
                     if (!base_valid) {
                         std::cerr << "[KnownList] PlayerBase невалідний → скидаємо для re-scan\n";
                         brain.SetPlayerBase(0);

@@ -229,7 +229,10 @@ void Brain::updateGameState(GameState& gs) {
     }
     gs.minimap_dots = m_minimap_cache;
 
-    if (m_world) {
+    // Читаємо KnownList тільки якщо PlayerBase валідний.
+    // Без цієї умови WorldState bg thread може повертати stale garbage-дані
+    // після reset PlayerBase (кожні 30с validity check).
+    if (m_world && m_player_base) {
         gs.kl_mobs        = m_world->mobs();
         gs.kl_alive_count = m_world->aliveCount();
         gs.kl_mob_died    = m_world->anyMobDiedThisTick();
