@@ -170,7 +170,7 @@ void BotBehaviorTree::reset() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool BotBehaviorTree::condIsDead(GameState& gs) {
-    return gs.is_dead;
+    return gs.is_dead && !s_self->inGrace();
 }
 
 bool BotBehaviorTree::condNeedsRest(GameState& gs) {
