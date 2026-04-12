@@ -139,10 +139,9 @@ uintptr_t OffsetScanner::performBlindScan() {
             if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // X і Y мають бути в заселеній зоні L2 (не near-origin garbage).
-            // Реальні ігрові зони ElmoreLab: |X| > 30000, |Y| > 30000.
-            // Об'єкти ≈ (0,0) — false positive з неініціалізованих структур.
-            if (std::fabsf(px) < 30000.f || std::fabsf(py) < 30000.f) continue;
+            // Відсіюємо garbage (0,0) структури: хоча б одна з X або Y > 1000.
+            // Порогові 30000 не підходять для LoA (X ∈ [-13511, 3955]).
+            if (std::fabsf(px) < 1000.f && std::fabsf(py) < 1000.f) continue;
             // Z не може бути точно 0 або степінь двійки (сміттєвий float)
             if (std::fabsf(pz) < 10.f) continue;
             // Координати не мають бути рівними між собою
