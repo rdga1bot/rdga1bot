@@ -1448,6 +1448,31 @@ void BotBehaviorTree::rlPreTick(GameState& gs) {
     m_rl_last_features = phi;
     m_rl_last_action   = action;
     m_rl_has_prev      = true;
+
+    // Periodic feature vector log
+    const int fli = gs.cfg.learning.feature_log_interval;
+    if (fli > 0 && m_log_fn) {
+        m_rl_feature_log_ticks++;
+        if (m_rl_feature_log_ticks >= fli) {
+            m_rl_feature_log_ticks = 0;
+            static const char* names[10] = {
+                "hp","mp","has_tgt","tgt_hp",
+                "kl_alive","minimap","secs_kill","secs_buff",
+                "is_dead","in_grace"
+            };
+            std::string s = "[RL-F] features:";
+            for (int i = 0; i < (int)phi.size(); i++) {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), " %s=%.3f", names[i], phi[i]);
+                s += buf;
+            }
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), " | eps=%.4f conf=%.3f act=%d",
+                          m_rl_epsilon, m_rl_action_confidence, (int)action);
+            s += buf;
+            m_log_fn(s);
+        }
+    }
 }
 
 void BotBehaviorTree::rlPostTick(GameState& gs) {

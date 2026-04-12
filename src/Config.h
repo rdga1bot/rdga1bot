@@ -278,6 +278,7 @@ public:
         int         buffer_size       = 1000;
         int         batch_size        = 32;
         std::string weights_file      = "./weights.json";
+        int         feature_log_interval = 300; // тіків між виводом Feature вектора (0=вимк)
     } learning;
 
     bool Load(const std::string& path);

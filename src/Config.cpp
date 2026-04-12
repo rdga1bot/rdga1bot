@@ -446,7 +446,8 @@ bool Config::Load(const std::string& path) {
     learning.save_frequency  = GetInt   ("Learning","SaveFrequency",   learning.save_frequency);
     learning.buffer_size     = GetInt   ("Learning","BufferSize",      learning.buffer_size);
     learning.batch_size      = GetInt   ("Learning","BatchSize",       learning.batch_size);
-    learning.weights_file    = Get      ("Learning","WeightsFile",     learning.weights_file);
+    learning.weights_file         = Get   ("Learning","WeightsFile",          learning.weights_file);
+    learning.feature_log_interval = GetInt("Learning","FeatureLogInterval", learning.feature_log_interval);
 
     // [Colors_MyBars]
     colors.my_hp_from_hsv = GetScalar("Colors_MyBars", "HPFromHSV",  colors.my_hp_from_hsv);
@@ -719,7 +720,8 @@ bool Config::Save(const std::string& path) const {
     f << "SaveFrequency    = " << learning.save_frequency  << "\n";
     f << "BufferSize       = " << learning.buffer_size     << "\n";
     f << "BatchSize        = " << learning.batch_size      << "\n";
-    f << "WeightsFile      = " << learning.weights_file    << "\n";
+    f << "WeightsFile           = " << learning.weights_file          << "\n";
+    f << "FeatureLogInterval    = " << learning.feature_log_interval  << "\n";
     f << "\n";
     f << "[Vision]\n";
     f << "UseRobustBarDetection = " << (use_robust_bar ? "true" : "false") << "\n";

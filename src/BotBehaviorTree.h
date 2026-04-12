@@ -211,6 +211,7 @@ private:
     float                 m_rl_epsilon           = 1.0f;
     int                   m_rl_ticks_since_update  = 0;
     int                   m_rl_kills_since_save    = 0;
+    int                   m_rl_feature_log_ticks   = 0;
     std::mt19937          m_rl_rng{std::random_device{}()};
 
     // ── RL сигнали за тік (скидаються на початку кожного tick) ───────────────
