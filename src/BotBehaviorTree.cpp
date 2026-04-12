@@ -933,6 +933,13 @@ void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
     if (!gs.minimap_dots.empty() && m_attack_was_unreachable) {
         m_attack_was_unreachable = false;
         gs.log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable flag");
+        // Одразу /target макрос — не пробуємо F2 який поверне той самий недосяжний моб
+        if (!gs.cfg.target_macro_keys.empty()) {
+            gs.hands.Delay(100);
+            gs.hands.TargetMacro(m_tgt_macro_idx);
+            m_tgt_macro_idx = (m_tgt_macro_idx + 1) % (int)gs.cfg.target_macro_keys.size();
+        }
+        return;
     }
 
     // /target макроси: тільки після N невдалих F2
