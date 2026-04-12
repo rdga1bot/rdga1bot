@@ -222,15 +222,10 @@ void KnownListReader::refreshScanCache() const {
     }
     std::fclose(f);
 
-    // Додаткова діагностика: виводимо всі знайдені регіони
     size_t total_mb = 0;
     for (const auto& r : m_scan_cache) total_mb += r.size;
     std::cerr << "[KnownList] scan cache: " << m_scan_cache.size()
-              << " regions, " << (total_mb / 1024 / 1024) << " MB total\n";
-    for (const auto& r : m_scan_cache)
-        std::cerr << "  [0x" << std::hex << r.base << " - 0x"
-                  << (r.base + r.size) << "] " << std::dec
-                  << (r.size / 1024) << " KB\n";
+              << " regions, " << (total_mb / 1024 / 1024) << " MB\n";
 }
 
 // ── Спільний читач типу з буферу або через readv ──────────────────────────────
