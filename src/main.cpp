@@ -921,8 +921,9 @@ int main(int argc, char* argv[]) {
                 // Верифікація: перевіряємо координати поточної сесії
                 float cpx = scanner.rpm_pub<float>(cached + OFF_PLAYER_X);
                 float cpy = scanner.rpm_pub<float>(cached + OFF_PLAYER_Y);
+                // Обидві координати мають бути ненульовими (Y=0 → невалідна/стара адреса)
                 bool valid = std::isfinite(cpx) && std::isfinite(cpy)
-                          && (std::fabsf(cpx) > 1000.f || std::fabsf(cpy) > 1000.f);
+                          && std::fabsf(cpx) > 200.f && std::fabsf(cpy) > 200.f;
                 if (valid) {
                     pb = cached;
                     std::cerr << "[discover-klist] PlayerBase з кешу: 0x" << std::hex << pb

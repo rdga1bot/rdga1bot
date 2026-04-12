@@ -216,12 +216,20 @@ void KnownListReader::refreshScanCache() const {
         if (name[0] == '/') continue;
         size_t sz = end - start;
         if (sz < (size_t)(m_off.objXOff + 12)) continue; // надто маленький
-        if (sz > 2u * 1024 * 1024) continue;      // пропускаємо > 2MB
+        if (sz > 32u * 1024 * 1024) continue;     // пропускаємо > 32MB (VRAM/system)
         m_scan_cache.push_back({start, sz});
     }
     std::fclose(f);
-    std::cerr << "[KnownList] scan cache updated: " << m_scan_cache.size()
-              << " regions\n";
+
+    // Додаткова діагностика: виводимо всі знайдені регіони
+    size_t total_mb = 0;
+    for (const auto& r : m_scan_cache) total_mb += r.size;
+    std::cerr << "[KnownList] scan cache: " << m_scan_cache.size()
+              << " regions, " << (total_mb / 1024 / 1024) << " MB total\n";
+    for (const auto& r : m_scan_cache)
+        std::cerr << "  [0x" << std::hex << r.base << " - 0x"
+                  << (r.base + r.size) << "] " << std::dec
+                  << (r.size / 1024) << " KB\n";
 }
 
 // ── Спільний читач типу з буферу або через readv ──────────────────────────────
