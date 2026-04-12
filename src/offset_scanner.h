@@ -24,7 +24,7 @@ public:
     // або будь-яких попередніх знань.
     // Час виконання: ~2-10с залежно від розміру heap.
     // Повертає 0 при невдачі.
-    uintptr_t blindScan();
+    uintptr_t blindScan(int timeoutMs = 0);
 
     // Знайти PlayerBase якщо координати гравця вже відомі (швидший, точніший).
     // Використовується як fallback якщо blindScan() дає помилкових кандидатів.
@@ -86,6 +86,9 @@ public:
 
 private:
     pid_t m_pid;
+
+    // Внутрішня реалізація blindScan без таймауту
+    uintptr_t performBlindScan();
 
     struct MemRegion {
         uintptr_t base = 0;

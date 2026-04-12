@@ -345,6 +345,18 @@ void Dashboard::DrawStatus(const Brain& brain, const Eyes::Me& me,
         mvwprintw(m_win_status, 3, rx, "%s", rl_buf);
         wattroff(m_win_status, COLOR_PAIR(COLOR_BUFF) | A_BOLD);
     }
+
+    // Shadow Mode статус (MR26)
+    if (brain.isShadowModeActive() && rx + 30 < m_cols) {
+        int shadow_row = brain.GetBotBT().isLearningEnabled() ? 4 : 3;
+        int color = brain.isMemReaderValid() ? COLOR_ATTACK : COLOR_DEAD;
+        wattron(m_win_status, COLOR_PAIR(color));
+        mvwprintw(m_win_status, shadow_row, rx,
+                  "Shadow:%lu cmp %lu diff",
+                  brain.getShadowComparisons(),
+                  brain.getShadowDiscrepancies());
+        wattroff(m_win_status, COLOR_PAIR(color));
+    }
 }
 
 // ─── DrawLog ───────────────────────────────────────────────────────────────

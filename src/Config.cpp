@@ -344,6 +344,10 @@ bool Config::Load(const std::string& path) {
     // [MemReader]
     mem_enabled   = GetBool  ("MemReader", "Enabled",    mem_enabled);
     mem_proc_name = Get      ("MemReader", "ProcName",   mem_proc_name);
+    mem_shadow_mode           = GetBool("MemReader", "ShadowMode",           mem_shadow_mode);
+    mem_max_consecutive_fails = GetInt ("MemReader", "MaxConsecutiveFailures",mem_max_consecutive_fails);
+    mem_blindscan_timeout_ms  = GetInt ("MemReader", "BlindScanTimeout",      mem_blindscan_timeout_ms);
+    mem_stats_log_interval_s  = GetInt ("MemReader", "StatsLogInterval",      mem_stats_log_interval_s);
     mem_player_ptr  = (uintptr_t)std::stoul(Get("MemReader", "PlayerPtr",  "0"), nullptr, 16);
     mem_hp_off      = (uintptr_t)std::stoul(Get("MemReader", "HP_Offset",  "0"), nullptr, 16);
     mem_max_hp_off  = (uintptr_t)std::stoul(Get("MemReader", "MaxHP_Offset","0"), nullptr, 16);

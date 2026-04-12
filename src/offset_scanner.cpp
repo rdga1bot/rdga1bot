@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <thread>
+#include <future>
 #include <chrono>
 #include <vector>
 #include <csignal>
@@ -67,7 +68,28 @@ static bool isL2Coord(float v, float lo, float hi) {
 //   4. firstObj + 0x24/0x28/0x2C → float XYZ → в межах L2 світу
 //   5. candidate + 0x24/0x28/0x2C → float XYZ → в межах L2 світу (сам гравець)
 //   6. X,Y,Z не всі нулі і не рівні між собою
-uintptr_t OffsetScanner::blindScan() {
+// ── blindScan: публічна обгортка з опціональним таймаутом ────────────────────
+uintptr_t OffsetScanner::blindScan(int timeoutMs) {
+    if (timeoutMs <= 0)
+        return performBlindScan();
+
+    // З таймаутом: запускаємо в окремому потоці через packaged_task
+    std::packaged_task<uintptr_t()> task([this]() {
+        return performBlindScan();
+    });
+    std::future<uintptr_t> future = task.get_future();
+    std::thread t(std::move(task));
+    t.detach(); // не блокуємо при завершенні за timeout
+
+    auto status = future.wait_for(std::chrono::milliseconds(timeoutMs));
+    if (status == std::future_status::ready)
+        return future.get();
+
+    std::cerr << "[OffsetScanner] blindScan timeout after " << timeoutMs << "ms\n";
+    return 0;
+}
+
+uintptr_t OffsetScanner::performBlindScan() {
     // L2 world bounds (Lineage 2 game world limits)
     // X/Y: Gracia Final world is roughly [-327668, 327668]
     // Z (висота): [-16384, 16384] для більшості зон

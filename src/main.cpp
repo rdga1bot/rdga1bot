@@ -1679,11 +1679,13 @@ int main(int argc, char* argv[]) {
                     kl_scan_attempts++;
                     kl_scan_running = true;
                     std::cerr << "[KnownList] blind scan спроба #" << kl_scan_attempts << " (фон)\n";
-                    auto* scanner_ptr = kl_scanner.get();
-                    auto* running_ptr = &kl_scan_running;
-                    auto* result_ptr  = &kl_scan_result;
-                    std::thread([scanner_ptr, running_ptr, result_ptr]() {
-                        uintptr_t base = scanner_ptr->blindScan();
+                    auto* scanner_ptr  = kl_scanner.get();
+                    auto* running_ptr  = &kl_scan_running;
+                    auto* result_ptr   = &kl_scan_result;
+                    int   bs_timeout   = cfg.mem_blindscan_timeout_ms > 0
+                                         ? cfg.mem_blindscan_timeout_ms : 0;
+                    std::thread([scanner_ptr, running_ptr, result_ptr, bs_timeout]() {
+                        uintptr_t base = scanner_ptr->blindScan(bs_timeout);
                         result_ptr->store(base);
                         running_ptr->store(false);
                     }).detach();

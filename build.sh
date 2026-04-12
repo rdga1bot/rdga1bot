@@ -55,6 +55,8 @@ SRCS="
   $SRC/BotBehaviorTree.cpp
   $SRC/LinearQModel.cpp
   $SRC/LearningWorker.cpp
+  $SRC/MemoryValidator.cpp
+  $SRC/ShadowLogger.cpp
 "
 
 # Detour sources (тільки якщо src/recast/Detour існує)

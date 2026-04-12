@@ -36,6 +36,13 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
     // BotBehaviorTree: єдиний планувальник
     m_bot_bt.init(m_cfg);
     Log("[BT] BotBehaviorTree: " + std::to_string(m_bot_bt.nodeCount()) + " вузлів");
+
+    // Shadow Logger: створюємо якщо ShadowMode увімкнено (MR26)
+    if (m_cfg.mem_shadow_mode && m_cfg.knownlist_enabled) {
+        m_shadow_logger      = std::make_unique<ShadowLogger>();
+        m_shadow_mode_active = true;
+        Log("[Shadow] ShadowLogger активовано. Логи: memory/shadow_logs/");
+    }
 }
 
 void Brain::ReloadConfig(const Config& new_cfg) {
@@ -175,6 +182,11 @@ void Brain::Process(bool debug) {
     if (m_prev_obj_name != "Dead") {
         if (cur_obj == "Dead") m_hp_zero_count = 0;
     }
+
+    // Shadow Mode: паралельне читання Memory для порівняння з OCR (MR26)
+    // НЕ впливає на рішення бота — OCR завжди primary
+    if (m_shadow_mode_active && m_shadow_logger)
+        readShadowMemoryState(gs);
 
     // Performance
     double tick_ms = std::chrono::duration<double, std::milli>(Now() - tick_start).count();
@@ -586,5 +598,55 @@ void Brain::SetGeoPath(const std::vector<std::pair<float,float>>& path,
 
 std::optional<PathRequest> Brain::GetPendingPathRequest() {
     return m_bot_bt.takePendingPathRequest();
+}
+
+// ── readShadowMemoryState (MR26) ──────────────────────────────────────────────
+void Brain::readShadowMemoryState(GameState& gs) {
+    // ── Валідація PlayerState ─────────────────────────────────────────────────
+    if (m_mem_player.valid) {
+        auto vr = MemoryValidator::validatePlayer(m_mem_player);
+        if (!vr.valid) {
+            m_consecutive_mem_fails++;
+            m_shadow_logger->logValidationError(vr.error);
+            if (m_consecutive_mem_fails >= m_cfg.mem_max_consecutive_fails) {
+                m_shadow_logger->logFailureAlert(m_consecutive_mem_fails);
+                Log("[Shadow] MemReader: " + std::to_string(m_consecutive_mem_fails)
+                    + " послідовних помилок: " + vr.error, LogLevel::Warning);
+            }
+        } else {
+            m_consecutive_mem_fails = 0;
+        }
+    }
+
+    // ── A/B порівняння HP/MP: Memory vs OCR ──────────────────────────────────
+    if (m_mem_player.valid && m_me.has_value())
+        m_shadow_logger->logPlayerComparison(m_mem_player, m_me.value());
+
+    // ── A/B порівняння кількості мобів: Memory vs мінімапа ───────────────────
+    if (gs.kl_alive_count >= 0 && !gs.minimap_dots.empty())
+        m_shadow_logger->logMobComparison(gs.kl_alive_count,
+                                          (int)gs.minimap_dots.size());
+
+    // ── Валідація першого живого моба з KnownList (вибірково) ─────────────────
+    for (const auto& mob : gs.kl_mobs) {
+        if (!mob.isAlive()) continue;
+        auto mvr = MemoryValidator::validateMob(mob);
+        if (!mvr.valid)
+            m_shadow_logger->logValidationError(
+                "mob[" + std::to_string(mob.objectID) + "]: " + mvr.error);
+        break; // тільки перший живий моб за тік
+    }
+
+    // ── Статистика кожні StatsLogInterval секунд ──────────────────────────────
+    auto now  = Clock::now();
+    double elapsed = std::chrono::duration<double>(now - m_last_shadow_stats_log).count();
+    if (elapsed >= (double)m_cfg.mem_stats_log_interval_s) {
+        m_last_shadow_stats_log = now;
+        m_shadow_logger->flush();
+        Log("[Shadow] Stats: "
+            + std::to_string(m_shadow_logger->totalComparisons()) + " cmp, "
+            + std::to_string(m_shadow_logger->discrepancies()) + " diff, "
+            + "avg HP diff=" + std::to_string(m_shadow_logger->avgHpDiffPercent()) + "%");
+    }
 }
 

@@ -161,6 +161,12 @@ public:
     // Всі значення = 0 → вимкнено (використовується OpenCV детекція)
     bool     mem_enabled     = false;
     std::string mem_proc_name = "l2.exe"; // ім'я процесу для пошуку
+
+    // [MemReader] Shadow Mode параметри (MR26)
+    bool mem_shadow_mode           = false;  // логувати розбіжності mem vs OCR
+    int  mem_max_consecutive_fails = 10;     // WARNING при N помилках поспіль
+    int  mem_blindscan_timeout_ms  = 0;      // таймаут blindScan (мс), 0=без таймауту
+    int  mem_stats_log_interval_s  = 60;     // інтервал логу статистики Shadow Mode
     uintptr_t mem_player_ptr  = 0;   // static offset від base l2.exe до pointer на PlayerObject
     std::vector<uintptr_t> mem_ptr_chain; // pointer chain offsets (порожньо = пряма адреса)
     uintptr_t mem_hp_off      = 0;

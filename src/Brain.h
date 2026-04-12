@@ -21,6 +21,8 @@
 #include "navmesh_worker.h"
 #include "game_state.h"
 #include "BotBehaviorTree.h"
+#include "MemoryValidator.h"
+#include "ShadowLogger.h"
 
 class Brain {
 public:
@@ -82,6 +84,19 @@ public:
     void SetGeoPath(const std::vector<std::pair<float,float>>& path, uint64_t path_id);
     std::optional<PathRequest> GetPendingPathRequest();
 
+    // Shadow Mode getters (MR26)
+    bool     isShadowModeActive()     const { return m_shadow_mode_active; }
+    bool     isMemReaderValid()       const { return m_consecutive_mem_fails == 0; }
+    uint64_t getShadowComparisons()   const {
+        return m_shadow_logger ? m_shadow_logger->totalComparisons() : 0;
+    }
+    uint64_t getShadowDiscrepancies() const {
+        return m_shadow_logger ? m_shadow_logger->discrepancies() : 0;
+    }
+    float getShadowAvgHpDiff() const {
+        return m_shadow_logger ? m_shadow_logger->avgHpDiffPercent() : 0.f;
+    }
+
     // Blacklist
     void BlacklistMob(int objectID, float seconds = 60.f);
     bool IsBlacklisted(int objectID) const;
@@ -123,6 +138,12 @@ private:
 
     // Memory Reading
     MemReader::PlayerState m_mem_player;
+
+    // Shadow Mode (MR26)
+    std::unique_ptr<ShadowLogger> m_shadow_logger;
+    int  m_consecutive_mem_fails = 0;
+    bool m_shadow_mode_active    = false;
+    TP   m_last_shadow_stats_log{};
 
     // KnownList
     std::unique_ptr<WorldState> m_world;
@@ -190,6 +211,7 @@ private:
     // Helpers
     void updateGameState(GameState& gs);
     void CheckPotions(const Eyes::Me& me);
+    void readShadowMemoryState(GameState& gs); // Shadow Mode A/B comparison (MR26)
     void CleanBlacklist();
     void InitRandomDelays();
     std::optional<L2Character> SelectWeightedTarget(
