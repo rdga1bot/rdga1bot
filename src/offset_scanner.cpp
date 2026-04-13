@@ -17,35 +17,44 @@ static constexpr size_t MAX_REGION_SIZE = 64 * 1024 * 1024; // 64 MB
 
 OffsetScanner::OffsetScanner(pid_t pid) : m_pid(pid) {}
 
-// ── Читання регіонів з /proc/<pid>/maps ──────────────────────────────────────
+// ── Читання регіонів з /proc/<pid>/maps (scanmem-style) ──────────────────────
 std::vector<OffsetScanner::MemRegion> OffsetScanner::getReadableRegions() const {
     std::vector<MemRegion> result;
-    std::ifstream maps("/proc/" + std::to_string(m_pid) + "/maps");
-    if (!maps) return result;
+    std::string path = "/proc/" + std::to_string(m_pid) + "/maps";
+    FILE* f = std::fopen(path.c_str(), "r");
+    if (!f) return result;
 
-    std::string line;
-    while (std::getline(maps, line)) {
-        if (line.size() < 20) continue;
+    char line[1024];
+    while (std::fgets(line, sizeof(line), f)) {
+        uintptr_t start = 0, end = 0;
+        char perms[8] = {}, dev[16] = {}, pathname[512] = {};
+        unsigned long offset = 0, inode = 0;
 
-        // Формат: addr_start-addr_end perms offset dev inode [path]
-        uintptr_t addr_start = 0, addr_end = 0;
-        char perms[8] = {};
-        if (std::sscanf(line.c_str(), "%lx-%lx %7s", &addr_start, &addr_end, perms) < 3)
-            continue;
-
-        // Тільки readable
+        int matched = std::sscanf(line, "%lx-%lx %7s %lx %15s %lu %511[^\n]",
+                                  &start, &end, perms, &offset, dev, &inode, pathname);
+        if (matched < 4) continue;
         if (perms[0] != 'r') continue;
 
-        // Пропускаємо vdso, vsyscall, stack
-        if (line.find("[vdso]")     != std::string::npos) continue;
-        if (line.find("[vsyscall]") != std::string::npos) continue;
-        if (line.find("[stack]")    != std::string::npos) continue;
+        // kernel/system регіони
+        if (std::strstr(pathname, "[vdso]"))     continue;
+        if (std::strstr(pathname, "[vsyscall]")) continue;
+        if (std::strstr(pathname, "[stack]"))    continue;
+        if (std::strstr(pathname, "[vvar]"))     continue;
 
-        size_t sz = addr_end - addr_start;
+        // system SO бібліотеки (не Wine DLL)
+        // Wine DLL шляхи: /home/.../.wine/... або /proc/...
+        // system SO: /lib/..., /usr/lib/...
+        if (std::strstr(pathname, "/lib/")    && std::strstr(pathname, ".so")) continue;
+        if (std::strstr(pathname, "/usr/lib") && std::strstr(pathname, ".so")) continue;
+
+        size_t sz = end - start;
         if (sz == 0 || sz > MAX_REGION_SIZE) continue;
+        if (start < 0x10000u)     continue;  // нульова сторінка
+        if (start >= 0xC0000000u) continue;  // Wine 32-bit: вище 3GB = kernel
 
-        result.push_back({addr_start, sz});
+        result.push_back({start, sz});
     }
+    std::fclose(f);
     return result;
 }
 
@@ -110,6 +119,16 @@ uintptr_t OffsetScanner::performBlindScan() {
         buf.resize(region.size);
         if (!readBytes(region.base, buf.data(), region.size)) continue;
 
+        // Helper: читає uint32 з buf[] якщо addr потрапляє в регіон, інакше rpm fallback.
+        auto readU32fromBuf = [&](uintptr_t addr, uint32_t& out) -> bool {
+            if (addr >= region.base && addr + 4 <= region.base + buf.size()) {
+                std::memcpy(&out, buf.data() + (addr - region.base), 4);
+                return true;
+            }
+            out = rpm<uint32_t>(addr);
+            return true;
+        };
+
         // Крок 4 байти — перевіряємо кожен вирівняний offset як candidate playerBase
         for (size_t i = 0; i + 0x130 <= buf.size(); i += 4) {
             // ── Перевірка 1: candidate + 0x120 → knownListPtr ──────────────
@@ -120,7 +139,8 @@ uintptr_t OffsetScanner::performBlindScan() {
             // ── Перевірка 2: knownListPtr[0] → перший об'єкт (valid ptr) ───
             // Примітка: +0x124 в Kamael клієнті — НЕ count, а другий ptr.
             // Тому перевірку count прибрано; замість неї — valid ptr на перший obj.
-            uint32_t firstObjPtr = rpm<uint32_t>(klPtr);
+            uint32_t firstObjPtr = 0;
+            readU32fromBuf(klPtr, firstObjPtr);
             if (!isValidPtr(firstObjPtr)) continue;
             // klPtr і firstObjPtr мають бути в різних діапазонах (list ≠ element)
             if (klPtr == firstObjPtr) continue;
@@ -149,22 +169,32 @@ uintptr_t OffsetScanner::performBlindScan() {
             // Координати не мають бути рівними між собою
             if (px == py && py == pz) continue;
 
-            // ── Перевірка 4: перший KL об'єкт має бути ПОРЯД з кандидатом ─────
-            // Реальний гравець: KL містить локальних мобів (в радіусі MaxRange ~2500 L2u).
-            // False positive: KL "об'єкт" → випадкова пам'ять → рандомні XYZ.
-            // Перевіряємо offset +0x24 і +0x90 (два можливих XYZ поля в L2 об'єкті).
+            // ── Перевірка 4: в buf[] є ще L2 XYZ крім самого гравця ──────────
+            // Kamael pb+0x120 = C++ KnownList object (не масив мобів).
+            // rpm(klPtr) повертає vtable ptr, а не L2Object.
+            // Тому верифікуємо через наявність 2+ незалежних XYZ у тому самому buf[].
             {
-                bool kl_nearby = false;
-                static constexpr float KL_MAX_DIST2 = 2500.f * 2500.f; // max KnownList range
-                for (uint32_t xoff : {0x24u, 0x90u}) {
-                    float ox = rpm<float>(firstObjPtr + xoff);
-                    float oy = rpm<float>(firstObjPtr + xoff + 4);
-                    if (!isL2Coord(ox, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
-                    if (!isL2Coord(oy, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
-                    float ddx = ox - px, ddy = oy - py;
-                    if (ddx*ddx + ddy*ddy < KL_MAX_DIST2) { kl_nearby = true; break; }
+                int xyz_count = 0;
+                size_t scan_lo = (i >= 0x4000) ? i - 0x4000 : 0;
+                size_t scan_hi = buf.size() >= 12 ? buf.size() - 12 : 0;
+                if (i + 0x4000 < scan_hi) scan_hi = i + 0x4000;
+
+                for (size_t j = scan_lo; j <= scan_hi && xyz_count < 2; j += 4) {
+                    if (j + 8 >= buf.size()) break;
+                    if (j == i) continue;
+                    float tx, ty, tz;
+                    std::memcpy(&tx, buf.data() + j,     4);
+                    std::memcpy(&ty, buf.data() + j + 4, 4);
+                    std::memcpy(&tz, buf.data() + j + 8, 4);
+                    if (!isL2Coord(tx, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+                    if (!isL2Coord(ty, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
+                    if (!isL2Coord(tz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
+                    if (std::fabsf(tx) < 200.f || std::fabsf(ty) < 200.f) continue;
+                    // не рахуємо сам px/py/pz як окремий об'єкт
+                    if (std::fabsf(tx - px) < 1.f && std::fabsf(ty - py) < 1.f) continue;
+                    xyz_count++;
                 }
-                if (!kl_nearby) continue; // KL об'єкти далеко → не гравець
+                if (xyz_count < 2) continue; // не L2 heap → пропускаємо
             }
 
             uintptr_t candidate = region.base + i;
