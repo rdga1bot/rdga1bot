@@ -988,6 +988,214 @@ int main(int argc, char* argv[]) {
         std::cerr << "[discover-klist] " << std::dec << mobAddrs.size()
                   << " адрес передано CE reverse scan.\n";
 
+        // ── Дамп структури першого моба для діагностики ──────────────────────────
+        if (!mobs.empty()) {
+            const auto& m0 = mobs[0];
+            std::cerr << "[discover-klist] Dump mob[0] @ 0x"
+                      << std::hex << m0.memPtr << " X=" << std::dec << (int)m0.x << ":\n";
+            for (int d = 0; d < 64; d++) {
+                uint32_t v = scanner.rpm_pub<uint32_t>(m0.memPtr + (uintptr_t)d * 4);
+                float vf = 0.f;
+                std::memcpy(&vf, &v, 4);
+                std::cerr << "  +" << std::setw(3) << std::hex << d*4
+                          << " = 0x" << std::setw(8) << std::setfill('0') << v
+                          << std::setfill(' ');
+                if (std::isfinite(vf) && std::fabsf(vf) > 100.f && std::fabsf(vf) < 327000.f)
+                    std::cerr << " (float:" << std::dec << (int)vf << ")";
+                else if (v > 0x10000u && v < 0xBFFF0000u)
+                    std::cerr << " (ptr)";
+                std::cerr << "\n";
+            }
+        }
+
+        // ── Range reverse pointer scan ±0x200 для першого моба ──────────────────
+        // Знаходимо ХТО тримає pointer близько до mob address (КL може зберігати
+        // іншу базу того самого об'єкту, наприклад mobBase±N).
+        if (!mobAddrs.empty()) {
+            uintptr_t target = mobAddrs[0];
+            uintptr_t range  = 0x200;
+            std::cerr << "[discover-klist] Range ptr scan mob[0]=0x"
+                      << std::hex << target << " ±0x" << range << ":\n";
+            // Читаємо регіони (спрощено: перші 64MB процесу)
+            bool found_any = false;
+            char maps_path[64];
+            std::snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", (int)pid);
+            FILE* mf = std::fopen(maps_path, "r");
+            if (mf) {
+                char ln[512];
+                while (std::fgets(ln, sizeof(ln), mf)) {
+                    uintptr_t rbase = 0, rend = 0;
+                    char rperms[8] = {};
+                    std::sscanf(ln, "%lx-%lx %4s", &rbase, &rend, rperms);
+                    if (rperms[0] != 'r') continue;
+                    if (rbase < 0x10000u || rbase >= 0x70000000u) continue;
+                    size_t rsz = rend - rbase;
+                    if (rsz > 64u*1024*1024) continue;
+                    std::vector<uint8_t> rbuf(rsz);
+                    if (!scanner.readBytesPublic(rbase, rbuf.data(), rsz)) continue;
+                    for (size_t ri = 0; ri + 4 <= rsz; ri += 4) {
+                        uint32_t rv;
+                        std::memcpy(&rv, rbuf.data() + ri, 4);
+                        if (rv >= target - range && rv <= target + range) {
+                            uintptr_t holder = rbase + ri;
+                            std::cerr << "  0x" << std::hex << holder
+                                      << " → 0x" << rv
+                                      << " (off from target: "
+                                      << std::dec << (int)(rv - (uint32_t)target) << ")\n";
+                            found_any = true;
+                            // Перевіряємо якщо holder близько до pb
+                            if (holder >= pb && holder < pb + 0x2000)
+                                std::cerr << "    *** IN PLAYER STRUCT @ pb+0x"
+                                          << std::hex << (holder - pb) << " ***\n";
+                        }
+                    }
+                }
+                std::fclose(mf);
+            }
+            if (!found_any)
+                std::cerr << "  (жодного pointer в heap)\n";
+        }
+
+        // ── KnownList структурний probe ──────────────────────────────────────────
+        // pb+0x120 → KnownList C++ object. Всередині є sub-struct з vtable, count,
+        // data ptr та bucket array. Шукаємо реальні L2Character об'єкти з XY@+0x24.
+        {
+            uint32_t klHead = scanner.rpm_pub<uint32_t>(pb + 0x120);
+            std::cerr << "[klist-probe] klHead=0x" << std::hex << klHead << "\n";
+            if (scanner.isValidPtr_pub(klHead)) {
+                // Sub-struct starts at klHead+0x1c (where vtable appears in dump)
+                uint32_t elemCount = scanner.rpm_pub<uint32_t>((uintptr_t)klHead + 0x20);
+                uint32_t dataPtr   = scanner.rpm_pub<uint32_t>((uintptr_t)klHead + 0x24);
+                uint32_t buckPtr   = scanner.rpm_pub<uint32_t>((uintptr_t)klHead + 0x2c);
+                uint32_t buckCount = scanner.rpm_pub<uint32_t>((uintptr_t)klHead + 0x30);
+                std::cerr << "[klist-probe] elemCount=" << std::dec << elemCount
+                          << " dataPtr=0x" << std::hex << dataPtr
+                          << " buckPtr=0x" << buckPtr
+                          << " buckCount=" << std::dec << buckCount << "\n";
+
+                // Dump raw content of dataPtr and buckPtr (first 20 dwords each)
+                for (auto [tag, dptr] : std::initializer_list<std::pair<const char*, uint32_t>>{
+                        {"dataPtr", dataPtr}, {"buckPtr", buckPtr}}) {
+                    if (!scanner.isValidPtr_pub(dptr)) continue;
+                    std::cerr << "[klist-probe] " << tag << " 0x" << std::hex << dptr << " raw[0..19]:";
+                    for (int di = 0; di < 20; di++) {
+                        uint32_t dv = scanner.rpm_pub<uint32_t>((uintptr_t)dptr + (uintptr_t)di*4);
+                        std::cerr << " " << std::hex << dv;
+                    }
+                    std::cerr << "\n";
+                }
+
+                // Follow linked list from firstElem via +0x00 (next ptr), check XY
+                // at +0x24/+0x28 (player-style) and +0x90/+0x94 (render-style)
+                uint32_t llCur = scanner.rpm_pub<uint32_t>(klHead);
+                std::cerr << "[klist-probe] LL from klHead+0 chain (max 30):\n";
+                static const uintptr_t LL_XY_OFFS[] = {0x18,0x1c,0x24,0x28,0x48,0x60,0x64,0x90,0x94};
+                float ppx2 = scanner.rpm_pub<float>(pb + 0x24);
+                float ppy2 = scanner.rpm_pub<float>(pb + 0x28);
+                for (int li = 0; li < 30 && scanner.isValidPtr_pub(llCur) && llCur != klHead; li++) {
+                    bool found_xy = false;
+                    for (uintptr_t xoff : LL_XY_OFFS) {
+                        float fx = scanner.rpm_pub<float>((uintptr_t)llCur + xoff);
+                        float fy = scanner.rpm_pub<float>((uintptr_t)llCur + xoff + 4);
+                        if (!std::isfinite(fx) || !std::isfinite(fy)) continue;
+                        if (std::fabsf(fx) < 5000.f || std::fabsf(fx) > 330000.f) continue;
+                        if (std::fabsf(fy) < 1000.f || std::fabsf(fy) > 330000.f) continue;
+                        float dx = fx - ppx2, dy = fy - ppy2;
+                        std::cerr << "  LL[" << std::dec << li << "] 0x" << std::hex << llCur
+                                  << " XY@+0x" << xoff << "=(" << std::dec << (int)fx << "," << (int)fy
+                                  << ") dist=" << (int)std::sqrtf(dx*dx+dy*dy) << "\n";
+                        found_xy = true; break;
+                    }
+                    if (!found_xy)
+                        std::cerr << "  LL[" << std::dec << li << "] 0x" << std::hex << llCur << " (no XY)\n";
+                    // follow next ptr at +0x00
+                    uint32_t nxt = scanner.rpm_pub<uint32_t>((uintptr_t)llCur);
+                    if (nxt == llCur) break; // self-loop = end
+                    llCur = nxt;
+                }
+
+                // Probe firstElem sub-ptrs for L2Character (XY @ +0x24/+0x28)
+                uint32_t firstElem = scanner.rpm_pub<uint32_t>(klHead);
+                std::cerr << "[klist-probe] firstElem=0x" << std::hex << firstElem << "\n";
+                if (scanner.isValidPtr_pub(firstElem)) {
+                    static const uintptr_t FE_OFFS[] = {
+                        0x08,0x0c,0x10,0x14,0x18,0x1c,
+                        0x38,0x3c,0x40,0x44,0x48,
+                        0x68,0x6c,0x70,0x74,0x78,
+                        0xb0,0xb4,0xb8
+                    };
+                    for (uintptr_t fo : FE_OFFS) {
+                        uint32_t sub = scanner.rpm_pub<uint32_t>((uintptr_t)firstElem + fo);
+                        if (!scanner.isValidPtr_pub(sub)) continue;
+                        float fx = scanner.rpm_pub<float>((uintptr_t)sub + 0x24);
+                        float fy = scanner.rpm_pub<float>((uintptr_t)sub + 0x28);
+                        float fz = scanner.rpm_pub<float>((uintptr_t)sub + 0x2c);
+                        bool coord_xy = std::isfinite(fx) && std::fabsf(fx) > 5000.f
+                                     && std::isfinite(fy) && std::fabsf(fy) > 1000.f
+                                     && std::fabsf(fx) < 330000.f
+                                     && std::fabsf(fy) < 330000.f;
+                        std::cerr << "  firstElem+0x" << std::hex << fo
+                                  << " → 0x" << sub
+                                  << " XY@+0x24=(" << std::dec << (int)fx << "," << (int)fy
+                                  << "," << (int)fz << ")"
+                                  << (coord_xy ? " *** L2CHAR? ***" : "") << "\n";
+                    }
+                }
+
+                // Scan first buckets of hash map at buckPtr — check XY at multiple offsets
+                if (scanner.isValidPtr_pub(buckPtr) && buckCount > 0 && buckCount < 100000u) {
+                    std::cerr << "[klist-probe] Scanning " << std::dec << buckCount
+                              << " buckets @ 0x" << std::hex << buckPtr << "...\n";
+                    // XY offset candidates: player uses +0x24, render objs use +0x90
+                    static const uintptr_t XY_TRY[] = {0x18,0x1c,0x24,0x28,0x48,0x60,0x64,0x90,0x94};
+                    int mobs_found = 0, bucket_dumps = 0;
+                    float ppx = scanner.rpm_pub<float>(pb + 0x24);
+                    float ppy = scanner.rpm_pub<float>(pb + 0x28);
+                    for (uint32_t bi = 0; bi < buckCount && mobs_found < 10; bi++) {
+                        uint32_t nodePtr = scanner.rpm_pub<uint32_t>((uintptr_t)buckPtr + (uintptr_t)bi * 4);
+                        if (!scanner.isValidPtr_pub(nodePtr)) continue;
+                        // Dump raw structure of first few non-null bucket nodes
+                        if (bucket_dumps < 3) {
+                            std::cerr << "  bucket[" << std::dec << bi
+                                      << "] node=0x" << std::hex << nodePtr << " raw[0..12]:";
+                            for (int di = 0; di < 13; di++) {
+                                uint32_t dv = scanner.rpm_pub<uint32_t>((uintptr_t)nodePtr + (uintptr_t)di*4);
+                                std::cerr << " " << std::hex << dv;
+                            }
+                            std::cerr << "\n";
+                            bucket_dumps++;
+                        }
+                        // Try node and node+4..node+16 as L2Character*, check XY at multiple offsets
+                        for (uintptr_t ni = 0; ni <= 0x10; ni += 4) {
+                            uint32_t charPtr = (ni == 0) ? nodePtr
+                                : scanner.rpm_pub<uint32_t>((uintptr_t)nodePtr + ni);
+                            if (!scanner.isValidPtr_pub(charPtr)) continue;
+                            for (uintptr_t xoff : XY_TRY) {
+                                float fx = scanner.rpm_pub<float>((uintptr_t)charPtr + xoff);
+                                float fy = scanner.rpm_pub<float>((uintptr_t)charPtr + xoff + 4);
+                                if (!std::isfinite(fx) || std::fabsf(fx) < 5000.f
+                                 || !std::isfinite(fy) || std::fabsf(fy) < 1000.f
+                                 || std::fabsf(fx) > 330000.f || std::fabsf(fy) > 330000.f) continue;
+                                float dx = fx - ppx, dy = fy - ppy;
+                                float dist = std::sqrtf(dx*dx + dy*dy);
+                                std::cerr << "  bucket[" << std::dec << bi
+                                          << "] node+0x" << std::hex << ni << "→0x" << charPtr
+                                          << " XY@+0x" << xoff << "=("
+                                          << std::dec << (int)fx << "," << (int)fy
+                                          << ") dist=" << (int)dist << " *** L2CHAR xoff=0x"
+                                          << std::hex << xoff << " ***\n";
+                                mobs_found++;
+                                break;
+                            }
+                            if (mobs_found >= 10) break;
+                        }
+                    }
+                    if (!mobs_found)
+                        std::cerr << "[klist-probe] Жодного L2Char у hash buckets.\n";
+                }
+            }
+        }
+
         // Крок 3: CE reverse pointer scan → autoDiscoverKnownList
         uintptr_t klOff = scanner.autoDiscoverKnownList(pb, mobAddrs);
         if (klOff) {

@@ -12,6 +12,7 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <unordered_set>
 #include <csignal>
 #include <fcntl.h>
 #include <unistd.h>
@@ -353,24 +354,33 @@ std::vector<uintptr_t> OffsetScanner::reversePointerScan(uintptr_t target,
     return result;
 }
 
-// ── Auto-discover KnownList offset (forward scan) ────────────────────────────
-// Алгоритм (forward traversal, не reverse heap scan):
-//   1. Читаємо позицію гравця з pb+0x24/0x28
-//   2. Для кожного offset в pb+[0x80..0x300]:
-//      a. level1 = *(pb+off) — кандидат KnownList ptr (або C++ KL object ptr)
-//      b. Пробуємо arrPtr = level1 напряму (std::vector) АБО level1+sub (C++ object)
-//      c. Читаємо arrPtr як масив uint32 покажчиків на L2 об'єкти
-//      d. Для кожного ptr: перевіряємо *(ptr+0x90) як XY в L2 межах, поряд з гравцем
-//   3. Якщо 3+ об'єктів поряд → OFF_KNOWN_LIST = off, повертаємо
-// Час: < 2с (тільки targeted rpm() без повного heap scan).
+// ── Auto-discover KnownList offset (forward scan, MR42) ──────────────────────
+// Алгоритм (3-рівнева розвідка + діагностика структури):
+//   pb → level1 (KL C++ object) → level2 (embedded array field) → obj ptrs → XY
+//   або pb → level1 (flat array) → obj ptrs → XY
+//
+// Покращення vs MR41i:
+//   • sub діапазон 0x00..0x100 (C++ об'єкт може мати array ptr далеко)
+//   • 3-й рівень: level1→level2→arrPtr (підтримка глибших C++ containers)
+//   • MAX_DIST2 = 7000² (KnownList може тримати об'єкти до 7000 unit)
+//   • 11 XY offset кандидатів (0x18..0x90)
+//   • Діагностичний deep-dump pb+0x120 перших 32 dword
+//   • Якщо nearby≥1 але <3: печатаємо для аналізу (не повертаємо)
 uintptr_t OffsetScanner::autoDiscoverKnownList(uintptr_t playerBase,
                                                 const std::vector<uintptr_t>& knownObjAddrs) {
-    (void)knownObjAddrs; // Використовуємо forward scan — mob addrs не потрібні
+    (void)knownObjAddrs; // forward scan — mob addrs не потрібні
 
     if (!playerBase) return 0;
 
-    constexpr float WORLD_MIN = -327000.f, WORLD_MAX = 327000.f;
-    constexpr float MAX_DIST2 = 2500.f * 2500.f;
+    constexpr float WORLD_MIN  = -327000.f, WORLD_MAX  = 327000.f;
+    constexpr float MAX_DIST2  = 7000.f * 7000.f; // до 7000 unit від гравця
+    constexpr int   MIN_NEARBY = 4;   // потрібно 4+ nearby об'єктів
+    constexpr int   DENSITY_AT = 80;  // після 80 checked, nearby/checked ≥ 10%
+
+    // XY offset кандидати для L2Object: від дрібних (0x18) до великих (0x90)
+    static constexpr uintptr_t XY_OFFSETS[] = {
+        0x18, 0x1c, 0x24, 0x28, 0x48, 0x60, 0x64, 0x68, 0x78, 0x84, 0x90
+    };
 
     float px = rpm<float>(playerBase + 0x24);
     float py = rpm<float>(playerBase + 0x28);
@@ -378,64 +388,224 @@ uintptr_t OffsetScanner::autoDiscoverKnownList(uintptr_t playerBase,
         std::cerr << "[autoDiscoverKL] Невалідна позиція гравця (px=" << px << ")\n";
         return 0;
     }
-    std::cerr << "[autoDiscoverKL] Forward scan від pb=0x" << std::hex << playerBase
+    std::cerr << "[autoDiscoverKL] MR42 forward scan від pb=0x" << std::hex << playerBase
               << " XY=(" << std::dec << (int)px << "," << (int)py << ")\n";
 
-    // Перебираємо кандидати KnownList offset у pb+[0x80..0x300]
+    // testArray: скануємо arrBase як масив L2Object ptrs; повертає кількість nearby.
+    // Захисти від false positives:
+    //  1. Unique objects: один і той самий obj ptr не рахується двічі
+    //  2. Early density abort: якщо після 20 checked < 30% nearby → false positive
+    //  3. DENSITY_AT=80: якщо після 80 checked < 10% nearby → false positive
+    // verbose=true → друкує перші 10 об'єктів з XY для ручної валідації.
+    auto testArray = [&](uint32_t arrBase, bool verbose = false) -> int {
+        int nearby = 0, checked = 0, nulls = 0;
+        int printed = 0;
+        std::unordered_set<uint32_t> seen_objs;
+        seen_objs.reserve(64);
+        for (int i = 0; i < 2000; i++) {
+            uint32_t obj = rpm<uint32_t>((uintptr_t)arrBase + (uintptr_t)i * 4);
+            if (!isValidPtr(obj)) {
+                if (++nulls >= 8) break;
+                continue;
+            }
+            nulls = 0;
+            if (!seen_objs.insert(obj).second) continue; // дублікат → skip (false positive сигнал)
+            checked++;
+            bool found_xy = false;
+            float found_ox = 0.f, found_oy = 0.f;
+            uintptr_t found_xoff = 0;
+            for (uintptr_t xoff : XY_OFFSETS) {
+                float ox = rpm<float>((uintptr_t)obj + xoff);
+                float oy = rpm<float>((uintptr_t)obj + xoff + 4);
+                if (!isL2Coord(ox, WORLD_MIN, WORLD_MAX)) continue;
+                if (!isL2Coord(oy, WORLD_MIN, WORLD_MAX)) continue;
+                if (std::fabsf(ox) < 200.f || std::fabsf(oy) < 200.f) continue;
+                found_xy = true; found_ox = ox; found_oy = oy; found_xoff = xoff;
+                float dx = ox - px, dy = oy - py;
+                float d2 = dx*dx + dy*dy;
+                // dist > 200 units: виключаємо player's own fields (dist=0)
+                // dist < 7000 units: в межах KnownList
+                if (d2 > 200.f*200.f && d2 < MAX_DIST2) { nearby++; break; }
+            }
+            if (verbose && found_xy && printed < 10) {
+                float dx = found_ox - px, dy = found_oy - py;
+                float dist = std::sqrtf(dx*dx + dy*dy);
+                std::cerr << "    [obj " << std::dec << std::setw(2) << i
+                          << "] 0x" << std::hex << obj
+                          << " XY=(" << std::dec << (int)found_ox << "," << (int)found_oy
+                          << ") @+0x" << std::hex << found_xoff
+                          << " dist=" << std::dec << (int)dist
+                          << (dx*dx+dy*dy < MAX_DIST2 ? " <NEARBY>" : "") << "\n";
+                printed++;
+            }
+            // Early density abort #1: після 30 checked, nearby < 20% → false positive
+            if (checked >= 30 && nearby * 5 < checked) break;
+            // Early density abort #2: після DENSITY_AT checked, nearby < 10% → false positive
+            if (checked >= DENSITY_AT && nearby * 10 < checked) break;
+            if (!verbose && nearby >= MIN_NEARBY) break;
+        }
+        if (verbose)
+            std::cerr << "    total checked=" << std::dec << checked
+                      << " nearby=" << nearby << "\n";
+        return nearby;
+    };
+
+    // ── Діагностичний deep-dump pb+0x120 (відомий OFF_KNOWN_LIST) ───────────────
+    {
+        uint32_t kl_ptr = rpm<uint32_t>(playerBase + 0x120);
+        std::cerr << "[autoDiscoverKL] Deep dump pb+0x120 = 0x" << std::hex << kl_ptr << ":\n";
+        if (isValidPtr(kl_ptr)) {
+            for (int d = 0; d < 32; d++) {
+                uint32_t v = rpm<uint32_t>((uintptr_t)kl_ptr + (uintptr_t)d * 4);
+                std::cerr << "  0x" << std::hex << kl_ptr + (uintptr_t)d*4
+                          << " [+" << std::setw(3) << std::hex << (uint32_t)(d*4) << "] = 0x" << v;
+                if (isValidPtr(v)) std::cerr << " (ptr)";
+                std::cerr << "\n";
+            }
+        }
+        // ── Intrusive list probe via pb+0x120 sentinel ─────────────────────────────
+        // L2 може використовувати intrusive list: sentinel.next → list_node (embedded у L2Object)
+        // L2Object_base = node_addr - link_offset; XY = L2Object_base + 0x84 (або 0x90)
+        std::cerr << "[autoDiscoverKL] Intrusive list probe via pb+0x120:\n";
+        if (isValidPtr(kl_ptr)) {
+            uint32_t sentinel = kl_ptr;
+            // Спробуємо кілька link_offset значень (де в L2Object embedded list_link)
+            for (uint32_t link_off : {0u, 4u, 8u, 0xCu, 0x10u, 0x18u, 0x20u,
+                                      0x28u, 0x30u, 0x38u, 0x40u, 0x50u, 0x60u,
+                                      0x70u, 0x80u, 0x84u, 0x90u, 0x98u, 0xA0u}) {
+                uint32_t node = rpm<uint32_t>((uintptr_t)sentinel);  // sentinel.next
+                int count = 0, nearby_lk = 0;
+                while (isValidPtr(node) && node != sentinel && count < 200) {
+                    if (node >= link_off) {
+                        uint32_t obj_base = node - link_off;
+                        for (uintptr_t xoff : XY_OFFSETS) {
+                            float ox = rpm<float>((uintptr_t)obj_base + xoff);
+                            float oy = rpm<float>((uintptr_t)obj_base + xoff + 4);
+                            if (!isL2Coord(ox, WORLD_MIN, WORLD_MAX)) continue;
+                            if (!isL2Coord(oy, WORLD_MIN, WORLD_MAX)) continue;
+                            if (std::fabsf(ox) < 200.f || std::fabsf(oy) < 200.f) continue;
+                            float dx = ox - px, dy = oy - py;
+                            if (dx*dx + dy*dy < MAX_DIST2) { nearby_lk++; break; }
+                            break;
+                        }
+                    }
+                    node = rpm<uint32_t>((uintptr_t)node);  // node = node.next
+                    count++;
+                }
+                if (nearby_lk > 0)
+                    std::cerr << "  link_off=0x" << std::hex << link_off
+                              << " count=" << std::dec << count
+                              << " nearby=" << nearby_lk << "\n";
+                if (nearby_lk >= 3) {
+                    std::cerr << "[autoDiscoverKL] >>> INTRUSIVE LIST SUCCESS!\n"
+                              << "  sentinel=pb+0x120, link_offset=0x" << std::hex << link_off
+                              << " OFF_KNOWN_LIST=0x120\n";
+                    knownListOff = 0x120;
+                    return 0x120;
+                }
+            }
+            // Також спробуємо prev ptr (sentinel.prev → last node → traverse reverse)
+            uint32_t node = rpm<uint32_t>((uintptr_t)sentinel);
+            std::cerr << "  sentinel=0x" << std::hex << sentinel
+                      << " next=0x" << node;
+            node = rpm<uint32_t>((uintptr_t)sentinel + 4);
+            std::cerr << " prev=0x" << node << "\n";
+        }
+    }
+
+    uintptr_t best_off = 0;
+    int best_nearby    = 0;
+    uint32_t best_arr  = 0;
+
+    // ── Основний scan: pb+[0x80..0x300] ────────────────────────────────────────
     for (uintptr_t off = 0x80; off <= 0x300; off += 4) {
         uint32_t level1 = rpm<uint32_t>(playerBase + off);
         if (!isValidPtr(level1)) continue;
 
-        // Пробуємо level1 напряму (flat array) та level1+sub (C++ container object):
-        // sub=0: std::vector<L2Object*>::begin
-        // sub=4,8..0x40: поля всередині C++ KnownList object (vtable, size, capacity, begin...)
-        for (uintptr_t sub = 0; sub <= 0x40; sub += 4) {
-            uint32_t arrPtr = (sub == 0)
-                              ? level1
-                              : rpm<uint32_t>((uintptr_t)level1 + sub);
-            if (!isValidPtr(arrPtr)) continue;
-
-            int nearby   = 0;
-            int checked  = 0;
-            int nulls    = 0;
-
-            for (int i = 0; i < 2000 && nearby < 3; i++) {
-                uint32_t obj = rpm<uint32_t>((uintptr_t)arrPtr + (uintptr_t)i * 4);
-                if (!isValidPtr(obj)) {
-                    if (++nulls >= 16) break;
-                    continue;
-                }
-                nulls = 0;
-                checked++;
-
-                // Пробуємо OFF_OBJ_X=0x90 (L2Object) та OFF_PLAYER_X=0x24 (PlayerBase layout)
-                for (uintptr_t xoff : {(uintptr_t)0x90u, (uintptr_t)0x24u}) {
-                    float ox = rpm<float>((uintptr_t)obj + xoff);
-                    float oy = rpm<float>((uintptr_t)obj + xoff + 4);
-                    if (!isL2Coord(ox, WORLD_MIN, WORLD_MAX)) continue;
-                    if (!isL2Coord(oy, WORLD_MIN, WORLD_MAX)) continue;
-                    if (std::fabsf(ox) < 200.f || std::fabsf(oy) < 200.f) continue;
-                    float dx = ox - px, dy = oy - py;
-                    if (dx*dx + dy*dy < MAX_DIST2) { nearby++; break; }
-                }
-                // Якщо перевірили 100 і жодного nearby → явно не той масив
-                if (checked >= 100 && nearby == 0) break;
-            }
-
-            if (nearby >= 3) {
-                std::cerr << "[autoDiscoverKL] >>> SUCCESS!\n"
-                          << "  pb+0x" << std::hex << off << " → level1=0x" << level1
-                          << ", sub+0x" << sub << " → arr=0x" << arrPtr << "\n"
-                          << "  Nearby objects: " << std::dec << nearby << "\n"
+        // Рівень 1: level1 як пряма flat array
+        {
+            int n = testArray(level1);
+            if (n > best_nearby) { best_nearby = n; best_off = off; best_arr = level1; }
+            if (n >= MIN_NEARBY) {
+                testArray(level1, /*verbose=*/true);
+                std::cerr << "[autoDiscoverKL] >>> SUCCESS L1!\n"
+                          << "  pb+0x" << std::hex << off << " → arr=0x" << level1
+                          << " nearby=" << std::dec << n << "\n"
                           << "[autoDiscoverKL] OFF_KNOWN_LIST = 0x" << std::hex << off << "\n";
                 knownListOff = off;
                 return off;
             }
         }
+
+        // Рівень 2: level1 = C++ container object, level2 = embedded array ptr
+        for (uintptr_t sub = 4; sub <= 0x100; sub += 4) {
+            uint32_t level2 = rpm<uint32_t>((uintptr_t)level1 + sub);
+            if (!isValidPtr(level2)) continue;
+            if (level2 == level1) continue; // самопосилання
+
+            int n = testArray(level2);
+            if (n > best_nearby) { best_nearby = n; best_off = off; best_arr = level2; }
+            if (n >= MIN_NEARBY) {
+                testArray(level2, /*verbose=*/true);
+                std::cerr << "[autoDiscoverKL] >>> SUCCESS L2!\n"
+                          << "  pb+0x" << std::hex << off << " → level1=0x" << level1
+                          << " → sub+0x" << sub << " → arr=0x" << level2
+                          << " nearby=" << std::dec << n << "\n"
+                          << "[autoDiscoverKL] OFF_KNOWN_LIST = 0x" << std::hex << off << "\n";
+                knownListOff = off;
+                return off;
+            }
+
+            // Рівень 3: level2 = ще один C++ object
+            for (uintptr_t sub2 = 4; sub2 <= 0x80; sub2 += 4) {
+                uint32_t level3 = rpm<uint32_t>((uintptr_t)level2 + sub2);
+                if (!isValidPtr(level3)) continue;
+                if (level3 == level2 || level3 == level1) continue;
+
+                int n3 = testArray(level3);
+                if (n3 > best_nearby) { best_nearby = n3; best_off = off; best_arr = level3; }
+                if (n3 >= MIN_NEARBY) {
+                    testArray(level3, /*verbose=*/true);
+                    std::cerr << "[autoDiscoverKL] >>> SUCCESS L3!\n"
+                              << "  pb+0x" << std::hex << off
+                              << " → L1=0x" << level1
+                              << " →+0x" << sub << "→ L2=0x" << level2
+                              << " →+0x" << sub2 << "→ arr=0x" << level3
+                              << " nearby=" << std::dec << n3 << "\n"
+                              << "[autoDiscoverKL] OFF_KNOWN_LIST = 0x" << std::hex << off << "\n";
+                    knownListOff = off;
+                    return off;
+                }
+            }
+        }
     }
 
-    // Діагностика: виводимо всі валідні ptr у pb+[0x80..0x300]
-    std::cerr << "[autoDiscoverKL] Не знайдено. Валідні ptr у pb:\n";
+    // ── Фаза 2: пряме сканування embedded array (pb+off_direct = arr_start) ────
+    // Перевіряємо чи сам pb+off є масивом L2Object ptrs (без розіменування ptr).
+    // Застосовно для випадку де KnownList — fixed-size масив всередині struct гравця.
+    std::cerr << "[autoDiscoverKL] Direct embedded scan pb+[0x200..0x800]...\n";
+    for (uintptr_t off = 0x200; off <= 0x800; off += 4) {
+        uint32_t arr_direct = static_cast<uint32_t>(playerBase + off);
+        int n = testArray(arr_direct);
+        if (n > best_nearby) { best_nearby = n; best_off = off; best_arr = arr_direct; }
+        if (n >= MIN_NEARBY) {
+            testArray(arr_direct, /*verbose=*/true);
+            std::cerr << "[autoDiscoverKL] >>> SUCCESS DIRECT EMBEDDED!\n"
+                      << "  pb+0x" << std::hex << off << " (direct) arr=0x" << arr_direct
+                      << " nearby=" << std::dec << n << "\n"
+                      << "[autoDiscoverKL] OFF_KL_EMBEDDED = 0x" << std::hex << off << "\n";
+            // Зберігаємо з префіксом 0x80000000 щоб відрізнити від ptr-mode
+            knownListOff = off | 0x80000000u;
+            return off;
+        }
+    }
+
+    // Не знайдено — виводимо найкращого кандидата та повний ptr список
+    std::cerr << "[autoDiscoverKL] Не знайдено (MIN_NEARBY=" << std::dec << MIN_NEARBY << ").\n";
+    if (best_nearby > 0)
+        std::cerr << "  Найкращий кандидат: pb+0x" << std::hex << best_off
+                  << " arr=0x" << best_arr << " nearby=" << std::dec << best_nearby << "\n";
+    std::cerr << "[autoDiscoverKL] Валідні ptr у pb+[0x80..0x300]:\n";
     for (uintptr_t off = 0x80; off <= 0x300; off += 4) {
         uint32_t v = rpm<uint32_t>(playerBase + off);
         if (isValidPtr(v))
