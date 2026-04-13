@@ -961,15 +961,32 @@ int main(int argc, char* argv[]) {
                       << "Стань ближче до мобів.\n";
             return 1;
         }
-        std::cerr << "[discover-klist] Знайдено " << mobs.size() << " мобів:\n";
+        std::cerr << "[discover-klist] Знайдено " << mobs.size() << " мобів (всього)\n";
+
+        // Відбір для CE reverse scan: топ-30 за HP, мінімум HP≥1000.
+        // HP<1000 → false positive (render-буфер, navmesh node тощо).
+        // Лімітуємо 30 адресами — достатньо для autoDiscoverKnownList,
+        // і reverse scan завершується за ~30с замість 10+ хвилин.
+        std::sort(mobs.begin(), mobs.end(),
+                  [](const L2Character& a, const L2Character& b){ return a.hp > b.hp; });
         std::vector<uintptr_t> mobAddrs;
+        std::cerr << "[discover-klist] Топ мобів для CE scan (HP≥1000):\n";
         for (const auto& m : mobs) {
+            if (m.hp < 1000.f) break; // відсортовано за спаданням, далі все менше
+            if (mobAddrs.size() >= 30) break;
             std::cerr << "  memPtr=0x" << std::hex << m.memPtr
                       << " X=" << std::dec << (int)m.x
                       << " Y=" << (int)m.y
                       << " HP=" << (int)m.hp << "\n";
             mobAddrs.push_back(m.memPtr);
         }
+        if (mobAddrs.empty()) {
+            std::cerr << "[discover-klist] Жодного моба з HP≥1000. "
+                      << "Стань ближче до живих мобів.\n";
+            return 1;
+        }
+        std::cerr << "[discover-klist] " << std::dec << mobAddrs.size()
+                  << " адрес передано CE reverse scan.\n";
 
         // Крок 3: CE reverse pointer scan → autoDiscoverKnownList
         uintptr_t klOff = scanner.autoDiscoverKnownList(pb, mobAddrs);

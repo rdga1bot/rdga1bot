@@ -301,10 +301,10 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                     m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
                 if (typeRaw != 0) continue; // тільки Mob
 
-                // HP validation: реальний L2 об'єкт ЗАВЖДИ має HP >= 0.
-                // Від'ємний HP = довільна пам'ять що випадково пройшла XYZ фільтр.
+                // HP validation: реальний L2 моб ЗАВЖДИ має HP > 0.
+                // HP=0 = мертвий або довільна пам'ять; HP<0 = сміттєва пам'ять.
                 float hp = rpm<float>(objBase + m_off.charHpOff);
-                if (!std::isfinite(hp) || hp < 0.f || hp > 500000.f) continue;
+                if (!std::isfinite(hp) || hp <= 0.f || hp > 500000.f) continue;
 
                 L2Character ch;
                 ch.memPtr = objBase;
