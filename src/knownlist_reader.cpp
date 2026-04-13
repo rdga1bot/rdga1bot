@@ -301,18 +301,21 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                     m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
                 if (typeRaw != 0) continue; // тільки Mob
 
-                // HP validation: реальний L2 моб ЗАВЖДИ має HP > 0.
-                // HP=0 = мертвий або довільна пам'ять; HP<0 = сміттєва пам'ять.
-                float hp = rpm<float>(objBase + m_off.charHpOff);
-                if (!std::isfinite(hp) || hp <= 0.f || hp > 500000.f) continue;
+                // HP: render_node+0x58 → game_obj → +0x14 (uint32, NOT float).
+                // render_node+0x100 reads interpolated X — do NOT use as HP.
+                uint32_t gObjPtr = rpm<uint32_t>(objBase + OFF_GAME_OBJ_PTR);
+                if (!isValidPtr((uintptr_t)gObjPtr)) continue;
+                uint32_t hp_u32 = rpm<uint32_t>((uintptr_t)gObjPtr + OFF_GAME_OBJ_HP);
+                if (hp_u32 == 0 || hp_u32 > 500000u) continue;
+                float hp = static_cast<float>(hp_u32);
 
                 L2Character ch;
                 ch.memPtr = objBase;
                 ch.type   = L2ObjectType::Mob;
                 ch.x = x; ch.y = y; ch.z = z;
                 ch.hp     = hp;
-                ch.hpMax  = rpm<float>  (objBase + m_off.charHpMaxOff);
-                ch.isDead = rpm<int32_t>(objBase + m_off.charIsDeadOff) != 0;
+                ch.hpMax  = 0.f;   // N/A — не зберігається окремо
+                ch.isDead = false;  // hp_u32 > 0 вже підтверджено вище
 
                 // Читаємо назву якщо OFF_OBJ_NAME відкалібровано
                 if (OFF_OBJ_NAME != 0) {

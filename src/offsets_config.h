@@ -29,10 +29,16 @@ constexpr uintptr_t OFF_OBJ_X        = 0x90;   // float  — world X (підтв
 constexpr uintptr_t OFF_OBJ_Y        = 0x94;   // float  — world Y
 constexpr uintptr_t OFF_OBJ_Z        = 0x98;   // float  — world Z
 
-// L2Character extra offsets (відкалібровано ElmoreLab Kamael 2026-04-02)
-constexpr uintptr_t OFF_CHAR_HP      = 0x100;  // float  — HP (підтверджено: 87.22→0.00 після kill)
+// render_node → game_obj → HP (MR43: 2-hop via game object, підтверджено 2026-04-14)
+// render_node+0x58 = ptr → game_obj; game_obj+0x14 = current HP (uint32, NOT float!)
+// render_node+0x100 = interpolated X (WRONG HP offset — не використовувати для HP!)
+constexpr uintptr_t OFF_GAME_OBJ_PTR = 0x58;   // render_node → game_obj ptr (uint32)
+constexpr uintptr_t OFF_GAME_OBJ_HP  = 0x14;   // game_obj → current HP (uint32, NOT float!)
+
+// L2Character extra offsets (LEGACY — використовуються лише для readMobs/readAllAsChars через KnownList ptr)
+constexpr uintptr_t OFF_CHAR_HP      = 0x100;  // WARNING: reads interpolated X, NOT real HP (broken)
 constexpr uintptr_t OFF_CHAR_HP_MAX  = 0x000;  // N/A    — ElmoreLab не зберігає MaxHP в KnownList
-constexpr uintptr_t OFF_CHAR_IS_DEAD = 0x180;  // int32  — 1=мертвий (підтверджено: 0→1 після kill)
+constexpr uintptr_t OFF_CHAR_IS_DEAD = 0x180;  // WARNING: reads 0x80000000 for live mobs (broken)
 
 // L2Character extended offsets (потребують калібровки через --calibrate)
 // MP гравця/моба — типові HF значення, перевір через HP scan в --calibrate

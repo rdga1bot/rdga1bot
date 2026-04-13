@@ -183,13 +183,19 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
     m_mob_died_this_tick.store(false, std::memory_order_relaxed); // atomic — не потребує mutex
     std::lock_guard<std::mutex> lk(m_mutex);
     if (m_target.has_value() && m_target->memPtr) {
+        // MR43: 2-hop HP read via game_obj (render_node+0x58 → game_obj → +0x14, uint32)
+        // render_node+0x100 = interpolated X (NOT HP), render_node+0x180 = always 0x80000000 (NOT isDead)
+        uint32_t gObjPtr = 0;
+        ProcessMemory::Read(m_pid, m_target->memPtr + OFF_GAME_OBJ_PTR, &gObjPtr, 4);
         float hp = 0.f;
-        int32_t dead = 0;
-        ProcessMemory::Read(m_pid,m_target->memPtr + m_off.charHpOff,     &hp,   4);
-        ProcessMemory::Read(m_pid,m_target->memPtr + m_off.charIsDeadOff, &dead, 4);
+        if (gObjPtr > 0x10000 && gObjPtr < 0xBFFF0000) {
+            uint32_t hp_u32 = 0;
+            ProcessMemory::Read(m_pid, (uintptr_t)gObjPtr + OFF_GAME_OBJ_HP, &hp_u32, 4);
+            hp = static_cast<float>(hp_u32);
+        }
         m_target->hp     = hp;
-        m_target->isDead = (dead != 0);
-        if (m_target->isDead || hp <= 0.f) {
+        m_target->isDead = (hp <= 0.f);
+        if (m_target->isDead) {
             m_mob_died_this_tick.store(true, std::memory_order_relaxed);
         }
     }
