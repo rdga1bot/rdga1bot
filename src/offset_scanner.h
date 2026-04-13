@@ -107,9 +107,12 @@ private:
     // Внутрішня реалізація blindScan без таймауту
     uintptr_t performBlindScan();
 
+    enum class MemRegionType : uint8_t { Heap, Exe, Misc };
+
     struct MemRegion {
-        uintptr_t base = 0;
-        size_t    size = 0;
+        uintptr_t     base = 0;
+        size_t        size = 0;
+        MemRegionType type = MemRegionType::Misc;
     };
 
     // Читабельні регіони з /proc/<pid>/maps (r-- або rw-), розмір ≤ 64MB

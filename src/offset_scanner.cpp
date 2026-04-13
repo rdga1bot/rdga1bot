@@ -11,7 +11,11 @@
 #include <chrono>
 #include <vector>
 #include <map>
+#include <algorithm>
 #include <csignal>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
 
 static constexpr size_t MAX_REGION_SIZE = 64 * 1024 * 1024; // 64 MB
 
@@ -52,7 +56,21 @@ std::vector<OffsetScanner::MemRegion> OffsetScanner::getReadableRegions() const 
         if (start < 0x10000u)     continue;  // нульова сторінка
         if (start >= 0xC0000000u) continue;  // Wine 32-bit: вище 3GB = kernel
 
-        result.push_back({start, sz});
+        // Класифікація типу регіону — scanmem maps_get_pathname_type() стиль (пункт 3+4)
+        MemRegionType rtype = MemRegionType::Misc;
+        if (std::strstr(pathname, "[heap]")) {
+            rtype = MemRegionType::Heap;
+        } else if (pathname[0] == '\0') {
+            // Анонімний регіон: з x-правами = Exe (Wine PE text / JIT),
+            // без x і inode=0 = Heap (anonymous mmap, Wine heap)
+            if (perms[2] == 'x')   rtype = MemRegionType::Exe;
+            else if (inode == 0)   rtype = MemRegionType::Heap;
+        } else if (perms[2] == 'x') {
+            // Named executable: Wine PE секції (l2.exe .text, .data)
+            rtype = MemRegionType::Exe;
+        }
+
+        result.push_back({start, sz, rtype});
     }
     std::fclose(f);
     return result;
@@ -108,16 +126,35 @@ uintptr_t OffsetScanner::performBlindScan() {
     constexpr float WORLD_Z_MIN  = -16000.f;
     constexpr float WORLD_Z_MAX  =  16000.f;
 
-    const auto regions = getReadableRegions();
+    auto regions = getReadableRegions();
+    // Пріоритет сканування: Heap та Exe перед Misc (scanmem strategy — пункт 3)
+    std::stable_partition(regions.begin(), regions.end(),
+                          [](const MemRegion& r){ return r.type != MemRegionType::Misc; });
     size_t total_bytes = 0;
     for (const auto& r : regions) total_bytes += r.size;
     std::cerr << "[OffsetScanner] blindScan: " << regions.size() << " регіонів, "
               << (total_bytes / 1024 / 1024) << " MB\n";
 
+    // Відкрити /proc/pid/mem для pread — надійніший за process_vm_readv (пункти 1+2)
+    char _mempath[64];
+    std::snprintf(_mempath, sizeof(_mempath), "/proc/%d/mem", (int)m_pid);
+    int memfd = ::open(_mempath, O_RDONLY);
+    if (memfd < 0) {
+        std::cerr << "[OffsetScanner] " << _mempath
+                  << " недоступний (" << std::strerror(errno)
+                  << ") — fallback до process_vm_readv\n";
+    }
+
     std::vector<uint8_t> buf;
     for (const auto& region : regions) {
         buf.resize(region.size);
-        if (!readBytes(region.base, buf.data(), region.size)) continue;
+        if (memfd >= 0) {
+            ssize_t nread = ::pread(memfd, buf.data(), region.size, (off_t)region.base);
+            if (nread <= 0) continue;
+            buf.resize((size_t)nread); // часткове читання → скорочуємо до реальних байтів
+        } else {
+            if (!readBytes(region.base, buf.data(), region.size)) continue;
+        }
 
         // Helper: читає uint32 з buf[] якщо addr потрапляє в регіон, інакше rpm fallback.
         auto readU32fromBuf = [&](uintptr_t addr, uint32_t& out) -> bool {
@@ -200,10 +237,12 @@ uintptr_t OffsetScanner::performBlindScan() {
             uintptr_t candidate = region.base + i;
             std::cerr << "[OffsetScanner] blindScan: PlayerBase=0x" << std::hex << candidate
                       << " XYZ=(" << std::dec << (int)px << "," << (int)py << "," << (int)pz << ")\n";
+            if (memfd >= 0) ::close(memfd);
             return candidate;
         }
     }
 
+    if (memfd >= 0) ::close(memfd);
     std::cerr << "[OffsetScanner] blindScan: PlayerBase не знайдено\n";
     return 0;
 }
