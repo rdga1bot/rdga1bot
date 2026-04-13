@@ -353,88 +353,95 @@ std::vector<uintptr_t> OffsetScanner::reversePointerScan(uintptr_t target,
     return result;
 }
 
-// ── Auto-discover KnownList offset ───────────────────────────────────────────
-// Алгоритм (CE pointer scanner техніка):
-//   1. Для кожного moб addr: reversePointerScan → набір адрес що тримають pointer на моба
-//   2. "Контейнер" = адреса X така що X-N*4..X+N*4 тримають pointers на різних мобів
-//      (тобто це масив/список покажчиків)
-//   3. Перевіряємо playerBase+[0x80..0x300] крок 4:
-//      чи ptr @ offset вказує всередину якогось контейнера
-//   4. Виводимо дамп для аналізу + повертаємо перший знайдений offset.
+// ── Auto-discover KnownList offset (forward scan) ────────────────────────────
+// Алгоритм (forward traversal, не reverse heap scan):
+//   1. Читаємо позицію гравця з pb+0x24/0x28
+//   2. Для кожного offset в pb+[0x80..0x300]:
+//      a. level1 = *(pb+off) — кандидат KnownList ptr (або C++ KL object ptr)
+//      b. Пробуємо arrPtr = level1 напряму (std::vector) АБО level1+sub (C++ object)
+//      c. Читаємо arrPtr як масив uint32 покажчиків на L2 об'єкти
+//      d. Для кожного ptr: перевіряємо *(ptr+0x90) як XY в L2 межах, поряд з гравцем
+//   3. Якщо 3+ об'єктів поряд → OFF_KNOWN_LIST = off, повертаємо
+// Час: < 2с (тільки targeted rpm() без повного heap scan).
 uintptr_t OffsetScanner::autoDiscoverKnownList(uintptr_t playerBase,
                                                 const std::vector<uintptr_t>& knownObjAddrs) {
-    if (knownObjAddrs.empty()) {
-        std::cerr << "[discover-klist] Немає mob addresses — стань поряд з мобами\n";
+    (void)knownObjAddrs; // Використовуємо forward scan — mob addrs не потрібні
+
+    if (!playerBase) return 0;
+
+    constexpr float WORLD_MIN = -327000.f, WORLD_MAX = 327000.f;
+    constexpr float MAX_DIST2 = 2500.f * 2500.f;
+
+    float px = rpm<float>(playerBase + 0x24);
+    float py = rpm<float>(playerBase + 0x28);
+    if (!isL2Coord(px, WORLD_MIN, WORLD_MAX) || !isL2Coord(py, WORLD_MIN, WORLD_MAX)) {
+        std::cerr << "[autoDiscoverKL] Невалідна позиція гравця (px=" << px << ")\n";
         return 0;
     }
+    std::cerr << "[autoDiscoverKL] Forward scan від pb=0x" << std::hex << playerBase
+              << " XY=(" << std::dec << (int)px << "," << (int)py << ")\n";
 
-    std::cerr << "[discover-klist] Reverse pointer scan для " << knownObjAddrs.size()
-              << " мобів...\n";
-
-    // Крок 1: для кожного моба — знайти всі покажчики на нього
-    // ptr_containers[container_addr] = кількість мобів що мають pointer в цьому контейнері
-    // container = адреса вирівняна на 0x40 (64 bytes) → групуємо близькі покажчики
-    std::map<uintptr_t, int> container_score;
-
-    for (uintptr_t mobAddr : knownObjAddrs) {
-        auto ptrs = reversePointerScan(mobAddr, 64);
-        std::cerr << "  mob=0x" << std::hex << mobAddr << " → " << std::dec
-                  << ptrs.size() << " покажчиків\n";
-        for (uintptr_t ptrAddr : ptrs) {
-            // Округляємо до блоку 0x40 — отримуємо "контейнер"
-            uintptr_t container = ptrAddr & ~(uintptr_t)0x3F;
-            container_score[container]++;
-        }
-    }
-
-    // Крок 2: відбираємо контейнери де score >= 2 (тримають >= 2 різних мобів)
-    // (якщо mob'ів < 2 — беремо score >= 1)
-    const int min_score = (knownObjAddrs.size() >= 2) ? 2 : 1;
-    std::vector<uintptr_t> candidates;
-    std::cerr << "[discover-klist] Контейнери (score >= " << min_score << "):\n";
-    for (const auto& [addr, score] : container_score) {
-        if (score >= min_score) {
-            std::cerr << "  container=0x" << std::hex << addr
-                      << " score=" << std::dec << score << "\n";
-            candidates.push_back(addr);
-        }
-    }
-
-    if (candidates.empty()) {
-        std::cerr << "[discover-klist] Жодного контейнера не знайдено\n";
-        return 0;
-    }
-
-    // Крок 3: скануємо playerBase + [0x80..0x300] на pointer до container (або всередину)
-    std::cerr << "[discover-klist] Пошук offsets від PlayerBase=0x"
-              << std::hex << playerBase << ":\n";
-    uintptr_t best = 0;
-
+    // Перебираємо кандидати KnownList offset у pb+[0x80..0x300]
     for (uintptr_t off = 0x80; off <= 0x300; off += 4) {
-        uintptr_t val = static_cast<uintptr_t>(rpm<uint32_t>(playerBase + off));
-        if (!isValidPtr(val)) continue;
-        for (uintptr_t cand : candidates) {
-            // val вказує в межах контейнера [cand .. cand+0xFF]
-            if (val >= cand && val < cand + 0x100) {
-                std::cerr << "  >>> offset=0x" << std::hex << off
-                          << " pb[off]=0x" << val
-                          << " → container=0x" << cand << std::dec << "\n";
-                if (!best) {
-                    best = off;
-                    knownListOff = off;
+        uint32_t level1 = rpm<uint32_t>(playerBase + off);
+        if (!isValidPtr(level1)) continue;
+
+        // Пробуємо level1 напряму (flat array) та level1+sub (C++ container object):
+        // sub=0: std::vector<L2Object*>::begin
+        // sub=4,8..0x40: поля всередині C++ KnownList object (vtable, size, capacity, begin...)
+        for (uintptr_t sub = 0; sub <= 0x40; sub += 4) {
+            uint32_t arrPtr = (sub == 0)
+                              ? level1
+                              : rpm<uint32_t>((uintptr_t)level1 + sub);
+            if (!isValidPtr(arrPtr)) continue;
+
+            int nearby   = 0;
+            int checked  = 0;
+            int nulls    = 0;
+
+            for (int i = 0; i < 2000 && nearby < 3; i++) {
+                uint32_t obj = rpm<uint32_t>((uintptr_t)arrPtr + (uintptr_t)i * 4);
+                if (!isValidPtr(obj)) {
+                    if (++nulls >= 16) break;
+                    continue;
                 }
+                nulls = 0;
+                checked++;
+
+                // Пробуємо OFF_OBJ_X=0x90 (L2Object) та OFF_PLAYER_X=0x24 (PlayerBase layout)
+                for (uintptr_t xoff : {(uintptr_t)0x90u, (uintptr_t)0x24u}) {
+                    float ox = rpm<float>((uintptr_t)obj + xoff);
+                    float oy = rpm<float>((uintptr_t)obj + xoff + 4);
+                    if (!isL2Coord(ox, WORLD_MIN, WORLD_MAX)) continue;
+                    if (!isL2Coord(oy, WORLD_MIN, WORLD_MAX)) continue;
+                    if (std::fabsf(ox) < 200.f || std::fabsf(oy) < 200.f) continue;
+                    float dx = ox - px, dy = oy - py;
+                    if (dx*dx + dy*dy < MAX_DIST2) { nearby++; break; }
+                }
+                // Якщо перевірили 100 і жодного nearby → явно не той масив
+                if (checked >= 100 && nearby == 0) break;
+            }
+
+            if (nearby >= 3) {
+                std::cerr << "[autoDiscoverKL] >>> SUCCESS!\n"
+                          << "  pb+0x" << std::hex << off << " → level1=0x" << level1
+                          << ", sub+0x" << sub << " → arr=0x" << arrPtr << "\n"
+                          << "  Nearby objects: " << std::dec << nearby << "\n"
+                          << "[autoDiscoverKL] OFF_KNOWN_LIST = 0x" << std::hex << off << "\n";
+                knownListOff = off;
+                return off;
             }
         }
     }
 
-    if (!best)
-        std::cerr << "[discover-klist] Offset не знайдено. "
-                  << "Спробуй стати ближче до більшої кількості мобів.\n";
-    else
-        std::cerr << "[discover-klist] Знайдено OFF_KNOWN_LIST=0x"
-                  << std::hex << best << " → оновіть offsets_config.h\n" << std::dec;
-
-    return best;
+    // Діагностика: виводимо всі валідні ptr у pb+[0x80..0x300]
+    std::cerr << "[autoDiscoverKL] Не знайдено. Валідні ptr у pb:\n";
+    for (uintptr_t off = 0x80; off <= 0x300; off += 4) {
+        uint32_t v = rpm<uint32_t>(playerBase + off);
+        if (isValidPtr(v))
+            std::cerr << "  pb+0x" << std::hex << off << " = 0x" << v << "\n";
+    }
+    return 0;
 }
 
 // ── Крок 3: калібрування offsets об'єкту ─────────────────────────────────────
