@@ -7,7 +7,7 @@
 - Папка: ~/l2bot/rdga1bot/
 - Build: bash build.sh && ./launch.sh
 
-## Поточний стан (2026-04-12)
+## Поточний стан (2026-04-14)
 - **BotBehaviorTree** — єдиний планувальник (ObjectiveManager видалено в MR20c)
 - **MR26** — MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B JSONL, ShadowMode=false)
 - **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
@@ -21,10 +21,17 @@
 - **MR35** — playerBaseCache з offsets.json використовується до blindScan (Attempt 0)
 - **MR36** — видалено Options.cpp/.h (legacy dead code від l2cvbot)
 - **MR37** — FeatureLogInterval: `[RL-F]` рядок у session log кожні N тіків (default 300)
+- **MR38** — blindScan reliability fix + scanmem-style maps parser
+- **MR39** — scanmem-style region types + pread + priority scan
+- **MR41** — CE reverse scan → forward scan; HP>0 filter + топ-30 ліміт
+- **MR42** — діагностика: render_node дамп + game_obj pool сканування + range ptr scan
+- **MR43** — **HP FIX**: render_node+0x58 → game_obj → +0x14 = HP (uint32, NOT float!)
+  - render_node+0x100 = interpolated X (не HP!), render_node+0x180 = 0x80000000 (не isDead!)
+  - `isAlive()` тепер повертає `true` для живих мобів; kill detection виправлено
 - **NavMesh tools** — `scripts/navmesh_preview.py` (2D), `scripts/navmesh_3d.py` (Detour binary → 3D mesh)
 - **NavMesh LoA** — `navmesh_loa.pts` (648 чистих точок), `navmesh_loa.bin` (304 полігони, 985 трикутників)
   - Координатне відображення: L2_X→Recast_X, L2_Z(висота)→Recast_Y(up), L2_Y→Recast_Z
-- **Наступні пріоритети**: live farm → спостерігати `[RL-F]` features + epsilon decay, дебаг KnownList
+- **Наступні пріоритети**: live farm → перевірити kl_alive_count > 0, спостерігати kill detection + RL features
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
