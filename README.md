@@ -29,8 +29,9 @@ C++ бот для автоматизації фарму в Lineage II.
 
 **Memory reading (KnownList)**
 - `process_vm_readv` — без root, без Cheat Engine, без Windows API
-- `blindScan()` — автономний пошук PlayerBase без відомих offsets
-- Region scan heap: XYZ triplet scan → тип/HP/isDead/ім'я/level
+- `blindScan()` — автономний пошук PlayerBase; atomic abort при таймауті
+- Region scan heap: XYZ triplet scan → тип/HP/isDead/ім'я/level (KL_MAX_OBJECTS=2000)
+- HP читання (MR43): render_node+0x58 → game_obj → +0x14 = HP (uint32, NOT float)
 - Thread-safe WorldState (snapshot copy під mutex, bgLoop scan кожну 1с)
 - Зважений вибір цілі: `[WeightedTargeting]` — scoring по відстані/HP/freshness
 - `--dump-objects` / `--calibrate [--name "X"]` — калібровка без Cheat Engine
@@ -38,6 +39,8 @@ C++ бот для автоматизації фарму в Lineage II.
 **BehaviorTree планувальник (MR20, MR27-28)**
 - Stackless BT VM: `BTNode` (24 bytes), `BTState` (8 bytes), плоскі масиви — без heap, без рекурсії
 - Гілки: Dead → Rest → Zone → Buff → Loot → Attack → Target Selector (7 вузлів, ~22 загалом)
+- VM_MAX_STEPS=10000 guard — захист від нескінченного циклу при corrupt tree state
+- GoogleTest suite: `tests/bt_test.cpp` + `tests/memory_test.cpp` (14 тестів, `make -C tests run`)
 - Target піддерево (MR28): Init → DeadTarget → Minimap → F2AndMacro → Navigation → GeoPath → Patrol
 - `thread_local s_self` — static Action/Condition функції безпечно звертаються до стану
 
@@ -54,6 +57,7 @@ C++ бот для автоматизації фарму в Lineage II.
 - GeodataWorker: async A* FindPath (Core 3, `[Threading] GeodataThread`)
 - LearningWorker: async IRLS batch update (`[Learning] Enabled=true`)
 - Всі воркери `Enabled=false` за замовчуванням — зворотна сумісність збережена
+- weights.json: авто-збереження ваг при shutdown, двопрохідна валідація при завантаженні
 
 **Антидетект**
 - RandomDelay: нормальний розподіл затримок між атаками, поворотами, ходьбою
@@ -72,8 +76,8 @@ C++ бот для автоматизації фарму в Lineage II.
 **Автоматика**
 - Авто-зілля HP/MP/CP з кулдауном 5с
 - Dead detection: Enter → 20с → grace 30с → відновлення фарму
-- Telegram сповіщення: смерть + статистика (через fork+curl)
-- Авто-збереження stats кожні N kills + `/tmp/rdga1bot_stats.json` live export
+- Telegram сповіщення: смерть + статистика (через fork+curl, ліміт 3 паралельні)
+- Авто-збереження stats кожні N kills + `/tmp/rdga1bot_stats.json` live export (очищається при старті)
 
 **TUI Dashboard (ncurses)**
 - HP/MP/CP бари персонажа, HP цілі, kills/deaths, K/D ratio
@@ -209,8 +213,8 @@ Capture_Linux.cpp      — XShm screen capture
 Intercept_Linux.cpp    — XTest backend (XTestFakeKeyEvent)
 Window_Linux.cpp       — X11 window finding (кешований)
 MemReader.cpp/.h       — читання HP/MP/CP/XYZ гравця з пам'яті Wine
-OffsetScanner          — blindScan(timeoutMs), calibrateHeadingOffset(), findNameOffset()
-KnownListReader        — region scan мобів, readName(), findMobByName()
+OffsetScanner          — blindScan(timeoutMs+abort), calibrateHeadingOffset(), findNameOffset()
+KnownListReader        — region scan мобів (KL_MAX_OBJECTS=2000), readName(), findMobByName()
 WorldState             — thread-safe агрегатор KnownList
 Geodata.cpp/.h         — L2J геодата: Load(), CanMoveTo(), A* FindPath()
 RandomDelay.h          — нормальний розподіл затримок (антидетект)
@@ -231,3 +235,4 @@ Stats.cpp/.h           — статистика сесії + JSON лог + /tmp 
 - libx11, libxtst (XTest), libxext (XShm)
 - curl (для Telegram, опціонально)
 - Python 3.x + scikit-learn (для QA Monitor, опціонально)
+- googletest (для тестів: `make -C tests run`, опціонально)
