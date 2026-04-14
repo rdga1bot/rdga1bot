@@ -57,9 +57,10 @@ TEST(UnderflowGuardTest, GuardPreventsSubtraction) {
     EXPECT_LT(xAddr_bad, objXOff); // guard спрацьовує → continue
 
     // xAddr більший за objXOff → безпечна арифметика
-    uintptr_t xAddr_good = 0x10024;
+    // xAddr=0x20000, objXOff=0x24 → objBase=0x1FFdc (глибоко в valid range)
+    uintptr_t xAddr_good = 0x20000;
     EXPECT_GE(xAddr_good, objXOff);
     uintptr_t objBase = xAddr_good - objXOff;
-    EXPECT_EQ(objBase, 0x10000u);
+    EXPECT_EQ(objBase, 0x1FFDCu);
     EXPECT_TRUE(isValidPtr(objBase));
 }

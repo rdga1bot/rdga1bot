@@ -29,8 +29,7 @@ BT_SRCS := bt_test.cpp \
             $(SRC)/Intercept.cpp \
             $(SRC)/Intercept_Linux.cpp \
             $(SRC)/Config.cpp \
-            $(SRC)/Stats.cpp \
-            $(SRC)/RandomDelay.cpp
+            $(SRC)/Stats.cpp
 
 MEMORY_SRCS := memory_test.cpp
 

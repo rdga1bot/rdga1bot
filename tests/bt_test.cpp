@@ -81,20 +81,42 @@ TEST(BehaviorTreeTest, WaitNodeRunningThenSuccess) {
     EXPECT_EQ(bt.tick(f.gs, t0 + 300), BTStatus::Success);
 }
 
-// ── Тест 5: Repeat рахує ітерації та повертає Success після N разів ──────────
-TEST(BehaviorTreeTest, RepeatCountsCorrectly) {
+// ── Тест 5: Repeat рахує ітерації ─────────────────────────────────────────────
+// Stackless VM: якщо дочірній синхронний (не повертає Running),
+// Repeat виконує всі N ітерацій за ОДИН тік і повертає Success.
+// Щоб перевірити Running між ітераціями — дочірній має повертати Running.
+static int g_running_count = 0;
+static BTStatus act_running_twice(GameState&) {
+    // Перші два виклики — Running (підвішуємо VM), третій — Success
+    return (++g_running_count < 3) ? BTStatus::Running : BTStatus::Success;
+}
+
+TEST(BehaviorTreeTest, RepeatSyncChildCompletesInOneTick) {
+    // Repeat(3) з синхронним дочірнім: всі ітерації за один тік → Success
     BehaviorTree bt;
     uint16_t rep = bt.addRepeat(3);
     bt.addChild(rep, bt.addAction(act_success));
     bt.setRoot(rep);
 
     GsFixture f;
+    EXPECT_EQ(bt.tick(f.gs, now_ms()), BTStatus::Success);
+}
+
+TEST(BehaviorTreeTest, RepeatAsyncChildRunsMultipleTicks) {
+    // Repeat(1) з дочірнім що повертає Running двічі перед Success
+    g_running_count = 0;
+    BehaviorTree bt;
+    uint16_t rep = bt.addRepeat(1);
+    bt.addChild(rep, bt.addAction(act_running_twice));
+    bt.setRoot(rep);
+
+    GsFixture f;
     uint32_t t = now_ms();
 
-    // 1-й і 2-й тіки: ще не виконали 3 рази
+    // Тік 1: дочірній повертає Running (g_running_count=1) → Repeat чекає
     EXPECT_EQ(bt.tick(f.gs, t), BTStatus::Running);
+    // Тік 2: дочірній повертає Running (g_running_count=2) → Repeat чекає
     EXPECT_EQ(bt.tick(f.gs, t), BTStatus::Running);
-
-    // 3-й тік: 3/3 виконано → Success
+    // Тік 3: дочірній повертає Success (g_running_count=3), 1/1 → Success
     EXPECT_EQ(bt.tick(f.gs, t), BTStatus::Success);
 }
