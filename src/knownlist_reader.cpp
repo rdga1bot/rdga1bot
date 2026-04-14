@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "knownlist_reader.h"
 #include "offsets_config.h"
 #include "ProcessMemory.h"
@@ -29,7 +30,7 @@ std::vector<L2Object> KnownListReader::readAll(uintptr_t playerBase) const {
     // Kamael client: +0x124 — NOT a count (it's a pointer). Use sentinel iteration.
     // Sparse arrays may have null gaps → continue; only 8 consecutive nulls = end.
     int null_streak = 0;
-    for (int i = 0; i < 2000; ++i) {
+    for (int i = 0; i < KL_MAX_OBJECTS; ++i) {
         uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
         if (!isValidPtr(objPtr)) {
             if (++null_streak >= 8) break;
@@ -66,7 +67,7 @@ std::vector<L2Character> KnownListReader::readMobs(uintptr_t playerBase) const {
     if (!isValidPtr(knownListPtr)) return result;
 
     int null_streak2 = 0;
-    for (int i = 0; i < 2000; ++i) {
+    for (int i = 0; i < KL_MAX_OBJECTS; ++i) {
         uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
         if (!isValidPtr(objPtr)) {
             if (++null_streak2 >= 8) break;
@@ -114,7 +115,7 @@ std::vector<L2Character> KnownListReader::readAllAsChars(uintptr_t playerBase) c
     if (!isValidPtr(knownListPtr)) return result;
 
     int null_streak = 0;
-    for (int i = 0; i < 2000; ++i) {
+    for (int i = 0; i < KL_MAX_OBJECTS; ++i) {
         uintptr_t objPtr = rpm<uint32_t>(knownListPtr + (uintptr_t)i * 4);
         if (!isValidPtr(objPtr)) {
             if (++null_streak >= 8) break;

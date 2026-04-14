@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -103,6 +105,10 @@ public:
 
 private:
     pid_t m_pid;
+
+    // Сигнал для performBlindScan(): вийти якомога швидше.
+    // Встановлюється blindScan() при таймауті. Потокобезпечно (atomic).
+    mutable std::atomic<bool> m_scan_abort{false};
 
     // Внутрішня реалізація blindScan без таймауту
     uintptr_t performBlindScan();

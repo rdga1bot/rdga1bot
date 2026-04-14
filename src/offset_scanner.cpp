@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "offset_scanner.h"
 #include "ProcessMemory.h"
 #include <fstream>
@@ -103,6 +104,7 @@ uintptr_t OffsetScanner::blindScan(int timeoutMs) {
         return performBlindScan();
 
     // З таймаутом: запускаємо в окремому потоці через packaged_task
+    m_scan_abort.store(false);
     std::packaged_task<uintptr_t()> task([this]() {
         return performBlindScan();
     });
@@ -114,6 +116,7 @@ uintptr_t OffsetScanner::blindScan(int timeoutMs) {
     if (status == std::future_status::ready)
         return future.get();
 
+    m_scan_abort.store(true); // сигналізуємо performBlindScan() завершити роботу
     std::cerr << "[OffsetScanner] blindScan timeout after " << timeoutMs << "ms\n";
     return 0;
 }
@@ -147,7 +150,9 @@ uintptr_t OffsetScanner::performBlindScan() {
     }
 
     std::vector<uint8_t> buf;
+    size_t scan_iteration = 0; // для перевірки m_scan_abort кожні 1000 ітерацій
     for (const auto& region : regions) {
+        if (m_scan_abort.load(std::memory_order_relaxed)) break;
         buf.resize(region.size);
         if (memfd >= 0) {
             ssize_t nread = ::pread(memfd, buf.data(), region.size, (off_t)region.base);
@@ -169,6 +174,12 @@ uintptr_t OffsetScanner::performBlindScan() {
 
         // Крок 4 байти — перевіряємо кожен вирівняний offset як candidate playerBase
         for (size_t i = 0; i + 0x130 <= buf.size(); i += 4) {
+            // Перевіряємо abort кожні 1000 ітерацій (таймаут від батьківського потоку)
+            if ((++scan_iteration % 1000) == 0 &&
+                m_scan_abort.load(std::memory_order_relaxed)) {
+                if (memfd >= 0) ::close(memfd);
+                return 0;
+            }
             // ── Перевірка 1: candidate + 0x120 → knownListPtr ──────────────
             uint32_t klPtr = 0;
             std::memcpy(&klPtr, buf.data() + i + 0x120, 4);

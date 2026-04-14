@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "BehaviorTree.h"
 #include "game_state.h"
@@ -233,8 +234,10 @@ private:
             std::chrono::duration<double>(s));
     }
 
-    // thread_local ptr для доступу з static Action/Condition функцій
-    // (single-threaded Brain — безпечно)
+    // thread_local ptr для доступу з static Action/Condition функцій.
+    // SINGLE-THREAD CONTRACT: tick() викликається виключно з Brain-потоку.
+    // Якщо s_self != nullptr і != this — два BotBehaviorTree у одному потоці (помилка).
+    // Перевіряється assert(s_self == nullptr || s_self == this) на початку tick().
     static thread_local BotBehaviorTree* s_self;
 
     // ── Condition functions ───────────────────────────────────────────────────

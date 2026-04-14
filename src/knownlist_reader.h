@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include <vector>
 #include <optional>
@@ -11,6 +12,11 @@
 // Патерн ReadBytes скопійовано з MemReader (не рефакторимо MemReader).
 class KnownListReader {
 public:
+    // Максимальна кількість об'єктів у KnownList.
+    // Kamael клієнт тримає ~300 видимих об'єктів при стандартному view range;
+    // 2000 — безпечна верхня межа що унеможливлює нескінченний цикл при corrupted ptr.
+    static constexpr int KL_MAX_OBJECTS = 2000;
+
     KnownListReader(pid_t pid, const OffsetScanner& offsets);
 
     // Читати всі об'єкти KnownList.

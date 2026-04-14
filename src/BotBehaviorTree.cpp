@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "BotBehaviorTree.h"
+#include <cassert>
 #include "FeatureExtractor.h"
 #include "RewardCalculator.h"
 #include "Input.h"
@@ -130,6 +132,7 @@ void BotBehaviorTree::init(const Config& cfg) {
 
 // ── tick ──────────────────────────────────────────────────────────────────────
 std::string BotBehaviorTree::tick(GameState& gs) {
+    assert(s_self == nullptr || s_self == this); // single-thread contract
     s_self = this;
     uint32_t nowMs = (uint32_t)std::chrono::duration_cast<
         std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
@@ -177,7 +180,16 @@ bool BotBehaviorTree::condNeedsRest(GameState& gs) {
     if (!gs.hp_valid || gs.is_dead || gs.in_grace || gs.has_target) return false;
     const bool low_hp = gs.hp > 0 && gs.hp < gs.cfg.hp_threshold;
     const bool low_mp = gs.mp > 0 && gs.mp < gs.cfg.mp_threshold;
-    if (low_hp || low_mp) return true;
+    if (low_hp || low_mp) {
+        // Якщо буф вже прострочений — не блокуємо Buff гілку через Rest
+        if (gs.cfg.buff_enabled && gs.buff_needed()) {
+            gs.log("[REST] Буф потрібен (buff_in=" +
+                   std::to_string((int)(gs.cfg.buff_interval - gs.secs_since_last_buff)) +
+                   "с) → пропускаємо Rest");
+            return false;
+        }
+        return true;
+    }
 
     // RL override: форсувати відпочинок раніше розкладу (RestNow)
     if (s_self && s_self->m_rl_model

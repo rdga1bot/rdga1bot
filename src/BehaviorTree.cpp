@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "BehaviorTree.h"
+#include <iostream>
 
 BehaviorTree::BehaviorTree() {
     memset(m_nodes,    0, sizeof(m_nodes));
@@ -89,7 +91,14 @@ BTStatus BehaviorTree::tick(GameState& gs, uint32_t nowMs) {
     uint16_t pc     = m_root;
     BTStatus result = BTStatus::Running; // Running = "перший вхід у вузол"
 
+    int vm_steps = 0;
+    static constexpr int VM_MAX_STEPS = 10000;
+
     while (true) {
+        if (++vm_steps > VM_MAX_STEPS) {
+            std::cerr << "[BT] VM_MAX_STEPS exceeded — malformed tree state, aborting tick\n";
+            break;
+        }
 
         if (pc == INVALID) break; // вийшли вище root
 

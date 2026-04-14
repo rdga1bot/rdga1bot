@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <atomic>
 #include <string>
 #include <chrono>
 
@@ -24,6 +26,11 @@ private:
     bool m_on_death = true;
     int m_stats_interval = 3600;
     std::chrono::steady_clock::time_point m_last_stats;
+
+    // Обмеження одночасних curl fork'ів — захист від накопичення зомбі-процесів
+    // при повільному Telegram API або відсутності інтернету.
+    static constexpr int kMaxPendingForks = 3;
+    std::atomic<int> m_pending{0};
 
     void Send(const std::string& text); // async via std::thread
     void SendSync(const std::string& text); // calls curl

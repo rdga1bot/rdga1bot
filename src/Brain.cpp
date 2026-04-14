@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "Brain.h"
 #include "Utils.h"
 #include <iostream>
@@ -54,6 +55,13 @@ void Brain::ReloadConfig(const Config& new_cfg) {
 
 void Brain::Init() {
     Log("[Brain] Ініціалізація...\n");
+    // Очищаємо live stats з попередньої сесії щоб QA Monitor не читав старі дані
+    {
+        std::ofstream clear("/tmp/rdga1bot_stats.json");
+        if (clear) clear << "{\"ts\":0,\"kills\":0,\"deaths\":0,\"attacks\":0,"
+                            "\"hp_potions\":0,\"mp_potions\":0,"
+                            "\"targeting_failures\":0,\"uptime_sec\":0}\n";
+    }
 }
 
 // ── Process ───────────────────────────────────────────────────────────────────

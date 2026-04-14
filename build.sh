@@ -23,8 +23,10 @@ fi
 NCURSES_FLAGS="$(pkg-config --cflags ncursesw 2>/dev/null || echo '')"
 NCURSES_LIBS="$(pkg-config --libs ncursesw 2>/dev/null || echo '-lncursesw')"
 
-CFLAGS="-std=c++17 -O2 -I$SRC -I$DIR/third_party/eigen -DEIGEN_NO_DEBUG $(pkg-config --cflags x11 xtst xext $OPENCV_PKG) $NCURSES_FLAGS"
-LDFLAGS="$(pkg-config --libs x11 xtst xext $OPENCV_PKG) $NCURSES_LIBS -lpthread"
+HARDENING="-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE"
+CFLAGS="-std=c++17 -O2 -I$SRC -I$DIR/third_party/eigen -DEIGEN_NO_DEBUG $(pkg-config --cflags x11 xtst xext $OPENCV_PKG) $NCURSES_FLAGS $HARDENING"
+LDFLAGS="$(pkg-config --libs x11 xtst xext $OPENCV_PKG) $NCURSES_LIBS -lpthread -pie -Wl,-z,relro,-z,now"
+# Debug build: DEBUG_FLAGS="-fsanitize=address,undefined" (add to CFLAGS/LDFLAGS manually)
 
 SRCS="
   $SRC/main.cpp

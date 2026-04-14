@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include <string>
 #include <chrono>
@@ -27,7 +28,7 @@ struct Stats {
     int   episode_steps     = 0;
 
     void resetEpisode()       { episode_kills = 0; episode_steps = 0; }
-    void recordEpisodeKill()  { episode_kills++; kills++; }
+    void recordEpisodeKill()  { episode_kills++; /* kills++ видалено — RecordKill() вже є */ }
     void recordEpisodeStep()  { episode_steps++; }
 
     int UptimeSec() const;

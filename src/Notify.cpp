@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "Notify.h"
 #include "Stats.h"
 
@@ -80,9 +81,14 @@ void Notify::SendSync(const std::string& text) {
 
 void Notify::Send(const std::string& text) {
     if (!m_enabled) return;
-    // Асинхронна відправка через окремий потік
+    if (m_pending.load() >= kMaxPendingForks) {
+        std::cout << "[Notify] dropped: too many pending\n";
+        return;
+    }
+    m_pending.fetch_add(1);
     std::thread([this, text]() {
         SendSync(text);
+        m_pending.fetch_sub(1);
     }).detach();
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "Stats.h"
 
 #include <iostream>
@@ -9,7 +10,8 @@
 
 int Stats::UptimeSec() const {
     auto now = std::chrono::steady_clock::now();
-    return (int)std::chrono::duration_cast<std::chrono::seconds>(now - session_start).count();
+    auto secs = std::chrono::duration_cast<std::chrono::seconds>(now - session_start).count();
+    return secs > 0 ? (int)secs : 0;
 }
 
 std::string Stats::UptimeStr() const {
