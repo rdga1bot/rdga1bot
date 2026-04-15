@@ -168,6 +168,9 @@ private:
     std::optional<std::vector<Eyes::MinimapDot>> m_async_minimap;
     bool m_has_async_vision = false;
 
+    // HP попереднього тіку для обчислення gs.hp_falling
+    int m_hp_prev = -1;
+
     // Minimap throttle: кешований результат, оновлюється max 10 FPS
     std::vector<Eyes::MinimapDot> m_minimap_cache;
     TP                            m_minimap_last_update{};

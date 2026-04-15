@@ -48,6 +48,10 @@ struct GameState {
 
     // ── Мінімапа ──────────────────────────────────────────────────────────────
     std::vector<Eyes::MinimapDot> minimap_dots;
+    // true якщо є хоч одна точка ближча за close_px від центру мінімапи.
+    // Порогове значення = радіус /nexttarget в пікселях мінімапи (~35 з 78 радіусу).
+    // Це моби, що МОЖУТЬ атакувати прямо зараз (не далекі, що видно /target "Name").
+    bool minimap_close_threat = false;
 
     // ── KnownList ─────────────────────────────────────────────────────────────
     std::vector<L2Character> kl_mobs;
@@ -65,6 +69,9 @@ struct GameState {
     bool is_dead     = false;
     bool in_grace    = false;
     bool hands_ready = false;
+    // true якщо HP зменшився порівняно з попереднім тіком (активно атакують).
+    // Встановлюється в Brain::updateGameState() на основі m_hp_prev.
+    bool hp_falling  = false;
 
     // ── RandomDelay (owned by Brain, exposed as raw ptrs) ────────────────────
     RandomDelay* rd_attack = nullptr;

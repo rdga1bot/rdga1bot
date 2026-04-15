@@ -241,6 +241,26 @@ void Brain::updateGameState(GameState& gs) {
     }
     gs.minimap_dots = m_minimap_cache;
 
+    // hp_falling: HP зменшився порівняно з попереднім тіком → атакують прямо зараз.
+    // Поріг 2%: нормальна флуктуація < 1%, активна атака > 2% за тік (~1с).
+    if (gs.hp_valid && m_hp_prev >= 0) {
+        gs.hp_falling = (gs.hp < m_hp_prev - 1);
+    } else {
+        gs.hp_falling = false;
+    }
+    m_hp_prev = gs.hp_valid ? gs.hp : -1;
+
+    // minimap_close_threat: є точка мінімапи ближча за ~35px від центру.
+    // 35px з 78px радіусу ≈ 45% радіусу мінімапи ≈ радіус /nexttarget (~600 юнітів).
+    // Далекі моби (/target "Name" зона) знаходяться біля краю мінімапи (dist ≥ 40+px).
+    {
+        constexpr float kClosePx = 35.f;
+        gs.minimap_close_threat = false;
+        for (const auto& d : gs.minimap_dots) {
+            if (d.dist < kClosePx) { gs.minimap_close_threat = true; break; }
+        }
+    }
+
     // Читаємо KnownList тільки якщо PlayerBase валідний.
     // Без цієї умови WorldState bg thread може повертати stale garbage-дані
     // після reset PlayerBase (кожні 30с validity check).

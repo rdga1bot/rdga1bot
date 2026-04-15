@@ -188,10 +188,12 @@ bool BotBehaviorTree::condNeedsRest(GameState& gs) {
                    "с) → пропускаємо Rest");
             return false;
         }
-        // Мінімапа показує мобів → НЕ відпочиваємо, шукаємо таргет і атакуємо.
+        // Близькі моби (dist<35px на мінімапі) АБО HP падає → атакуємо, не відпочиваємо.
         // TH: Vampiric Rage / крити лікують під час атаки → зупинка = смерть.
-        if (!gs.minimap_dots.empty()) {
-            gs.log("[REST] Мінімапа: моби поряд → атакуємо замість відпочинку");
+        // Перевірка по dist відкидає ДАЛЕКІ моби (/target "Name" зона) що завжди видно.
+        if (gs.hp_falling || gs.minimap_close_threat) {
+            gs.log("[REST] " + std::string(gs.hp_falling ? "HP падає" : "Моби поряд (minimap)") +
+                   " → атакуємо замість відпочинку");
             return false;
         }
         return true;
@@ -224,9 +226,9 @@ bool BotBehaviorTree::condNeedsBuff(GameState& gs) {
     // Новий баф: не запускаємо якщо є таргет або cooldown активний
     if (gs.has_target) return false;
     if (secsSince(s_self->m_last_kill_time) < 2.0) return false;
-    // Мінімапа показує мобів → атакуємо спочатку, баф після зачищення.
-    // TH: зупинка атаки при активних мобах = смерть.
-    if (!gs.minimap_dots.empty()) return false;
+    // Близькі моби (dist<35px) АБО HP падає → атакуємо, не починаємо баф.
+    // minimap_dots ЗАВЖДИ непорожній в зоні фарму — перевіряємо ВІДСТАНЬ точок.
+    if (gs.hp_falling || gs.minimap_close_threat) return false;
 
     // RL override: форсувати баф раніше розкладу
     if (s_self->m_rl_model
@@ -422,11 +424,12 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
     switch (self.m_buff_stage) {
 
     case 0: { // Чекаємо скидання бойового стану L2 → ESC + ALT+B
-        // Мінімапа показує мобів → переривати очікування, повертатись до атаки.
-        // condNeedsBuff заблокує новий баф поки minimap_dots не порожній.
-        if (!gs.minimap_dots.empty()) {
+        // Близькі моби (dist<35px) АБО HP падає під час очікування → abort, атакуємо.
+        // minimap_dots завжди є в зоні фарму — перевіряємо дистанцію.
+        if (gs.hp_falling || gs.minimap_close_threat) {
             self.m_last_buff = now() - std::chrono::seconds(gs.cfg.buff_interval - 30);
-            gs.log("[Buffs] Мінімапа: моби поряд → переривати очікування бойового стану");
+            gs.log("[Buffs] " + std::string(gs.hp_falling ? "HP падає" : "Моби поряд") +
+                   " → переривати очікування бойового стану");
             self.m_buff_stage = 0;
             self.m_buff_retries = 0;
             return BTStatus::Success;
