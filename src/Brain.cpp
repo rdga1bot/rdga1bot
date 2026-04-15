@@ -55,6 +55,10 @@ void Brain::ReloadConfig(const Config& new_cfg) {
 
 void Brain::Init() {
     Log("[Brain] Ініціалізація...\n");
+    // Скидаємо stats для нової сесії — session_start оновлюється до поточного часу.
+    // БЕЗ цього: після exception-restart session_start залишається від першого запуску
+    // процесу → uptime_sec:246760+ і garbage kills при збереженні.
+    m_stats = Stats{};
     // Очищаємо live stats з попередньої сесії щоб QA Monitor не читав старі дані
     {
         std::ofstream clear("/tmp/rdga1bot_stats.json");

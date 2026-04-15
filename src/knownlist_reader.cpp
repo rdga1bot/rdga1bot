@@ -272,6 +272,9 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
     std::unordered_set<uintptr_t> seen;
     seen.reserve(64);
 
+    // Діагностичні лічильники (логуються при кожному скані у stderr)
+    uint32_t dbg_in_range = 0, dbg_type0 = 0, dbg_valid_ptr = 0, dbg_hp_ok = 0;
+
     for (const auto& reg : m_scan_cache) {
         const uintptr_t rEnd = reg.base + reg.size;
         for (uintptr_t addr = reg.base; addr < rEnd; addr += kChunk) {
@@ -292,6 +295,7 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
 
                 float dx = x - px, dy = y - py;
                 if (dx*dx + dy*dy > kMaxR2) continue;
+                ++dbg_in_range;
 
                 uintptr_t xAddr = addr + (uintptr_t)o;
                 if (xAddr < m_off.objXOff) continue;
@@ -301,13 +305,16 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                 int32_t typeRaw = readTypeFromBuf(
                     m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
                 if (typeRaw != 0) continue; // тільки Mob
+                ++dbg_type0;
 
                 // HP: render_node+0x58 → game_obj → +0x14 (uint32, NOT float).
                 // render_node+0x100 reads interpolated X — do NOT use as HP.
                 uint32_t gObjPtr = rpm<uint32_t>(objBase + OFF_GAME_OBJ_PTR);
                 if (!isValidPtr((uintptr_t)gObjPtr)) continue;
+                ++dbg_valid_ptr;
                 uint32_t hp_u32 = rpm<uint32_t>((uintptr_t)gObjPtr + OFF_GAME_OBJ_HP);
                 if (hp_u32 == 0 || hp_u32 > 500000u) continue;
+                ++dbg_hp_ok;
                 float hp = static_cast<float>(hp_u32);
 
                 L2Character ch;
@@ -337,6 +344,20 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                 result.push_back(ch);
             }
         }
+    }
+    // Діагностика: виводимо лічильники фільтрів у stderr при кожному скані
+    // in_range → скільки XYZ кандидатів у дистанції від гравця
+    // type0    → пройшли type==0 (mob) фільтр
+    // validPtr → gObjPtr валідний ptr
+    // hp_ok    → hp_u32 ∈ (0, 500000] → реальний моб
+    static uint32_t s_scan_n = 0;
+    if ((++s_scan_n % 10) == 1) { // кожен 10-й скан (~30с)
+        std::cerr << "[KnownList] scan#" << s_scan_n
+                  << " in_range=" << dbg_in_range
+                  << " type0=" << dbg_type0
+                  << " validPtr=" << dbg_valid_ptr
+                  << " hp_ok=" << dbg_hp_ok
+                  << " result=" << result.size() << "\n";
     }
     return result;
 }

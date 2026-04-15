@@ -8,8 +8,9 @@ if [ ! -f rdga1bot ]; then
 fi
 
 # Якщо є збережений конфіг — пропускаємо TUI (--quick)
+# stderr → окремий лог для діагностики KnownList/scan без засмічення TUI
 if [ -f rdga1bot.ini ] && [ "$1" != "--setup" ]; then
-    exec ./rdga1bot --quick "$@"
+    exec ./rdga1bot --quick "$@" 2>> "logs/stderr_$(date +%Y%m%d).log"
 fi
 
-exec ./rdga1bot "$@"
+exec ./rdga1bot "$@" 2>> "logs/stderr_$(date +%Y%m%d).log"
