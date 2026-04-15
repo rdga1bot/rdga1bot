@@ -423,13 +423,13 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
     // ALT+B режим — багатостадійний FSM з template matching
     switch (self.m_buff_stage) {
 
-    case 0: { // Чекаємо скидання бойового стану L2 → ESC + ALT+B
+    case 0: { // Чекаємо виходу з флагу (combat state) L2 → ESC + ALT+B
         // Близькі моби (dist<35px) АБО HP падає під час очікування → abort, атакуємо.
         // minimap_dots завжди є в зоні фарму — перевіряємо дистанцію.
         if (gs.hp_falling || gs.minimap_close_threat) {
             self.m_last_buff = now() - std::chrono::seconds(gs.cfg.buff_interval - 30);
             gs.log("[Buffs] " + std::string(gs.hp_falling ? "HP падає" : "Моби поряд") +
-                   " → переривати очікування бойового стану");
+                   " → переривати очікування виходу з флагу");
             self.m_buff_stage = 0;
             self.m_buff_retries = 0;
             return BTStatus::Success;
@@ -437,7 +437,7 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
         const double kCombatExpire = 15.0;
         if (secsSince(self.m_last_kill_time) < kCombatExpire) {
             if (self.m_buff_retries % 50 == 0) {
-                gs.log("[Buffs] Чекаємо скидання бойового стану ще " +
+                gs.log("[Buffs] Чекаємо виходу з флагу (combat state) ще " +
                     std::to_string((int)(kCombatExpire - secsSince(self.m_last_kill_time))) + "с...");
             }
             ++self.m_buff_retries;
