@@ -188,6 +188,12 @@ bool BotBehaviorTree::condNeedsRest(GameState& gs) {
                    "с) → пропускаємо Rest");
             return false;
         }
+        // Мінімапа показує мобів → НЕ відпочиваємо, шукаємо таргет і атакуємо.
+        // TH: Vampiric Rage / крити лікують під час атаки → зупинка = смерть.
+        if (!gs.minimap_dots.empty()) {
+            gs.log("[REST] Мінімапа: моби поряд → атакуємо замість відпочинку");
+            return false;
+        }
         return true;
     }
 
@@ -218,6 +224,9 @@ bool BotBehaviorTree::condNeedsBuff(GameState& gs) {
     // Новий баф: не запускаємо якщо є таргет або cooldown активний
     if (gs.has_target) return false;
     if (secsSince(s_self->m_last_kill_time) < 2.0) return false;
+    // Мінімапа показує мобів → атакуємо спочатку, баф після зачищення.
+    // TH: зупинка атаки при активних мобах = смерть.
+    if (!gs.minimap_dots.empty()) return false;
 
     // RL override: форсувати баф раніше розкладу
     if (s_self->m_rl_model
@@ -413,6 +422,15 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
     switch (self.m_buff_stage) {
 
     case 0: { // Чекаємо скидання бойового стану L2 → ESC + ALT+B
+        // Мінімапа показує мобів → переривати очікування, повертатись до атаки.
+        // condNeedsBuff заблокує новий баф поки minimap_dots не порожній.
+        if (!gs.minimap_dots.empty()) {
+            self.m_last_buff = now() - std::chrono::seconds(gs.cfg.buff_interval - 30);
+            gs.log("[Buffs] Мінімапа: моби поряд → переривати очікування бойового стану");
+            self.m_buff_stage = 0;
+            self.m_buff_retries = 0;
+            return BTStatus::Success;
+        }
         const double kCombatExpire = 15.0;
         if (secsSince(self.m_last_kill_time) < kCombatExpire) {
             if (self.m_buff_retries % 50 == 0) {
@@ -941,16 +959,15 @@ void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
     // Основний метод: F2 /nexttarget
     gs.hands.NextTarget();
 
-    // Скидаємо unreachable flag якщо мінімапа показала мобів
+    // Скидаємо unreachable flag якщо мінімапа показала мобів.
+    // F2 вже надіслано вище — дозволяємо nexttarget знайти ближнього моба.
+    // Макрос /target "Name" НЕ стріляємо одразу: він може взяти ДАЛЕКОГО моба,
+    // тоді як F2 (nexttarget) завжди повертає найближчого.
+    // Якщо F2 знову повернув недосяжного → через kMacroFallbackAfter спроб макрос
+    // все одно спрацює через звичайний fallback нижче.
     if (!gs.minimap_dots.empty() && m_attack_was_unreachable) {
         m_attack_was_unreachable = false;
-        gs.log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable flag");
-        // Одразу /target макрос — не пробуємо F2 який поверне той самий недосяжний моб
-        if (!gs.cfg.target_macro_keys.empty()) {
-            gs.hands.Delay(100);
-            gs.hands.TargetMacro(m_tgt_macro_idx);
-            m_tgt_macro_idx = (m_tgt_macro_idx + 1) % (int)gs.cfg.target_macro_keys.size();
-        }
+        gs.log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable, F2 вже відіслано");
         return;
     }
 
