@@ -75,7 +75,8 @@ public:
     bool inGrace()       const { return Clock::now() < m_respawn_until; }
 
     // Сигнал від Attack гілки що треба Loot
-    void notifyKill()  { m_loot_pending = true; m_last_kill_time = Clock::now(); }
+    void notifyKill()  { m_loot_pending = true; m_last_kill_time = Clock::now();
+                         m_atk_unreachable_streak = 0; }
 
     // GeoPath delivery (для Brain dispatch)
     void deliverGeoPath(const std::vector<std::pair<float,float>>& path, uint64_t id);
@@ -146,6 +147,7 @@ private:
     float m_atk_mem_hp_abs           = -1.f;
     bool  m_atk_low_hp_timer_active  = false;
     TP    m_atk_low_hp_since{};
+    int   m_atk_unreachable_streak   = 0; // лічильник послідовних unreachable без kills
     std::unique_ptr<RandomDelay> m_atk_rd;
 
     // ── Zone стан ─────────────────────────────────────────────────────────────

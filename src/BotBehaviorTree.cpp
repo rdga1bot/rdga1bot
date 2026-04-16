@@ -748,7 +748,9 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
             self.m_atk_last_hp        = hp_for_stable;
             self.m_atk_hp_stable_since = now();
         } else if (secsSince(self.m_atk_hp_stable_since) > 5.0) {
-            gs.log("[ATTACKING] HP стабільний 5с (моб недосяжний) → Target [unreachable]");
+            self.m_atk_unreachable_streak++;
+            gs.log("[ATTACKING] HP стабільний 5с (моб недосяжний) → Target [unreachable] ×"
+                + std::to_string(self.m_atk_unreachable_streak));
             self.blacklistCurrentTarget(gs);
             gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
             gs.hands.Send(200);
@@ -979,16 +981,21 @@ void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
     // Основний метод: F2 /nexttarget
     gs.hands.NextTarget();
 
-    // Скидаємо unreachable flag тільки якщо є БЛИЗЬКІ моби (minimap_close_threat).
-    // minimap_dots ЗАВЖДИ непорожній в зоні фарму (показує моби в радіусі /target "Name").
-    // Якщо лише далекі моби → тримаємо m_attack_was_unreachable=true → macro_fallback
-    // спрацює через kMacroFallbackAfterUnreach спроб (менший за kMacroFallbackAfter).
-    // F2 вже надіслано вище — якщо знайде ближнього, attack активується;
-    // якщо знову недосяжний → macro_fallback підключить /target макрос.
-    if (gs.minimap_close_threat && m_attack_was_unreachable) {
+    // Скидаємо unreachable flag тільки якщо є БЛИЗЬКІ моби (minimap_close_threat)
+    // І streak невеликий (< 5 послідовних unreachable).
+    // Якщо streak >= 5 — ігноруємо minimap, форсуємо повний цикл macro / patrol,
+    // бо бот застряг в unreachable-loop з одним і тим же мобом.
+    static constexpr int kUnreachStreakForceRetarget = 5;
+    if (gs.minimap_close_threat && m_attack_was_unreachable
+        && m_atk_unreachable_streak < kUnreachStreakForceRetarget) {
         m_attack_was_unreachable = false;
         gs.log("[TARGETING] Близькі моби (minimap) → скидаємо unreachable, F2 вже відіслано");
         return;
+    }
+    if (m_atk_unreachable_streak >= kUnreachStreakForceRetarget) {
+        gs.log("[TARGETING] Streak ×" + std::to_string(m_atk_unreachable_streak)
+            + " → форсуємо повний цикл (ігноруємо minimap_close_threat)");
+        m_atk_unreachable_streak = 0; // скидаємо щоб наступний unreachable знову рахувався
     }
 
     // /target макроси: тільки після N невдалих F2
