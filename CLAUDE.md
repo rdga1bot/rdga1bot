@@ -31,7 +31,18 @@
 - **NavMesh tools** — `scripts/navmesh_preview.py` (2D), `scripts/navmesh_3d.py` (Detour binary → 3D mesh)
 - **NavMesh LoA** — `navmesh_loa.pts` (648 чистих точок), `navmesh_loa.bin` (304 полігони, 985 трикутників)
   - Координатне відображення: L2_X→Recast_X, L2_Z(висота)→Recast_Y(up), L2_Y→Recast_Z
-- **Наступні пріоритети**: live farm → перевірити kl_alive_count > 0, спостерігати kill detection + RL features
+- **MR46b** — зупинка атаки по dist (не minimap_dots); kClosePx: 35→70px
+- **MR47** — `m_buff_after_death`: форс-баф після respawn ігнорує minimap_close_threat
+- **MR48** — KL-HP: nearest-mob (не min-HP); логування `[KL-HP]`; видалено false `has_target` override
+- **MR49** — QA stats фільтрація по сесії (session_start з filename + uptime/kills reset detector)
+  - `summarize()` коректно з max() після фільтрації однієї сесії
+  - `log_tailer.py`: kl_hp / kl_hp_pct патерни; `anomaly_engine.py`: kl_hp детектори
+- **MR50** — `m_atk_unreachable_streak`: після 5 послідовних unreachable без kills →
+  ігноруємо minimap_close_threat, форсуємо повний цикл (Pokemon macro + patrol)
+- **MR51** — `m_atk_streak_force_count`: після 3 force-циклів (~75с) → ESC + `has_target=false`
+  → patrol сам рухається та знаходить нову ціль (break 20хв Pokemon-loop)
+  - QA: death_loop рахує лише "Фаза 0" (1 смерть = 4 [DEAD] рядки → fix false CRITICAL)
+- **Наступні пріоритети**: live farm → спостерігати streak/force у логах; kill rate > 3/хв
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
