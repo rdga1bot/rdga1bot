@@ -241,20 +241,21 @@ void Brain::updateGameState(GameState& gs) {
     }
     gs.minimap_dots = m_minimap_cache;
 
-    // hp_falling: HP зменшився порівняно з попереднім тіком → атакують прямо зараз.
-    // Поріг 2%: нормальна флуктуація < 1%, активна атака > 2% за тік (~1с).
+    // hp_falling: будь-яке зменшення HP порівняно з попереднім тіком.
+    // Порогу нема — навіть -1 одиниця означає активну атаку (Vampiric Rage: зупинка = смерть).
     if (gs.hp_valid && m_hp_prev >= 0) {
-        gs.hp_falling = (gs.hp < m_hp_prev - 1);
+        gs.hp_falling = (gs.hp < m_hp_prev);
     } else {
         gs.hp_falling = false;
     }
     m_hp_prev = gs.hp_valid ? gs.hp : -1;
 
-    // minimap_close_threat: є точка мінімапи ближча за ~35px від центру.
-    // 35px з 78px радіусу ≈ 45% радіусу мінімапи ≈ радіус /nexttarget (~600 юнітів).
-    // Далекі моби (/target "Name" зона) знаходяться біля краю мінімапи (dist ≥ 40+px).
+    // minimap_close_threat: є точка мінімапи ближча за ~70px від центру.
+    // 70px з 78px радіусу ≈ 90% радіусу мінімапи (~1200 юнітів).
+    // Далекі моби (/target "Name" зона) видно тільки біля самого краю (dist >70px).
+    // Поріг 35px був надто малим: моб на dist≈67px не детектувався, хоча вже в зоні атаки.
     {
-        constexpr float kClosePx = 35.f;
+        constexpr float kClosePx = 70.f;
         gs.minimap_close_threat = false;
         for (const auto& d : gs.minimap_dots) {
             if (d.dist < kClosePx) { gs.minimap_close_threat = true; break; }

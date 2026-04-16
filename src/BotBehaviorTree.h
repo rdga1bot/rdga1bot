@@ -118,8 +118,9 @@ private:
     TP  m_rest_start{};
 
     // ── Стан Buff гілки ───────────────────────────────────────────────────────
-    TP  m_last_buff{};       // коли востаннє бафались
-    int m_buff_stage    = 0;
+    TP   m_last_buff{};       // коли востаннє бафались
+    int  m_buff_stage    = 0;
+    bool m_buff_after_death = false; // форс-баф після respawn (ігнорує minimap_close_threat)
     int m_buff_retries  = 0;
     bool m_buff_tab_fallback = false;
     cv::Point m_buff_tab_click_pos{0, 0};

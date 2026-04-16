@@ -188,7 +188,7 @@ bool BotBehaviorTree::condNeedsRest(GameState& gs) {
                    "с) → пропускаємо Rest");
             return false;
         }
-        // Близькі моби (dist<35px на мінімапі) АБО HP падає → атакуємо, не відпочиваємо.
+        // Близькі моби (dist<70px на мінімапі) АБО HP падає → атакуємо, не відпочиваємо.
         // TH: Vampiric Rage / крити лікують під час атаки → зупинка = смерть.
         // Перевірка по dist відкидає ДАЛЕКІ моби (/target "Name" зона) що завжди видно.
         if (gs.hp_falling || gs.minimap_close_threat) {
@@ -226,9 +226,12 @@ bool BotBehaviorTree::condNeedsBuff(GameState& gs) {
     // Новий баф: не запускаємо якщо є таргет або cooldown активний
     if (gs.has_target) return false;
     if (secsSince(s_self->m_last_kill_time) < 2.0) return false;
-    // Близькі моби (dist<35px) АБО HP падає → атакуємо, не починаємо баф.
+    // Близькі моби (dist<70px) АБО HP падає → атакуємо, не починаємо баф.
     // minimap_dots ЗАВЖДИ непорожній в зоні фарму — перевіряємо ВІДСТАНЬ точок.
-    if (gs.hp_falling || gs.minimap_close_threat) return false;
+    // Виняток: m_buff_after_death — після respawn баф критичний (без нього миттєва смерть).
+    if (!s_self->m_buff_after_death) {
+        if (gs.hp_falling || gs.minimap_close_threat) return false;
+    }
 
     // RL override: форсувати баф раніше розкладу
     if (s_self->m_rl_model
@@ -276,9 +279,10 @@ BTStatus BotBehaviorTree::actDead(GameState& gs) {
         return BTStatus::Running;
 
     case 2:
-        gs.log("[DEAD] Фаза 2: відроджено, grace 30с");
-        self.m_respawn_until = futureBy(30.0);
-        self.m_dead_phase    = 0;
+        gs.log("[DEAD] Фаза 2: відроджено, grace 30с → форс-баф після grace");
+        self.m_respawn_until   = futureBy(30.0);
+        self.m_dead_phase      = 0;
+        self.m_buff_after_death = true;
         self.notifyDeathRL();
         return BTStatus::Success;
 
@@ -415,6 +419,7 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
         }
         self.m_last_buff = now();
         self.m_buff_stage = 0;
+        self.m_buff_after_death = false;
         gs.log("[Buffs] Завершено, наступний баф через " +
             std::to_string(gs.cfg.buff_interval) + "с");
         return BTStatus::Success;
@@ -424,9 +429,12 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
     switch (self.m_buff_stage) {
 
     case 0: { // Чекаємо виходу з флагу (combat state) L2 → ESC + ALT+B
-        // Близькі моби (dist<35px) АБО HP падає під час очікування → abort, атакуємо.
+        // Близькі моби (dist<70px) АБО HP падає під час очікування → abort, атакуємо.
         // minimap_dots завжди є в зоні фарму — перевіряємо дистанцію.
-        if (gs.hp_falling || gs.minimap_close_threat) {
+        // Виняток: m_buff_after_death — після respawn minimap_close_threat ігнорується,
+        // бо без бафів (Vampiric Rage) смерть гарантована.
+        const bool minimap_block = gs.minimap_close_threat && !self.m_buff_after_death;
+        if (gs.hp_falling || minimap_block) {
             self.m_last_buff = now() - std::chrono::seconds(gs.cfg.buff_interval - 30);
             gs.log("[Buffs] " + std::string(gs.hp_falling ? "HP падає" : "Моби поряд") +
                    " → переривати очікування виходу з флагу");
@@ -558,6 +566,7 @@ BTStatus BotBehaviorTree::actBuff(GameState& gs) {
         }
         self.m_buff_tab_fallback  = false;
         self.m_buff_tab_click_pos = {0, 0};
+        self.m_buff_after_death   = false;
         gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
         gs.hands.Delay(300);
         gs.hands.Send();
@@ -962,15 +971,15 @@ void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
     // Основний метод: F2 /nexttarget
     gs.hands.NextTarget();
 
-    // Скидаємо unreachable flag якщо мінімапа показала мобів.
-    // F2 вже надіслано вище — дозволяємо nexttarget знайти ближнього моба.
-    // Макрос /target "Name" НЕ стріляємо одразу: він може взяти ДАЛЕКОГО моба,
-    // тоді як F2 (nexttarget) завжди повертає найближчого.
-    // Якщо F2 знову повернув недосяжного → через kMacroFallbackAfter спроб макрос
-    // все одно спрацює через звичайний fallback нижче.
-    if (!gs.minimap_dots.empty() && m_attack_was_unreachable) {
+    // Скидаємо unreachable flag тільки якщо є БЛИЗЬКІ моби (minimap_close_threat).
+    // minimap_dots ЗАВЖДИ непорожній в зоні фарму (показує моби в радіусі /target "Name").
+    // Якщо лише далекі моби → тримаємо m_attack_was_unreachable=true → macro_fallback
+    // спрацює через kMacroFallbackAfterUnreach спроб (менший за kMacroFallbackAfter).
+    // F2 вже надіслано вище — якщо знайде ближнього, attack активується;
+    // якщо знову недосяжний → macro_fallback підключить /target макрос.
+    if (gs.minimap_close_threat && m_attack_was_unreachable) {
         m_attack_was_unreachable = false;
-        gs.log("[TARGETING] Мінімапа: моби знайдені → скидаємо unreachable, F2 вже відіслано");
+        gs.log("[TARGETING] Близькі моби (minimap) → скидаємо unreachable, F2 вже відіслано");
         return;
     }
 
