@@ -993,9 +993,25 @@ void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
         return;
     }
     if (m_atk_unreachable_streak >= kUnreachStreakForceRetarget) {
+        m_atk_streak_force_count++;
         gs.log("[TARGETING] Streak ×" + std::to_string(m_atk_unreachable_streak)
+            + " force#" + std::to_string(m_atk_streak_force_count)
             + " → форсуємо повний цикл (ігноруємо minimap_close_threat)");
-        m_atk_unreachable_streak = 0; // скидаємо щоб наступний unreachable знову рахувався
+        m_atk_unreachable_streak = 0;
+
+        // Після 3 форс-циклів поспіль (~75с без kills) — ESC таргет + пауза,
+        // щоб бот фізично змінив позицію через patrol/nav замість Pokemon-loop.
+        static constexpr int kForceEscAfter = 3;
+        if (m_atk_streak_force_count >= kForceEscAfter) {
+            gs.log("[TARGETING] force#" + std::to_string(m_atk_streak_force_count)
+                + " → ESC таргет, patrol шукатиме нову ціль");
+            gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
+            gs.hands.Send(300);
+            const_cast<GameState&>(gs).has_target = false;
+            m_atk_streak_force_count = 0;
+            m_attack_was_unreachable = false;
+            return; // не надсилаємо F2/macro — patrol сам знайде
+        }
     }
 
     // /target макроси: тільки після N невдалих F2

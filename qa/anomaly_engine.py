@@ -95,7 +95,11 @@ class RuleEngine:
         etype = ev.get("type")
 
         if etype == "dead":
-            self._dead_events.append((now, ev))
+            # Рахуємо лише реальні смерті (Фаза 0 = початок death-sequence),
+            # ігноруємо наступні фази тієї ж смерті (Фаза 1, Фаза 2, "загинув")
+            detail = ev.get("detail", "") or ""
+            if "Фаза 0" in detail or "загинув" in detail:
+                self._dead_events.append((now, ev))
 
         elif etype == "blacklist":
             self._blacklist_events.append((now, ev))

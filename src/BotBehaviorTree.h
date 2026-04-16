@@ -76,7 +76,7 @@ public:
 
     // Сигнал від Attack гілки що треба Loot
     void notifyKill()  { m_loot_pending = true; m_last_kill_time = Clock::now();
-                         m_atk_unreachable_streak = 0; }
+                         m_atk_unreachable_streak = 0; m_atk_streak_force_count = 0; }
 
     // GeoPath delivery (для Brain dispatch)
     void deliverGeoPath(const std::vector<std::pair<float,float>>& path, uint64_t id);
@@ -147,7 +147,8 @@ private:
     float m_atk_mem_hp_abs           = -1.f;
     bool  m_atk_low_hp_timer_active  = false;
     TP    m_atk_low_hp_since{};
-    int   m_atk_unreachable_streak   = 0; // лічильник послідовних unreachable без kills
+    int   m_atk_unreachable_streak    = 0; // послідовних unreachable без kills
+    int   m_atk_streak_force_count   = 0; // скільки разів streak форсував retarget поспіль
     std::unique_ptr<RandomDelay> m_atk_rd;
 
     // ── Zone стан ─────────────────────────────────────────────────────────────
