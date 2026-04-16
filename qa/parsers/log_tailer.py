@@ -80,6 +80,14 @@ LOG_PATTERNS: List[tuple] = [
     (re.compile(_TS_PREFIX + r'\[NAV\]\s+(.+)'),
      'nav', ['detail']),
 
+    # [KL-HP] nearest dist=150 hpMax=0 hpAbs=2847 ocr=78
+    (re.compile(_TS_PREFIX + r'\[KL-HP\]\s+nearest\s+dist=(\d+)\s+hpMax=(\d+)\s+hpAbs=(\d+)\s+ocr=(\d+)'),
+     'kl_hp', ['dist', 'hp_max', 'hp_abs', 'ocr']),
+
+    # [KL-HP] nearest dist=150 hpMax=500 hp%=78 ocr=78
+    (re.compile(_TS_PREFIX + r'\[KL-HP\]\s+nearest\s+dist=(\d+)\s+hpMax=(\d+)\s+hp%=(-?\d+)\s+ocr=(\d+)'),
+     'kl_hp_pct', ['dist', 'hp_max', 'hp_pct', 'ocr']),
+
     # [POTION] HP N% < N% → вживаємо
     (re.compile(_TS_PREFIX + r'\[POTION\]\s+(HP|MP|CP)\s+(\d+)%'),
      'potion', ['potion_type', 'current_pct']),
@@ -147,7 +155,8 @@ def parse_line(line: str, ref_date: Optional[date] = None) -> Optional[dict]:
                     # Числові поля — автоконверсія
                     if field in ('avg_us', 'kill_num', 'attempt', 'count',
                                  'ms', 'mobs', 'alive', 'items', 'node_count',
-                                 'mob_id', 'dx', 'current_pct', 'hp', 'mp', 'cp'):
+                                 'mob_id', 'dx', 'current_pct', 'hp', 'mp', 'cp',
+                                 'dist', 'hp_max', 'hp_abs', 'hp_pct', 'ocr'):
                         try:
                             val = int(val)
                         except (TypeError, ValueError):

@@ -680,9 +680,16 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
                     self.m_atk_mem_hp_valid = true;
                     const_cast<GameState&>(gs).target->hp = (int)pct;
                     // НЕ перезаписуємо has_target: kill detection через kl_mob_died + hp≤2% debounce
+                    gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
+                        " hpMax=" + std::to_string((int)best->hpMax) +
+                        " hp%=" + std::to_string((int)pct) +
+                        " ocr=" + std::to_string(gs.target->hp));
                 } else {
                     self.m_atk_mem_hp_valid = true;
                     self.m_atk_mem_hp_abs   = best->hpAbs();
+                    gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
+                        " hpMax=0 hpAbs=" + std::to_string((int)best->hpAbs()) +
+                        " ocr=" + std::to_string(gs.target->hp));
                 }
             }
         }

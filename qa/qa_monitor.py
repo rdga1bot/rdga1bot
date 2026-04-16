@@ -73,17 +73,122 @@ def _find_most_recent_log(log_dir: str = None) -> str | None:
 # Analyze-only mode
 # ---------------------------------------------------------------------------
 
+def _extract_session_start(log_path: str) -> datetime | None:
+    """Витягує datetime початку сесії з імені файлу session_YYYYMMDD_HHMMSS.log."""
+    import re
+    basename = os.path.basename(log_path)
+    m = re.search(r'session_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})', basename)
+    if not m:
+        return None
+    try:
+        return datetime(
+            int(m.group(1)), int(m.group(2)), int(m.group(3)),
+            int(m.group(4)), int(m.group(5)), int(m.group(6)),
+        )
+    except ValueError:
+        return None
+
+
+def _filter_records_by_session(records: list, session_start: datetime,
+                                session_end: datetime | None = None) -> list:
+    """
+    Відфільтровує records за часовим вікном сесії.
+    1. Залишає записи з timestamp_dt >= session_start - 60s
+    2. Обрізає по session_end якщо відомий, або по першому uptime/kills reset
+       (ознака старту нової сесії бота).
+    """
+    from datetime import timezone
+
+    def make_aware(dt):
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    lo = make_aware(session_start - timedelta(seconds=60))
+    hi = make_aware(session_end + timedelta(seconds=60)) if session_end else None
+
+    # Крок 1 — фільтр по нижній межі
+    candidates = []
+    for r in records:
+        ts = r.get("timestamp_dt")
+        if ts is None:
+            continue
+        ts = make_aware(ts)
+        if ts < lo:
+            continue
+        if hi and ts > hi:
+            break
+        candidates.append(r)
+
+    if not candidates:
+        return candidates
+
+    # Крок 2 — обрізати по першому reset нової сесії бота.
+    # Детектори:
+    #   A) uptime впав на > 60с (явний restart)
+    #   B) kills впали на > 5 (лічильник скинуто)
+    #   C) приріст uptime << приріст wall-clock (бот перезапустився між записами)
+    #      якщо elapsed_wall > 120с і elapsed_uptime < elapsed_wall * 0.35 → нова сесія
+    result = [candidates[0]]
+    for i in range(1, len(candidates)):
+        prev = candidates[i - 1]
+        curr = candidates[i]
+        prev_uptime = prev.get("uptime_sec", 0)
+        curr_uptime = curr.get("uptime_sec", 0)
+        prev_kills  = prev.get("kills", 0)
+        curr_kills  = curr.get("kills", 0)
+
+        # A: uptime явно впав
+        if curr_uptime < prev_uptime - 60:
+            break
+        # B: kills впали
+        if curr_kills < prev_kills - 5:
+            break
+        # C: wall-clock gap >> uptime gap → restart між записами
+        ts_prev = prev.get("timestamp_dt")
+        ts_curr = curr.get("timestamp_dt")
+        if ts_prev and ts_curr:
+            from datetime import timezone
+            def aw(dt):
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            elapsed_wall   = (aw(ts_curr) - aw(ts_prev)).total_seconds()
+            elapsed_uptime = curr_uptime - prev_uptime
+            if elapsed_wall > 120 and elapsed_uptime < elapsed_wall * 0.35:
+                break
+
+        result.append(curr)
+
+    return result
+
+
 def run_analyze_only(stats_path: str, log_path: str | None = None) -> dict:
     """
     Повний аналіз одного stats JSON файлу (+ опціонально session log).
     Генерує звіт у qa/reports/.
+    Якщо log_path вказано — фільтрує stats records за часовим вікном сесії.
     """
     logger.info(f"[QA] Завантажуємо: {stats_path}")
 
-    records = load_file(stats_path)
-    if not records:
+    all_records = load_file(stats_path)
+    if not all_records:
         logger.error(f"[QA] Файл порожній або всі рядки corrupted: {stats_path}")
         return {}
+
+    logger.info(f"[QA] Всього записів у файлі: {len(all_records)}")
+
+    # Фільтрація за часовим вікном сесії якщо є log_path
+    records = all_records
+    if log_path:
+        session_start = _extract_session_start(log_path)
+        if session_start:
+            # Визначаємо session_end — пізніше буде уточнено з подій логу
+            # Спочатку фільтруємо по session_start (session_end невідомий)
+            records = _filter_records_by_session(all_records, session_start)
+            logger.info(f"[QA] Після фільтрації за сесією ({session_start.strftime('%H:%M:%S')}): "
+                        f"{len(records)} записів (було {len(all_records)})")
+            if not records:
+                logger.warning("[QA] Записів у вікні сесії не знайдено — використовуємо всі")
+                records = all_records
 
     records = compute_deltas(records)
     records = compute_kill_rate(records)

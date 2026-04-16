@@ -68,6 +68,10 @@ class RuleEngine:
         self._baseline_samples: int = 0
         self._bt_avg_us_history: deque = deque()  # останні 20 значень BT avg
 
+        # KL-HP tracking (MR48)
+        self._kl_hp_abs_history: deque = deque() # (ts, hp_abs, dist) — 60с вікно
+        self._kl_hp_far_count:   int   = 0       # dist > 500 підряд
+
         self._live_stats_last_ts: Optional[float] = None
         self._live_stats_ever_fresh: bool = False  # True якщо stats хоч раз був свіжим
         self._last_ingest_ts: float = time.time()  # час останнього ingested запису
@@ -115,6 +119,15 @@ class RuleEngine:
         elif etype == "targeting_attempt":
             pass  # handled by stats
 
+        elif etype in ("kl_hp", "kl_hp_pct"):
+            dist    = ev.get("dist", 9999)
+            hp_abs  = ev.get("hp_abs", ev.get("hp_pct", 0))
+            self._kl_hp_abs_history.append((now, hp_abs, dist))
+            if dist > 500:
+                self._kl_hp_far_count += 1
+            else:
+                self._kl_hp_far_count = 0
+
     def ingest_stats(self, snap: dict, ts: float = None):
         """Обробляє snapshot з StatsReader або LiveStats.
         ts — реальний час запису (float unix); якщо None — використовує time.time().
@@ -157,6 +170,7 @@ class RuleEngine:
         anomalies.extend(self._check_blacklist_flood(now))
         anomalies.extend(self._check_stuck_in_target(now))
         anomalies.extend(self._check_hp_stable(now))
+        anomalies.extend(self._check_kl_hp_tracking(now))
         anomalies.extend(self._check_bot_frozen(now))
         anomalies.extend(self._check_tf_spike(now))
         anomalies.extend(self._check_kill_rate_drop(now))
@@ -266,6 +280,44 @@ class RuleEngine:
                      "severity": "ERROR",
                      "context": f"+{total_tf} targeting failures in last 1min"}]
         return []
+
+    def _check_kl_hp_tracking(self, now: float) -> List[dict]:
+        """
+        Перевіряє якість KL-HP трекінгу (MR48):
+        - WARN: nearest mob dist > 500 кілька разів підряд (не той моб)
+        - WARN: hpAbs не змінюється 30с під час атаки (hp stable = unreachable loop)
+        """
+        self._prune(self._kl_hp_abs_history, 60, now)
+        if len(self._kl_hp_abs_history) < 3:
+            return []
+
+        anomalies = []
+
+        # 1. Далекий моб (dist > 500) 5+ разів підряд → можливо не той таргет
+        if self._kl_hp_far_count >= 5:
+            anomalies.append({
+                "name": "kl_hp_wrong_target",
+                "score": 25,
+                "severity": "WARNING",
+                "context": f"KL nearest dist>500 для {self._kl_hp_far_count} тіків підряд"
+            })
+
+        # 2. hpAbs стабільний 30с → nearest mob не атакується (hp не змінюється)
+        window = list(self._kl_hp_abs_history)
+        if len(window) >= 3:
+            age = now - window[0][0]
+            if age >= 30:
+                vals = [v for _, v, d in window if d <= 500]
+                if vals and max(vals) == min(vals):
+                    anomalies.append({
+                        "name": "kl_hp_abs_stable",
+                        "score": 20,
+                        "severity": "WARNING",
+                        "context": f"KL hpAbs={vals[0]} стабільний {int(age)}с — "
+                                   "nearest mob HP не змінюється (не той таргет або hp не читається)"
+                    })
+
+        return anomalies
 
     def _check_kill_rate_drop(self, now: float) -> List[dict]:
         """kills/хв < 50% від baseline за останні 10хв."""

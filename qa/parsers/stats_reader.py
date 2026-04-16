@@ -188,14 +188,15 @@ def compute_deltas(records: List[dict]) -> List[dict]:
 
 
 def summarize(records: List[dict]) -> dict:
-    """Генерує підсумок сесії з усіх записів."""
+    """Генерує підсумок сесії з усіх записів.
+    Використовує max() — коректно коли records вже відфільтровані до однієї сесії."""
     if not records:
         return {}
 
-    total_kills = max(r.get("kills", 0) for r in records)
-    total_deaths = max(r.get("deaths", 0) for r in records)
+    total_kills   = max(r.get("kills", 0) for r in records)
+    total_deaths  = max(r.get("deaths", 0) for r in records)
     total_attacks = max(r.get("attacks", 0) for r in records)
-    total_tf = max(r.get("targeting_failures", 0) for r in records)
+    total_tf      = max(r.get("targeting_failures", 0) for r in records)
     total_hp_pots = max(r.get("hp_potions", 0) for r in records)
     total_mp_pots = max(r.get("mp_potions", 0) for r in records)
 
