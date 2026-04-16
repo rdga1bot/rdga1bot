@@ -661,28 +661,29 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
             return BTStatus::Success; // → Selector спробує Loot
         }
 
-        // HP моба з пам'яті (якщо увімкнено) — моб з мінімальним HP (той що атакується)
-        if (gs.cfg.mem_use_for_target_hp && gs.target.has_value()) {
-            float min_hp_abs = 1e9f;
-            float min_pct    = 101.f;
-            bool  has_pct    = false;
+        // HP моба з пам'яті (якщо увімкнено) — НАЙБЛИЖЧИЙ моб (= поточний таргет).
+        // Раніше: мінімальний HP по всьому KL → вмираючий сусідній моб B (2% HP)
+        // підмінював target->hp і тригерив false kill / has_target=false на поточному A.
+        // Результат: 3-4 моби з ~0% HP гоняться за ботом + "unreachable" кожні 7-8 атак.
+        // Тепер: беремо моба найближчого до гравця (той якого ми атакуємо).
+        if (gs.cfg.mem_use_for_target_hp && gs.target.has_value() && gs.coords_valid) {
+            float best_dist = 1e12f;
+            const L2Character* best = nullptr;
             for (const auto& mob : gs.kl_mobs) {
                 if (!mob.isAlive()) continue;
-                if (mob.hpMax > 0.f) {
-                    float p = mob.hpPercent();
-                    if (p < min_pct) min_pct = p;
-                    has_pct = true;
-                } else if (mob.hpAbs() < min_hp_abs) {
-                    min_hp_abs = mob.hpAbs();
-                }
+                float d = mob.distanceTo(gs.player_x, gs.player_y);
+                if (d < best_dist) { best_dist = d; best = &mob; }
             }
-            if (has_pct && min_pct <= 100.f) {
-                self.m_atk_mem_hp_valid = true;
-                const_cast<GameState&>(gs).target->hp = (int)min_pct;
-                const_cast<GameState&>(gs).has_target = (min_pct > 2.f);
-            } else if (!has_pct && min_hp_abs < 1e8f) {
-                self.m_atk_mem_hp_valid = true;
-                self.m_atk_mem_hp_abs   = min_hp_abs;
+            if (best) {
+                if (best->hpMax > 0.f) {
+                    float pct = best->hpPercent();
+                    self.m_atk_mem_hp_valid = true;
+                    const_cast<GameState&>(gs).target->hp = (int)pct;
+                    // НЕ перезаписуємо has_target: kill detection через kl_mob_died + hp≤2% debounce
+                } else {
+                    self.m_atk_mem_hp_valid = true;
+                    self.m_atk_mem_hp_abs   = best->hpAbs();
+                }
             }
         }
     }

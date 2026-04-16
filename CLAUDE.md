@@ -7,8 +7,8 @@
 - Папка: ~/l2bot/rdga1bot/
 - Build: bash build.sh && ./launch.sh
 
-## Поточний стан (2026-04-14)
-- **BotBehaviorTree** — єдиний планувальник (ObjectiveManager видалено в MR20c)
+## Поточний стан (2026-04-16)
+- **BotBehaviorTree** — єдиний планувальник. RL: `[Learning] Enabled=true` за замовчуванням.
 - **MR26** — MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B JSONL, ShadowMode=false)
 - **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
 - **MR28** — Target Selector піддерево з 7 BT вузлів (~22 вузли загалом)
