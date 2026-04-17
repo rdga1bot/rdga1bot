@@ -71,7 +71,7 @@ public:
 
     // [Potions]
     Input::KeyboardKey hp_key = Input::KeyboardKey::F6;
-    int hp_threshold = 70;
+    int hp_threshold = 45;
     Input::KeyboardKey mp_key = Input::KeyboardKey::F7;
     int mp_threshold = 40;
     Input::KeyboardKey cp_key = Input::KeyboardKey::F8;

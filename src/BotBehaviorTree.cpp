@@ -196,6 +196,13 @@ bool BotBehaviorTree::condNeedsRest(GameState& gs) {
                    " → атакуємо замість відпочинку");
             return false;
         }
+        // Нещодавній kill (< 15с) — активна зона бою, не відпочивати.
+        // Атакер може агресуватись ззовні 70px minimap (close_threat=false),
+        // а потіон стабілізує HP між тіками (hp_falling=false) → бот застряє в Rest і гине.
+        if (s_self && secsSince(s_self->m_last_kill_time) < 15.0) {
+            gs.log("[REST] Нещодавній kill (<15с) → активна зона, не відпочиваємо");
+            return false;
+        }
         return true;
     }
 

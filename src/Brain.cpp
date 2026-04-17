@@ -222,6 +222,18 @@ void Brain::updateGameState(GameState& gs) {
     gs.player_heading = m_mem_player.heading;
     gs.coords_valid   = m_mem_player.valid;
 
+    // Fallback: якщо MemReader вимкнений/невалідний, але PlayerBase є —
+    // читаємо XYZ гравця напряму з playerBase (той самий offset що й KnownList).
+    // Потрібно для KL-HP distanceTo() — без coords KL-HP ніколи не запускається.
+    if (!gs.coords_valid && m_world && m_player_base) {
+        if (m_world->refreshPlayerXYZ()) {
+            gs.player_x   = m_world->playerX;
+            gs.player_y   = m_world->playerY;
+            gs.player_z   = m_world->playerZ;
+            gs.coords_valid = true;
+        }
+    }
+
     gs.target     = m_target;
     gs.has_target = HasTarget();
     gs.target_hp  = m_target.has_value() ? m_target->hp : 0;

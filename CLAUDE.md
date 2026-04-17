@@ -7,7 +7,7 @@
 - Папка: ~/l2bot/rdga1bot/
 - Build: bash build.sh && ./launch.sh
 
-## Поточний стан (2026-04-16)
+## Поточний стан (2026-04-17)
 - **BotBehaviorTree** — єдиний планувальник. RL: `[Learning] Enabled=true` за замовчуванням.
 - **MR26** — MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B JSONL, ShadowMode=false)
 - **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
@@ -42,7 +42,14 @@
 - **MR51** — `m_atk_streak_force_count`: після 3 force-циклів (~75с) → ESC + `has_target=false`
   → patrol сам рухається та знаходить нову ціль (break 20хв Pokemon-loop)
   - QA: death_loop рахує лише "Фаза 0" (1 смерть = 4 [DEAD] рядки → fix false CRITICAL)
-- **Наступні пріоритети**: live farm → спостерігати streak/force у логах; kill rate > 3/хв
+- **MR52** — два критичних фікси:
+  - `condNeedsRest`: не відпочивати < 15с після kill (активна зона бою); hp_threshold 70%→45%
+    - Root cause смерті: атакер > 70px minimap → close_threat=false; потіон стабілізує HP → hp_falling=false → бот застряє в Rest 51с і гине
+    - RL-F "minimap=1.0" = кількість dots (feature[5]=dots.size()/5), НЕ minimap_close_threat!
+  - KL-HP coords fallback: якщо `m_mem_player.valid=false` але `m_player_base` є → `refreshPlayerXYZ()` → `gs.coords_valid=true`
+    - PosX_Offset=0x0 в INI → MemReader вимкнений → coords_valid=false → KL-HP ніколи не запускався
+    - Тепер читає XY гравця прямо з playerBase (той самий offset що KnownList)
+- **Наступні пріоритети**: live farm 5+ год; перевірити [KL-HP] логи; kill rate > 3/хв стабільно
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
