@@ -260,6 +260,11 @@ public:
     // [Colors_*]
     ColorConfig colors;
 
+    // [QA] — налагодження та візуалізація
+    bool qa_frame_capture     = false;  // зберігати PNG-кадри на ключових подіях у qa/frames/
+    int  qa_frame_max_per_min = 10;     // обмеження кадрів/хв (антифлуд)
+    std::string qa_frames_dir = "qa/frames";
+
     bool IsSpoiler() const { return char_class == "Spoiler"; }
 
     // [BehaviorTree]
