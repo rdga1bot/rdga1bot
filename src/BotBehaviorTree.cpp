@@ -870,6 +870,11 @@ BTStatus BotBehaviorTree::actTgtMinimap(GameState& gs) {
 
 BTStatus BotBehaviorTree::actTgtF2AndMacro(GameState& gs) {
     if (!s_self) return BTStatus::Failure;
+    auto& self = *s_self;
+    // Є таргет і streak малий → не перемикаємо. Атака продовжується по поточному мобу.
+    // При streak >= 5 (справді застряг) — дозволяємо F2 щоб знайти нову ціль.
+    if (gs.has_target && self.m_atk_unreachable_streak < 5)
+        return BTStatus::Failure;
     s_self->tgtSendF2AndMacro(gs);
     return BTStatus::Failure; // передати до actTgtNavigation
 }
@@ -1291,18 +1296,9 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleGeoPath(GameState& gs,
         }
     }
 
-    // ── WalkForward якщо моб прямо попереду (dy < -15) ───────────────────────
-    // Пропускаємо якщо вже 2+ мобів на мінімапі: кімнатний спот — моби самі
-    // прийдуть в зону атаки, WalkForward тільки тягне зайвий агро.
-    const bool room_has_mobs = (gs.minimap_dots.size() >= 2);
-    if (map_ref && std::abs(map_ref->dx) <= kMinimapDxThreshold
-        && map_ref->dy < -15 && !m_tgt_nav_prev_was_walk
-        && gs.eyes.IsGroundAhead() && !room_has_mobs) {
-        gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 700));
-        m_tgt_nav_prev_was_walk = true;
-        gs.log("[MAP] Моб прямо попереду (dy=" + std::to_string(map_ref->dy) +
-            ") → WalkForward");
-    }
+    // WalkForward на основі мінімапи вимкнено: моби самі агряться і підходять.
+    // Застрягання в текстурах обробляється stuck detection вище (WalkBack+Rotate+WalkForward).
+    (void)map_ref;
 
     return std::nullopt;
 }
