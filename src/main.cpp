@@ -100,6 +100,7 @@ static void ApplyConfig(const Config& cfg, Hands& hands, Eyes& eyes, Brain& brai
     if (mem && cfg.mem_enabled) {
         MemReader::Offsets off;
         off.enabled      = true;
+        off.use_kl_base  = cfg.mem_use_kl_base;
         off.player_ptr   = cfg.mem_player_ptr;
         off.ptr_chain    = cfg.mem_ptr_chain;
         off.hp_off       = cfg.mem_hp_off;
@@ -1984,6 +1985,8 @@ int main(int argc, char* argv[]) {
                         std::cerr << "[KnownList] playerBaseCache=0x" << std::hex << cached
                                   << " валідний XYZ=(" << (int)cx << "," << (int)cy << ")"
                                   << std::dec << " — використовуємо без blindScan\n";
+                        if (cfg.mem_enabled && cfg.mem_use_kl_base)
+                            mem_reader.SetDirectBase(cached);
                         kl_scan_result.store(cached);
                     } else {
                         std::cerr << "[KnownList] playerBaseCache=0x" << std::hex << cached
@@ -2007,6 +2010,9 @@ int main(int argc, char* argv[]) {
                     }
                     kl_scanner->playerBaseCache = base;  // зберігаємо для --watch-pos
                     kl_scanner->saveOffsets(cfg.knownlist_offsets_file);
+                    // UseKLBase: передаємо playerBase до MemReader для прямого читання
+                    if (cfg.mem_enabled && cfg.mem_use_kl_base)
+                        mem_reader.SetDirectBase(base);
                     std::cerr << "[KnownList] PlayerBase=0x" << std::hex << base
                               << std::dec << " WorldState активовано\n";
                 }

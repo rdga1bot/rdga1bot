@@ -1,6 +1,7 @@
 #include "MemReader.h"
 #include "ProcessMemory.h"
 #include <fstream>
+#include <cmath>
 #include <sstream>
 #include <string>
 #include <cstring>
@@ -133,10 +134,16 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
     PlayerState state;
     if (!m_off.enabled || !IsOpen()) return state;
 
-    // Отримуємо адресу об'єкту гравця через pointer chain
-    uintptr_t obj_addr = m_base + m_off.player_ptr;
-    if (!m_off.ptr_chain.empty())
-        obj_addr = ResolveChain(obj_addr, m_off.ptr_chain);
+    // Отримуємо адресу об'єкту гравця
+    uintptr_t obj_addr = 0;
+    if (m_off.use_kl_base) {
+        // Режим UseKLBase: playerBase передається від KnownList напряму (SetDirectBase)
+        obj_addr = m_direct_base;
+    } else {
+        obj_addr = m_base + m_off.player_ptr;
+        if (!m_off.ptr_chain.empty())
+            obj_addr = ResolveChain(obj_addr, m_off.ptr_chain);
+    }
     if (!obj_addr) return state;
 
     // Читаємо поля (int32 для HP/MP/CP, float для позиції)
@@ -165,6 +172,11 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
             state.heading = hval;
     }
 
-    state.valid = (state.hp >= 0 && state.max_hp > 0);
+    // valid: HP+MaxHP прочитані → повний режим (замінює OCR HP)
+    //        XY координати прочитані (UseKLBase режим) → coords_valid, HP з OCR
+    const bool hp_ok    = (state.hp >= 0 && state.max_hp > 0);
+    const bool coords_ok = std::isfinite(state.x) && std::isfinite(state.y)
+                           && (state.x != 0.f || state.y != 0.f);
+    state.valid = hp_ok || (m_off.use_kl_base && coords_ok);
     return state;
 }

@@ -342,8 +342,9 @@ bool Config::Load(const std::string& path) {
     knownlist_max_range    = (float)GetDouble("KnownList", "MaxRange", (double)knownlist_max_range);
 
     // [MemReader]
-    mem_enabled   = GetBool  ("MemReader", "Enabled",    mem_enabled);
-    mem_proc_name = Get      ("MemReader", "ProcName",   mem_proc_name);
+    mem_enabled     = GetBool("MemReader", "Enabled",    mem_enabled);
+    mem_proc_name   = Get   ("MemReader", "ProcName",   mem_proc_name);
+    mem_use_kl_base = GetBool("MemReader", "UseKLBase", mem_use_kl_base);
     mem_shadow_mode           = GetBool("MemReader", "ShadowMode",           mem_shadow_mode);
     mem_max_consecutive_fails = GetInt ("MemReader", "MaxConsecutiveFailures",mem_max_consecutive_fails);
     mem_blindscan_timeout_ms  = GetInt ("MemReader", "BlindScanTimeout",      mem_blindscan_timeout_ms);

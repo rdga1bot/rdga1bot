@@ -49,7 +49,13 @@
   - KL-HP coords fallback: якщо `m_mem_player.valid=false` але `m_player_base` є → `refreshPlayerXYZ()` → `gs.coords_valid=true`
     - PosX_Offset=0x0 в INI → MemReader вимкнений → coords_valid=false → KL-HP ніколи не запускався
     - Тепер читає XY гравця прямо з playerBase (той самий offset що KnownList)
-- **Наступні пріоритети**: live farm 5+ год; перевірити [KL-HP] логи; kill rate > 3/хв стабільно
+- **MR53** — MemReader + ShadowMode увімкнено для тестування:
+  - `UseKLBase=true`: MemReader отримує playerBase від KnownList (без статичного PlayerPtr)
+  - `PosX/Y/Z_Offset=0x24/0x28/0x2C`: XY координати з пам'яті валідні → `m_mem_player.valid=true`
+  - HP_Offset=0x0 (не відкалібровано) → HP з OCR; coords з memory → coords_valid=true через MemReader
+  - `ShadowMode=true`: логує порівняння OCR vs Memory → дозволяє побачити розбіжності
+  - HP/MP/CP offsets знайти пізніше через Cheat Engine або `--calibrate`
+- **Наступні пріоритети**: live farm 5+ год; перевірити [KL-HP] + [MemReader] логи; kill rate > 3/хв
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками

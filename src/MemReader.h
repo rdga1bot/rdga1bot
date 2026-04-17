@@ -46,6 +46,7 @@ public:
 
     // Конфігурація offsets (з .ini)
     struct Offsets {
+        bool      use_kl_base  = false; // true = приймати playerBase від KnownList напряму
         uintptr_t player_ptr   = 0;  // static addr (відносно base l2.exe)
         std::vector<uintptr_t> ptr_chain; // pointer chain offsets
         uintptr_t hp_off       = 0;
@@ -62,6 +63,10 @@ public:
     };
     void SetOffsets(const Offsets& off) { m_off = off; }
     const Offsets& GetOffsets() const { return m_off; }
+
+    // Пряма передача playerBase від KnownList (режим UseKLBase).
+    // Викликати щоразу коли KL знаходить/оновлює playerBase.
+    void SetDirectBase(uintptr_t base) { m_direct_base = base; }
 
     // Читаємо стан гравця (всі поля за один прохід)
     PlayerState ReadPlayer() const;
@@ -89,6 +94,8 @@ private:
     pid_t     m_pid  = 0;
     uintptr_t m_base = 0;   // base address l2.exe в адресному просторі процесу
     Offsets   m_off;
+
+    uintptr_t m_direct_base = 0;  // playerBase від KnownList (режим UseKLBase)
 
     bool ReadBytes(uintptr_t abs_addr, void* buf, size_t len) const;
     static pid_t FindPid(const std::string& proc_name);
