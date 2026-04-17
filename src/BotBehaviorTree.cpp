@@ -871,9 +871,9 @@ BTStatus BotBehaviorTree::actTgtMinimap(GameState& gs) {
 BTStatus BotBehaviorTree::actTgtF2AndMacro(GameState& gs) {
     if (!s_self) return BTStatus::Failure;
     auto& self = *s_self;
-    // Є таргет і streak малий → не перемикаємо. Атака продовжується по поточному мобу.
-    // При streak >= 5 (справді застряг) — дозволяємо F2 щоб знайти нову ціль.
-    if (gs.has_target && self.m_atk_unreachable_streak < 5)
+    // streak==0 = атаки йдуть, HP моба змінюється → таргет не міняємо.
+    // streak>0 = атаки не йдуть (ідемо до макро-таргету або застрягли) → F2 шукає ближчого.
+    if (gs.has_target && self.m_atk_unreachable_streak == 0)
         return BTStatus::Failure;
     s_self->tgtSendF2AndMacro(gs);
     return BTStatus::Failure; // передати до actTgtNavigation
@@ -1296,8 +1296,14 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleGeoPath(GameState& gs,
         }
     }
 
-    // WalkForward на основі мінімапи вимкнено: моби самі агряться і підходять.
-    // Застрягання в текстурах обробляється stuck detection вище (WalkBack+Rotate+WalkForward).
+    // WalkForward коли є таргет але атаки не йдуть → можливо застряг у текстурах.
+    // Broken geodata на free серверах: бот застряє в невидимих стінах.
+    if (gs.has_target && m_atk_unreachable_streak > 2 && !m_tgt_nav_prev_was_walk) {
+        gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 500));
+        m_tgt_nav_prev_was_walk = true;
+        gs.log("[NAV] streak=" + std::to_string(m_atk_unreachable_streak)
+            + " → WalkForward (вихід з текстур)");
+    }
     (void)map_ref;
 
     return std::nullopt;
