@@ -873,8 +873,14 @@ BTStatus BotBehaviorTree::actTgtF2AndMacro(GameState& gs) {
     auto& self = *s_self;
     // streak==0 = атаки йдуть, HP моба змінюється → таргет не міняємо.
     // streak>0 = атаки не йдуть (ідемо до макро-таргету або застрягли) → F2 шукає ближчого.
-    if (gs.has_target && self.m_atk_unreachable_streak == 0)
+    if (gs.has_target && self.m_atk_unreachable_streak == 0) {
+        gs.log("[F2] SKIP has_tgt=1 streak=0 (атаки йдуть)");
         return BTStatus::Failure;
+    }
+    gs.log("[F2] SEND has_tgt=" + std::to_string(gs.has_target ? 1 : 0)
+        + " streak=" + std::to_string(self.m_atk_unreachable_streak)
+        + " dots=" + std::to_string(gs.minimap_dots.size())
+        + " attempts=" + std::to_string(self.m_tgt_macro_attempts));
     s_self->tgtSendF2AndMacro(gs);
     return BTStatus::Failure; // передати до actTgtNavigation
 }
