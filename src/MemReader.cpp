@@ -2,6 +2,9 @@
 #include "ProcessMemory.h"
 #include <fstream>
 #include <cmath>
+#include <algorithm>
+#include <cstdint>
+#include <vector>
 #include <sstream>
 #include <string>
 #include <cstring>
@@ -179,4 +182,139 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
                            && (state.x != 0.f || state.y != 0.f);
     state.valid = hp_ok || (m_off.use_kl_base && coords_ok);
     return state;
+}
+
+// ── AutoCalibratePlayer ───────────────────────────────────────────────────────
+MemReader::AutoCalibResult MemReader::AutoCalibratePlayer(
+        pid_t pid, uintptr_t playerBase,
+        int hp_pct, int mp_pct, int cp_pct,
+        uintptr_t scan_max)
+{
+    AutoCalibResult result;
+    if (!pid || !playerBase || scan_max < 8) return result;
+
+    // Читаємо весь блок за один виклик
+    const size_t n = scan_max / 4;
+    std::vector<uint32_t> buf(n, 0);
+    ProcessMemory::Read(pid, playerBase, buf.data(), n * 4);
+
+    // Повертає true якщо cur/max*100 ≈ pct (±tol%) і значення виглядають як HP
+    auto match = [](uint32_t cur, uint32_t mx, int pct, int tol = 4) -> bool {
+        if (mx < 100u || mx > 500000u) return false;
+        if (cur == 0u || cur > mx)     return false;
+        int ratio = (int)((uint64_t)cur * 100u / mx);
+        return std::abs(ratio - pct) <= tol;
+    };
+
+    // Якщо всі три статси = 100% — калібрування ненадійне (будь-яка рівна пара підійде)
+    const bool degenerate = (hp_pct >= 98 && mp_pct >= 98 && cp_pct >= 98);
+
+    // Шукаємо пари (cur_idx, max_idx) в межах вікна 64 байти (16 uint32)
+    constexpr size_t kWindow = 16;
+    for (size_t i = 0; i < n && i < n; ++i) {
+        uint32_t cur = buf[i];
+        if (cur < 10u || cur > 500000u) continue;
+
+        size_t jend = std::min(i + kWindow, n);
+        for (size_t j = i + 1; j < jend; ++j) {
+            uint32_t mx = buf[j];
+
+            if (!result.found_hp && match(cur, mx, hp_pct)) {
+                // Перевірка: пара не підходить одночасно до mp/cp (якщо ті відрізняються)
+                bool ambig = (!degenerate)
+                    && (std::abs(hp_pct - mp_pct) < 3 || match(cur, mx, mp_pct))
+                    && (std::abs(hp_pct - cp_pct) < 3 || match(cur, mx, cp_pct));
+                if (!ambig) {
+                    result.hp_off = i * 4; result.max_hp_off = j * 4;
+                    result.found_hp = true;
+                }
+            }
+            if (!result.found_mp && match(cur, mx, mp_pct)) {
+                bool ambig = result.found_hp && (i * 4 == result.hp_off);
+                if (!ambig) {
+                    result.mp_off = i * 4; result.max_mp_off = j * 4;
+                    result.found_mp = true;
+                }
+            }
+            if (!result.found_cp && match(cur, mx, cp_pct)) {
+                bool ambig = (result.found_hp && i * 4 == result.hp_off)
+                          || (result.found_mp && i * 4 == result.mp_off);
+                if (!ambig) {
+                    result.cp_off = i * 4; result.max_cp_off = j * 4;
+                    result.found_cp = true;
+                }
+            }
+        }
+        if (result.found_hp && result.found_mp && result.found_cp) break;
+    }
+
+    std::cerr << "[MemCalib] playerBase=0x" << std::hex << playerBase << std::dec
+              << " hp=" << hp_pct << "% mp=" << mp_pct << "% cp=" << cp_pct << "%\n";
+    if (result.found_hp)
+        std::cerr << "[MemCalib] HP  cur=+0x" << std::hex << result.hp_off
+                  << " max=+0x" << result.max_hp_off << std::dec << "\n";
+    if (result.found_mp)
+        std::cerr << "[MemCalib] MP  cur=+0x" << std::hex << result.mp_off
+                  << " max=+0x" << result.max_mp_off << std::dec << "\n";
+    if (result.found_cp)
+        std::cerr << "[MemCalib] CP  cur=+0x" << std::hex << result.cp_off
+                  << " max=+0x" << result.max_cp_off << std::dec << "\n";
+    if (!result.found_hp && !result.found_mp && !result.found_cp)
+        std::cerr << "[MemCalib] Нічого не знайдено — спробуй при HP/MP < 90%\n";
+
+    return result;
+}
+
+// ── SaveCalib / LoadCalib ─────────────────────────────────────────────────────
+void MemReader::SaveCalib(const AutoCalibResult& r, const std::string& path) const {
+    std::ofstream f(path);
+    if (!f) return;
+    f << "{\n"
+      << "  \"hp_off\":"     << r.hp_off     << ",\n"
+      << "  \"max_hp_off\":" << r.max_hp_off << ",\n"
+      << "  \"mp_off\":"     << r.mp_off     << ",\n"
+      << "  \"max_mp_off\":" << r.max_mp_off << ",\n"
+      << "  \"cp_off\":"     << r.cp_off     << ",\n"
+      << "  \"max_cp_off\":" << r.max_cp_off << "\n"
+      << "}\n";
+    std::cerr << "[MemCalib] Збережено: " << path << "\n";
+}
+
+bool MemReader::LoadCalib(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return false;
+
+    auto parseUint = [&](const std::string& key, uintptr_t& out) {
+        std::string line;
+        f.clear(); f.seekg(0);
+        while (std::getline(f, line)) {
+            auto pos = line.find("\"" + key + "\"");
+            if (pos == std::string::npos) continue;
+            auto colon = line.find(':', pos);
+            if (colon == std::string::npos) continue;
+            try { out = (uintptr_t)std::stoull(line.substr(colon + 1)); } catch (...) {}
+            return;
+        }
+    };
+
+    AutoCalibResult r;
+    parseUint("hp_off",     r.hp_off);
+    parseUint("max_hp_off", r.max_hp_off);
+    parseUint("mp_off",     r.mp_off);
+    parseUint("max_mp_off", r.max_mp_off);
+    parseUint("cp_off",     r.cp_off);
+    parseUint("max_cp_off", r.max_cp_off);
+
+    r.found_hp = (r.hp_off > 0 && r.max_hp_off > 0);
+    r.found_mp = (r.mp_off > 0 && r.max_mp_off > 0);
+    r.found_cp = (r.cp_off > 0 && r.max_cp_off > 0);
+
+    if (!r.found_hp && !r.found_mp) return false;
+
+    if (r.found_hp) { m_off.hp_off = r.hp_off; m_off.max_hp_off = r.max_hp_off; }
+    if (r.found_mp) { m_off.mp_off = r.mp_off; m_off.max_mp_off = r.max_mp_off; }
+    if (r.found_cp) { m_off.cp_off = r.cp_off; m_off.max_cp_off = r.max_cp_off; }
+
+    std::cerr << "[MemCalib] Завантажено з " << path << "\n";
+    return true;
 }

@@ -55,7 +55,14 @@
   - HP_Offset=0x0 (не відкалібровано) → HP з OCR; coords з memory → coords_valid=true через MemReader
   - `ShadowMode=true`: логує порівняння OCR vs Memory → дозволяє побачити розбіжності
   - HP/MP/CP offsets знайти пізніше через Cheat Engine або `--calibrate`
-- **Наступні пріоритети**: live farm 5+ год; перевірити [KL-HP] + [MemReader] логи; kill rate > 3/хв
+- **MR54** — MemReader авто-калібрування HP/MP/CP без Cheat Engine:
+  - `AutoCalibratePlayer(pid, playerBase, hp%, mp%, cp%)`: сканує +0x00..+0x300, шукає пари
+    (cur, max) де cur/max*100 ≈ OCR відсоток (±4%)
+  - Тригер: після KL знаходить playerBase + OCR HP стабільний 3 тіки + хоча б 1 стат < 98%
+  - Результат → `mem_calib.json` (наступний запуск завантажує автоматично)
+  - Якщо HP/MP/CP=100% → чекає до 6с (60 тіків) потім калібрує (менш точно)
+  - Логи: `[MemCalib] HP cur=+0xXX max=+0xYY` тощо
+- **Наступні пріоритети**: live farm 5+ год; перевірити [MemCalib] + [KL-HP] логи; kill rate > 3/хв
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками

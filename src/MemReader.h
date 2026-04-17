@@ -68,6 +68,25 @@ public:
     // Викликати щоразу коли KL знаходить/оновлює playerBase.
     void SetDirectBase(uintptr_t base) { m_direct_base = base; }
 
+    // ── Авто-калібрування HP/MP/CP offsets ───────────────────────────────────
+    // Сканує playerBase+0x00..scan_max, шукає пари (cur,max) де cur/max*100 ≈ pct.
+    // hp/mp/cp_pct — поточні відсотки з OCR (0..100).
+    // Повертає true якщо знайдено хоча б HP offset.
+    struct AutoCalibResult {
+        uintptr_t hp_off = 0,  max_hp_off = 0;
+        uintptr_t mp_off = 0,  max_mp_off = 0;
+        uintptr_t cp_off = 0,  max_cp_off = 0;
+        bool found_hp = false, found_mp = false, found_cp = false;
+    };
+    static AutoCalibResult AutoCalibratePlayer(
+        pid_t pid, uintptr_t playerBase,
+        int hp_pct, int mp_pct, int cp_pct,
+        uintptr_t scan_max = 0x300);
+
+    // Зберегти/завантажити результат калібрування (mem_calib.json).
+    void SaveCalib(const AutoCalibResult& r, const std::string& path = "mem_calib.json") const;
+    bool LoadCalib(const std::string& path = "mem_calib.json");
+
     // Читаємо стан гравця (всі поля за один прохід)
     PlayerState ReadPlayer() const;
 
