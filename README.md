@@ -1,100 +1,76 @@
-# rdga1bot
+# rdga1bot — v1.2
 
-C++ бот для автоматизації фарму в Lineage II.
+C++ бот для автоматизації фарму в Lineage II.  
 Протестовано: ElmoreLab Kamael/Lionna, Arch Linux, Wine/Lutris (GE-Proton), X11.
+
+## Результати (v1.2)
+
+| Сесія | Kills | Deaths | Kill/хв |
+|-------|-------|--------|---------|
+| 31 хв (MR52) | 129 | 1 | 4.2 |
+| 10 хв (MR51) | 37 | 0 | 3.5 |
+| 125 хв (MR50) | 381 | 1 | 3.4 |
+| Тиждень (~54 сесії, v1.1) | ~15 700 | — | 4–15 |
+
+Ціль: **kill rate > 3/хв стабільно** — досягнуто.
+
+---
 
 ## Можливості
 
-**Бойовий цикл**
+### Бойовий цикл
 - Автоматичний пошук і атака мобів через `/nexttarget` (F2) і `/target МобНейм` макроси
 - Детекція смерті моба: OpenCV HP bar + KnownList memory read (instant, без debounce)
 - Watchdog таймаут — перехід до лутингу якщо kill не детектується
-- Споіл/sweep для класу Spoiler (SpoilKey + SweepKey)
 - Pokemon sweep: `/target Pokemon` + `/useshortcut` після кожного kill
 - Blacklist недосяжних мобів: HP-stable 5с → автоматичне блокування на 60с
+- **MR50**: `m_atk_unreachable_streak` — після 5 unreachable без kills → форсуємо повний цикл (Pokemon + patrol), ігноруючи minimap_close_threat
+- **MR51**: `m_atk_streak_force_count` — після 3 force-циклів (~75с) → ESC + `has_target=false` → patrol фізично переміщує бота (break 20хв Pokemon-loop)
+- **MR52**: `condNeedsRest` не відпочиває < 15с після kill; `hp_threshold` 70%→45% (TH Vampiric Rage лікується атакуючи)
 
-**Навігація**
+### Навігація
 - Мінімапа Rotating Radar: детекція червоних/фіолетових точок мобів, ротація до цілі
 - WalkForward по мінімапі (dy-based) + прогресивна ротація при застряганні
 - Патруль PatrolPath (`F2000,R500,...`) при порожній мінімапі
 - Memory-based навігація: координати XYZ + heading (`[Navigation] Enabled=true`)
-- Геодата L2J формат: A* pathfinding по `.geo` файлах (`[Geodata] Enabled=true`)
 - NavMesh Recast/Detour: `[NavMesh] Enabled=true` + зібрані точки руху
 
-**Детекція**
-- OpenCV XShm screen capture (lazy HSV конвертація, ~30-60 FPS)
-- HP/MP/CP бари персонажа і HP бар цілі (HSV, конфігуровані в INI)
-- Auto-calibration TargetStatusWnd: автовизначення posX при першому таргеті
-- F12 → `calibrate_*.png` + HSV auto-suggest в лозі
-
-**Memory reading (KnownList)**
+### Memory Reading (KnownList + MemReader)
 - `process_vm_readv` — без root, без Cheat Engine, без Windows API
 - `blindScan()` — автономний пошук PlayerBase; atomic abort при таймауті
 - Region scan heap: XYZ triplet scan → тип/HP/isDead/ім'я/level (KL_MAX_OBJECTS=2000)
 - HP читання (MR43): render_node+0x58 → game_obj → +0x14 = HP (uint32, NOT float)
+- **MR53 UseKLBase**: MemReader отримує `playerBase` від KnownList без статичного `PlayerPtr`; `PosX/Y/Z=0x24/0x28/0x2C` → координати гравця з пам'яті без Cheat Engine
+- **MR54 AutoCalibrate**: `AutoCalibratePlayer()` сканує `playerBase+0x00..0x300`, знаходить HP/MP/CP offsets через порівняння з OCR%; результат → `mem_calib.json` (автозавантаження при наступному старті)
+- **ShadowMode**: логує порівняння OCR vs Memory (`[MemCalib]`, `[KL-HP]`) — діагностика без зупинки
 - Thread-safe WorldState (snapshot copy під mutex, bgLoop scan кожну 1с)
-- Зважений вибір цілі: `[WeightedTargeting]` — scoring по відстані/HP/freshness
-- `--dump-objects` / `--calibrate [--name "X"]` — калібровка без Cheat Engine
+- `--dump-objects` / `--calibrate [--name "X"]` / `--hp-calibrate` — калібровка без Cheat Engine
 
-**BehaviorTree планувальник (MR20, MR27-28)**
+### BehaviorTree планувальник
 - Stackless BT VM: `BTNode` (24 bytes), `BTState` (8 bytes), плоскі масиви — без heap, без рекурсії
-- Гілки: Dead → Rest → Zone → Buff → Loot → Attack → Target Selector (7 вузлів, ~22 загалом)
-- VM_MAX_STEPS=10000 guard — захист від нескінченного циклу при corrupt tree state
-- GoogleTest suite: `tests/bt_test.cpp` + `tests/memory_test.cpp` (14 тестів, `make -C tests run`)
+- Гілки: Dead → Rest → Zone → Buff → Loot → Attack → Target Selector (~22 вузли)
 - Target піддерево (MR28): Init → DeadTarget → Minimap → F2AndMacro → Navigation → GeoPath → Patrol
 - `thread_local s_self` — static Action/Condition функції безпечно звертаються до стану
+- GoogleTest suite: `tests/bt_test.cpp` + `tests/memory_test.cpp` (`make -C tests run`)
 
-**Huber Q-Learning / RL (MR23-25, `[Learning] Enabled=false` за замовчуванням)**
+### Huber Q-Learning / RL (`[Learning] Enabled=true` за замовчуванням)
 - Лінійна Q-функція: `Q(s,a) = W[:,a]^T * phi(s)`, 10 ознак × 6 дій
 - IRLS з Huber-вагами — стійко до рідкісних смертей (викиди в reward)
 - Async LearningWorker: IRLS в окремому потоці, не блокує main loop
-- Epsilon-greedy exploration: `epsilon` від 1.0 до 0.05, decay після кожної смерті
+- Epsilon-greedy exploration: `epsilon` від 1.0 до 0.05
 - Ваги зберігаються в `weights.json`, автоматично завантажуються при старті
-- При `Enabled=false` — **нуль** впливу на поведінку, нуль overhead
 
-**Мультипоточність**
-- VisionWorker: async DetectNPCs + DetectMinimap (Core 2, `[Threading] VisionThread`)
-- GeodataWorker: async A* FindPath (Core 3, `[Threading] GeodataThread`)
-- LearningWorker: async IRLS batch update (`[Learning] Enabled=true`)
-- Всі воркери `Enabled=false` за замовчуванням — зворотна сумісність збережена
-- weights.json: авто-збереження ваг при shutdown, двопрохідна валідація при завантаженні
+### QA Monitor
+- Python daemon (`qa/qa_monitor.py`): аналіз логів, IsolationForest аномалії
+- Режими: `--analyze-only stats.json --log session.log`, `--replay`, `--live`
+- Фільтрація по сесії: розрізняє кілька сесій в одному stats-файлі (uptime/kills reset детектор)
+- Аномалії: death_loop (лише "Фаза 0"), kl_hp_spike, targeting_failure_spike, slow_bt_tick
 
-**Антидетект**
+### Антидетект
 - RandomDelay: нормальний розподіл затримок між атаками, поворотами, ходьбою
 - Конфігурується через `[Delays]` в INI (mean±std мс, `Enabled=false` за замовчуванням)
 
-**Буфінг**
-- ALT+B → template matching (`buff_tab.png`, `buff_profile.png`) → click профілю
-- Fallback на координати якщо шаблон не збігся; retry через 120с
-
-**QA Monitor**
-- Python daemon (`qa/qa_monitor.py`): аналіз логів, IsolationForest аномалії
-- Режими: `--analyze-only`, `--replay` (batch), `--live` (daemon під час фарму)
-- MemPalace bridge: ChromaDB векторна БД для cross-сесійного контексту
-- Baseline: 57799 kills, 22 сесії, 190 аномалій
-
-**Автоматика**
-- Авто-зілля HP/MP/CP з кулдауном 5с
-- Dead detection: Enter → 20с → grace 30с → відновлення фарму
-- Telegram сповіщення: смерть + статистика (через fork+curl, ліміт 3 паралельні)
-- Авто-збереження stats кожні N kills + `/tmp/rdga1bot_stats.json` live export (очищається при старті)
-
-**TUI Dashboard (ncurses)**
-- HP/MP/CP бари персонажа, HP цілі, kills/deaths, K/D ratio
-- Права колонка: режим `[OPENCV]`/`[MEM]`/`[HYBRID]`, XY координати, кількість мобів
-- RL рядок: `[RL] eps=X loss=Y upd=Z` (тільки якщо `[Learning] Enabled=true`)
-- Лог до 200 рядків з підсвіткою переходів стану
-- Пауза (P), скидання барів (R/Space), налаштування (S), calibrate (F12)
-- Глобальна зупинка: ScrollLock (XQueryKeymap, незалежно від фокусу)
-
-## Результати тестів
-
-| Тест | Kills | Deaths | Kill/хв |
-|------|-------|--------|---------|
-| 40 хв | 127 | 0 | 4.3 |
-| 100 хв | 1511 | 0 | 15.1 |
-| 3 год | 1940 | 0 | 11.0 |
-| Тиждень (~54 сесії) | ~15 700 | — | 4–15 |
+---
 
 ## Швидкий старт
 
@@ -103,72 +79,51 @@ C++ бот для автоматизації фарму в Lineage II.
 sudo pacman -S opencv gcc libx11 libxtst libxext curl ncurses
 
 # Зібрати
-cd ~/l2bot/rdga1bot
 bash build.sh
 
-# Перший запуск (TUI налаштувань)
-./launch.sh
-
-# Звичайний запуск (з rdga1bot.ini)
-./rdga1bot --quick
-
-# Тривалий фарм з логом
-./farm.sh
+# Запуск
+./launch.sh          # TUI налаштувань
+./rdga1bot --quick   # без TUI (rdga1bot.ini)
 ```
 
 ## Конфігурація
 
-Копіювати `rdga1bot.example.ini` → `rdga1bot.ini`, відредагувати під себе.
-`rdga1bot.ini` не комітується в git (містить Telegram токен).
+Копіювати `rdga1bot.example.ini` → `rdga1bot.ini`.
 
 ```ini
-[General]
-WindowTitle = Lineage II
-LogLevel = INFO
-
-[Character]
-Class = Treasure Hunter
-
-[Targeting]
-NextTargetKey = F2
-MacroKeys = F7,F8,F9,F10,F11
-
-[Attack]
-AttackKeys = F1
-AttackWait = 0.5
-AttackWatchdog = 20
-
-[Buffs]
-BuffEnabled = true
-BuffUseAltB = true
-BuffInterval = 600
+[Learning]
+Enabled = true        # Huber Q-Learning увімкнено за замовчуванням
 
 [KnownList]
 Enabled = true
-AutoScan = true
+AutoScan = true       # автоматичний blindScan PlayerBase
 
-[BehaviorTree]
-Enabled = true         # обов'язково для нового планувальника
+[MemReader]
+Enabled = true
+UseKLBase = true      # координати з playerBase (без Cheat Engine)
+PosX_Offset = 0x24
+PosY_Offset = 0x28
+PosZ_Offset = 0x2C
+ShadowMode = true     # логувати OCR vs Memory порівняння
+# HP/MP/CP offsets знаходяться автоматично при першому запуску → mem_calib.json
 
-[Learning]
-Enabled = false        # true = Huber Q-Learning (потребує [BehaviorTree] Enabled=true)
-LearningRate = 0.1
-EpsilonStart = 1.0
-WeightsFile = ./weights.json
-
-[Delays]
-Enabled = false        # true = антидетект варіативні затримки
-
-[WeightedTargeting]
-Enabled = false        # true = зважений вибір цілі (потребує KnownList)
-
-[Threading]
-Enabled = false
-VisionThread = false
-GeodataThread = false
+[Potions]
+HpThreshold = 45      # відпочинок тільки при < 45% HP (TH Vampiric Rage)
 ```
 
-Повний список параметрів: [`rdga1bot.example.ini`](rdga1bot.example.ini)
+Повний список: [`rdga1bot.example.ini`](rdga1bot.example.ini)
+
+## Калібровка
+
+```bash
+# Автоматична (при першому запуску з UseKLBase=true):
+# → [MemCalib] знаходить HP/MP/CP offsets, зберігає в mem_calib.json
+
+# Ручна діагностика:
+./rdga1bot --calibrate              # дамп KnownList об'єктів
+./rdga1bot --calibrate --name "Mob" # пошук по імені
+./rdga1bot --hp-calibrate           # пошук HP offset мобів
+```
 
 ## Клавіші
 
@@ -178,61 +133,33 @@ GeodataThread = false
 | P | Пауза / продовження |
 | S | Налаштування (hot-reload) |
 | R / Space | Скинути детекцію HP/MP/CP барів |
-| F12 | Зберегти calibrate_*.png + HSV auto-suggest |
-| PrintScreen | shot.png |
-
-## Калібровка KnownList (memory offsets)
-
-```bash
-./rdga1bot --dump-objects
-./rdga1bot --calibrate
-./rdga1bot --calibrate --name "Назва моба"
-```
-
-Докладно: [`CALIBRATION.md`](CALIBRATION.md)
+| F12 | Зберегти calibrate_*.png |
 
 ## Архітектура
 
 ```
 Brain.cpp/.h           — диспетчер: сприйняття + потіони + BotBehaviorTree dispatch
-Eyes.cpp/.h            — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа, NPC
+BehaviorTree.h/.cpp    — stackless BT VM (BTNode 24B, BTState 8B)
+BotBehaviorTree.h/.cpp — Farm BT + Target піддерево + RL хуки (MR27/28/50/51/52)
+Eyes.cpp/.h            — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа
 Hands.h                — дії: XTest keyboard/mouse, рух стрілками
 Config.cpp/.h          — INI парсер + валідація + interactive TUI
-Dashboard.cpp/.h       — ncurses TUI (3 колонки: бари / стат / mem info + RL рядок)
-BehaviorTree.h/.cpp    — stackless BT VM (BTNode 24B, BTState 8B, плоскі масиви)
-BotBehaviorTree.h/.cpp — Farm BT + Target піддерево (MR27/28) + RL хуки
-MemoryValidator.h/.cpp — валідація PlayerState/L2Character/coords (MR26)
-ShadowLogger.h/.cpp    — A/B Memory vs OCR JSONL лог (MR26, ShadowMode=false)
-LinearQModel.h/.cpp    — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій, save/load JSON
+Dashboard.cpp/.h       — ncurses TUI
+MemReader.cpp/.h       — HP/MP/CP/XYZ гравця; UseKLBase + AutoCalibratePlayer (MR53/54)
+OffsetScanner          — blindScan, calibrateHeadingOffset, findNameOffset
+KnownListReader        — region scan мобів (KL_MAX_OBJECTS=2000)
+WorldState             — thread-safe агрегатор KnownList
+LinearQModel.h/.cpp    — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій
 LearningWorker.h/.cpp  — async IRLS batch update thread
 FeatureExtractor.h     — phi(s): 10 ознак з GameState → Eigen::VectorXf
-ExperienceBuffer.h     — циклічний буфер Experience{s,a,r,s',done}
-RewardCalculator.h     — reward: kill/death/fail/buff/idle
-third_party/eigen/     — Eigen 3.4.0 header-only (лінійна алгебра)
-Capture_Linux.cpp      — XShm screen capture
-Intercept_Linux.cpp    — XTest backend (XTestFakeKeyEvent)
-Window_Linux.cpp       — X11 window finding (кешований)
-MemReader.cpp/.h       — читання HP/MP/CP/XYZ гравця з пам'яті Wine
-OffsetScanner          — blindScan(timeoutMs+abort), calibrateHeadingOffset(), findNameOffset()
-KnownListReader        — region scan мобів (KL_MAX_OBJECTS=2000), readName(), findMobByName()
-WorldState             — thread-safe агрегатор KnownList
-Geodata.cpp/.h         — L2J геодата: Load(), CanMoveTo(), A* FindPath()
-RandomDelay.h          — нормальний розподіл затримок (антидетект)
-vision_worker.h/.cpp   — async DetectNPCs+DetectMinimap (Core 2)
-geodata_worker.h/.cpp  — async A* FindPath (Core 3)
-qa/qa_monitor.py       — QA daemon: IsolationForest + MemPalace bridge
-Notify.cpp/.h          — Telegram через fork+curl
-Stats.cpp/.h           — статистика сесії + JSON лог + /tmp live export
+ShadowLogger.h/.cpp    — A/B Memory vs OCR JSONL лог
+qa/qa_monitor.py       — QA daemon: IsolationForest + session filtering
 ```
 
 ## Вимоги
 
 - Linux, X11 (не Wayland)
-- Wine (протестовано: GE-Proton через Flatpak Lutris)
-- g++ з підтримкою C++17
-- OpenCV 4.x
-- ncurses
-- libx11, libxtst (XTest), libxext (XShm)
-- curl (для Telegram, опціонально)
-- Python 3.x + scikit-learn (для QA Monitor, опціонально)
-- googletest (для тестів: `make -C tests run`, опціонально)
+- Wine (GE-Proton через Flatpak Lutris)
+- g++ з C++17, OpenCV 4.x, ncurses, libx11, libxtst, libxext
+- Python 3.x + scikit-learn (QA Monitor, опціонально)
+- googletest (тести, опціонально)
