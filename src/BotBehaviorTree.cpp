@@ -1292,8 +1292,12 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleGeoPath(GameState& gs,
     }
 
     // ── WalkForward якщо моб прямо попереду (dy < -15) ───────────────────────
+    // Пропускаємо якщо вже 2+ мобів на мінімапі: кімнатний спот — моби самі
+    // прийдуть в зону атаки, WalkForward тільки тягне зайвий агро.
+    const bool room_has_mobs = (gs.minimap_dots.size() >= 2);
     if (map_ref && std::abs(map_ref->dx) <= kMinimapDxThreshold
-        && map_ref->dy < -15 && !m_tgt_nav_prev_was_walk && gs.eyes.IsGroundAhead()) {
+        && map_ref->dy < -15 && !m_tgt_nav_prev_was_walk
+        && gs.eyes.IsGroundAhead() && !room_has_mobs) {
         gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 700));
         m_tgt_nav_prev_was_walk = true;
         gs.log("[MAP] Моб прямо попереду (dy=" + std::to_string(map_ref->dy) +
