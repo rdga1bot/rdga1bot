@@ -145,6 +145,7 @@ private:
     TP    m_atk_last_redetect{};
     bool  m_atk_mem_hp_valid         = false;
     float m_atk_mem_hp_abs           = -1.f;
+    float m_atk_kl_hp_prev_abs       = -1.f;  // throttle: log тільки при зміні
     bool  m_atk_low_hp_timer_active  = false;
     TP    m_atk_low_hp_since{};
     int   m_atk_unreachable_streak    = 0; // послідовних unreachable без kills

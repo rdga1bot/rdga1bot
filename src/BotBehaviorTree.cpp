@@ -679,24 +679,31 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
             for (const auto& mob : gs.kl_mobs) {
                 if (!mob.isAlive()) continue;
                 float d = mob.distanceTo(gs.player_x, gs.player_y);
+                // dist < 100 = player-об'єкт або garbage (player coords == mob coords)
+                if (d < 100.0f) continue;
                 if (d < best_dist) { best_dist = d; best = &mob; }
             }
             if (best) {
+                self.m_atk_mem_hp_valid = true;
+                const float absHp = best->hpAbs();
                 if (best->hpMax > 0.f) {
                     float pct = best->hpPercent();
-                    self.m_atk_mem_hp_valid = true;
                     const_cast<GameState&>(gs).target->hp = (int)pct;
                     // НЕ перезаписуємо has_target: kill detection через kl_mob_died + hp≤2% debounce
-                    gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
-                        " hpMax=" + std::to_string((int)best->hpMax) +
-                        " hp%=" + std::to_string((int)pct) +
-                        " ocr=" + std::to_string(gs.target->hp));
+                    if (absHp != self.m_atk_kl_hp_prev_abs) {
+                        self.m_atk_kl_hp_prev_abs = absHp;
+                        gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
+                            " hp%=" + std::to_string((int)pct) +
+                            " ocr=" + std::to_string(gs.target->hp));
+                    }
                 } else {
-                    self.m_atk_mem_hp_valid = true;
-                    self.m_atk_mem_hp_abs   = best->hpAbs();
-                    gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
-                        " hpMax=0 hpAbs=" + std::to_string((int)best->hpAbs()) +
-                        " ocr=" + std::to_string(gs.target->hp));
+                    self.m_atk_mem_hp_abs = absHp;
+                    if (absHp != self.m_atk_kl_hp_prev_abs) {
+                        self.m_atk_kl_hp_prev_abs = absHp;
+                        gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
+                            " hpAbs=" + std::to_string((int)absHp) +
+                            " ocr=" + std::to_string(gs.target->hp));
+                    }
                 }
             }
         }
