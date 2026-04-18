@@ -334,7 +334,7 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                 if (!isValidPtr((uintptr_t)gObjPtr)) continue;
                 ++dbg_valid_ptr;
                 uint32_t hp_u32 = rpm<uint32_t>((uintptr_t)gObjPtr + OFF_GAME_OBJ_HP);
-                if (hp_u32 == 0 || hp_u32 > 500000u) continue;
+                if (hp_u32 == 0 || hp_u32 > 2000u) continue;   // MR73: real mob HP ~70-200 units (hpAbs=70 confirmed)
                 ++dbg_hp_ok;
                 float hp = static_cast<float>(hp_u32);
 

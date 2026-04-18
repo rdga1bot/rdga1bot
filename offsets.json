@@ -1,8 +1,12 @@
 {
-  "playerBase":3241984,
+  "playerBase":3247788,
   "OFF_KNOWN_LIST":288,
   "OFF_KNOWN_COUNT":292,
+  "OFF_OBJ_TYPE":92,
   "OFF_OBJ_X":36,
   "OFF_OBJ_Y":40,
-  "OFF_OBJ_Z":44
+  "OFF_OBJ_Z":44,
+  "OFF_CHAR_HP":256,
+  "OFF_CHAR_HP_MAX":0,
+  "OFF_CHAR_IS_DEAD":384
 }

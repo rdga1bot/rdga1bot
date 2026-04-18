@@ -1316,14 +1316,10 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleGeoPath(GameState& gs,
         }
     }
 
-    // WalkForward коли є таргет але атаки не йдуть → можливо застряг у текстурах.
-    // Broken geodata на free серверах: бот застряє в невидимих стінах.
-    if (gs.has_target && m_atk_unreachable_streak > 2 && !m_tgt_nav_prev_was_walk) {
-        gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 500));
-        m_tgt_nav_prev_was_walk = true;
-        gs.log("[NAV] streak=" + std::to_string(m_atk_unreachable_streak)
-            + " → WalkForward (вихід з текстур)");
-    }
+    // WalkForward за unreachable_streak вилучено (MR73):
+    // Спрацьовувало під час нормального бою через KL-HP false positives →
+    // бот крокував у протилежну від моба сторону після 3-5 атак.
+    // Реальний вихід зі застрягань — tgtHandlePatrolAndRotate (MR65, 20с без руху).
     (void)map_ref;
 
     return std::nullopt;
