@@ -77,15 +77,21 @@ void Brain::Process(bool debug) {
     m_me     = m_eyes.DetectMe();
     m_target = m_eyes.DetectTarget();
 
-    // Memory Reading: якщо дані валідні — замінюємо OpenCV детекцію
+    // Memory Reading: якщо дані валідні — замінюємо OpenCV детекцію.
+    // Guardrail: якщо pct поза [0,100] — хибний offset, залишаємо OCR значення.
     if (m_mem_player.valid) {
+        auto safePct = [&](float cur, float max, int ocr_fallback) -> int {
+            if (max <= 0.f) return ocr_fallback;
+            int pct = (int)(cur * 100.f / max);
+            return (pct >= 0 && pct <= 100) ? pct : ocr_fallback;
+        };
+        int ocr_hp = m_me ? m_me->hp : 0;
+        int ocr_mp = m_me ? m_me->mp : 0;
+        int ocr_cp = m_me ? m_me->cp : 0;
         Eyes::Me mem_me;
-        mem_me.hp = (m_mem_player.max_hp > 0)
-            ? (m_mem_player.hp * 100 / m_mem_player.max_hp) : (m_me ? m_me->hp : 0);
-        mem_me.mp = (m_mem_player.max_mp > 0)
-            ? (m_mem_player.mp * 100 / m_mem_player.max_mp) : (m_me ? m_me->mp : 0);
-        mem_me.cp = (m_mem_player.max_cp > 0)
-            ? (m_mem_player.cp * 100 / m_mem_player.max_cp) : (m_me ? m_me->cp : 0);
+        mem_me.hp = safePct(m_mem_player.hp,    m_mem_player.max_hp, ocr_hp);
+        mem_me.mp = safePct(m_mem_player.mp,    m_mem_player.max_mp, ocr_mp);
+        mem_me.cp = safePct(m_mem_player.cp,    m_mem_player.max_cp, ocr_cp);
         m_me = mem_me;
         m_detect_me_fail_count = 0;
     }
@@ -657,10 +663,12 @@ void Brain::readShadowMemoryState(GameState& gs) {
         if (!vr.valid) {
             m_consecutive_mem_fails++;
             m_shadow_logger->logValidationError(vr.error);
-            if (m_consecutive_mem_fails >= m_cfg.mem_max_consecutive_fails) {
+            // Логуємо тільки при першому перевищенні порогу, далі замовкаємо.
+            // Умова ">= threshold" раніше логувала КОЖЕН тік → 140K рядків спаму.
+            if (m_consecutive_mem_fails == m_cfg.mem_max_consecutive_fails) {
                 m_shadow_logger->logFailureAlert(m_consecutive_mem_fails);
                 Log("[Shadow] MemReader: " + std::to_string(m_consecutive_mem_fails)
-                    + " послідовних помилок: " + vr.error, LogLevel::Warning);
+                    + " послідовних помилок (далі мовчимо): " + vr.error, LogLevel::Warning);
             }
         } else {
             m_consecutive_mem_fails = 0;
