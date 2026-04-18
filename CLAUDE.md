@@ -120,7 +120,17 @@
   - `world_state`: прибрано `readItemsRegionScan` (type==2 ніколи не matches + server-side loot)
   - `offsets.json`: прибрано LEGACY OFF_CHAR_HP/HP_MAX/IS_DEAD (dead code paths)
   - Реальні фільтри: XYZ triplet + HP через render_node + dist<100 (MR55)
-- **Наступні пріоритети**: live farm тест з новими offsets (--dump-objects → бойовий запуск)
+- **MR72** — два критичних фікси після першого бойового тесту:
+  - `Brain.cpp safePct()`: якщо memory pct поза [0,100] → OCR fallback (mem_calib.json offset 612 читав interpolated X → HP=254)
+  - `[Shadow] spam fix`: `m_consecutive_mem_fails >= threshold` → `== threshold` (логуємо тільки раз, не кожен тік)
+  - `mem_calib.json` видалено (false-positive AutoCalibrate: render_node+0x264 = interpolated X, не HP)
+  - Root cause TUI jitter + HP=254: safePct guardrail тепер захищає від будь-якого false-positive calib
+- **MR73** — WalkForward вилучено з GeoNav + HP filter 500k→2k:
+  - `tgtHandleGeoNavigation`: видалено WalkForward за `unreachable_streak > 2`
+  - Root cause: KL-HP false positives (hp_u32<500k = 157 "мобів") → stable HP 5s → streak++ → крокував від моба після 3-5 атак
+  - `knownlist_reader`: `hp_u32 > 500000 → > 2000` (real mob hpAbs=70, підтверджено логами)
+  - Реальний вихід зі застрягань залишився: tgtHandlePatrolAndRotate MR65 (20с без руху)
+- **Наступні пріоритети**: live farm тест MR73; дослідити `double free` crash при shutdown
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками

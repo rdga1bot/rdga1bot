@@ -50,6 +50,8 @@ C++ бот для автоматизації фарму в Lineage II.
 - `--dump-objects` / `--calibrate [--name "X"]` / `--hp-calibrate` / `--watch-pos` — калібровка без Cheat Engine
 - **MR70 Offsets**: `OFF_OBJ_X/Y/Z=0x24/28/2C` від playerBase (підтверджено `--watch-pos`); region scan `0x300000-0x350000` (підтверджено `--find-pos`, stride=0x5C0)
 - **MR71 Cleanup**: вилучено непідтверджені offsets (NAME/LEVEL/MP=0) і мертвий код (readAllAsChars, readItemsRegionScan, OFF_OBJ_TYPE фільтр); реальні фільтри: XYZ + HP через render_node + dist<100
+- **MR72**: `safePct()` guardrail (memory HP поза [0,100] → OCR fallback); `[Shadow]` spam fix (лог один раз); видалено false-positive mem_calib.json
+- **MR73**: WalkForward вилучено з GeoNav (root cause: KL-HP false positives → крокував від моба); HP filter `500k→2k` (hpAbs=70 підтверджено)
 - **Windows**: `ReadProcessMemory` (ProcessMemory.h), Toolhelp32 (FindPid), `EnumProcessModules` (FindModuleBase), `VirtualQueryEx` (region scan) — MR67
 
 ### BehaviorTree планувальник
