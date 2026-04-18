@@ -113,7 +113,14 @@
   - `OFF_OBJ_TYPE=0x5C` — завжди 0 в цьому клієнті (не розрізняє mob/player/item)
   - KnownList ptr відсутній (`+0x88=0`, `+0x120=0`) → тільки regionScan
   - `cache_valid`: AND-логіка `cx>200 AND cy>200` (проти false positive Y=0 з Wine .data секції)
-- **Наступні пріоритети**: live farm 5+ год; тест `--dump-objects` з новими offsets; Windows нативний білд
+- **MR71** — cleanup: виключення непідтверджених offsets і мертвого коду:
+  - `OFF_OBJ_NAME/LEVEL/MP/MP_MAX → 0` (не відкалібровані — читали garbage)
+  - `readMobsRegionScan`: прибрано OFF_OBJ_TYPE фільтр (завжди 0, dead filter)
+  - `world_state`: прибрано `readAllAsChars` fallback (KnownList ptr=0 → завжди empty)
+  - `world_state`: прибрано `readItemsRegionScan` (type==2 ніколи не matches + server-side loot)
+  - `offsets.json`: прибрано LEGACY OFF_CHAR_HP/HP_MAX/IS_DEAD (dead code paths)
+  - Реальні фільтри: XYZ triplet + HP через render_node + dist<100 (MR55)
+- **Наступні пріоритети**: live farm тест з новими offsets (--dump-objects → бойовий запуск)
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
