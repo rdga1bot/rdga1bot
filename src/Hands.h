@@ -29,7 +29,13 @@ public:
         m_window_rect   {}
     {}
 
-    void SetWindowRect(const Rect &rect) { m_window_rect = rect; }
+    void SetWindowRect(const Rect &rect) {
+        m_window_rect = rect;
+#ifndef _WIN32
+        // Propagate window position to Intercept for XSendEvent window-relative coords (MR66)
+        GetIntercept().SetWindowRect(rect.x, rect.y, rect.width, rect.height);
+#endif
+    }
     void SetGameWindow(unsigned long wnd) { Input::SetGameWindow(wnd); }
 
     void ResetUI()

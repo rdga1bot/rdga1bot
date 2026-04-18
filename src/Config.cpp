@@ -134,6 +134,9 @@ bool Config::Load(const std::string& path) {
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     ParseINI(text);
 
+    // [Input]
+    input_backend = Get("Input", "Backend", input_backend);
+
     // [General]
     window_title = Get("General", "WindowTitle", window_title);
     debug = GetBool("General", "Debug", debug);

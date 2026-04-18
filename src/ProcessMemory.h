@@ -1,8 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
-#include <sys/uio.h>
-#include <sys/types.h>
+#include "platform.h"
 
 // Утилітарний header-only модуль для читання пам'яті Wine/L2 процесу
 // через process_vm_readv (без root, Linux only).

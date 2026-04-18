@@ -1666,6 +1666,10 @@ int main(int argc, char* argv[]) {
         MemReader mem_reader;
 
         ApplyConfig(cfg, hands, eyes, brain, &mem_reader);
+#ifndef _WIN32
+        // MR66: встановлюємо input backend (xtest/xsendevent/hybrid)
+        hands.GetIntercept().SetBackend(cfg.input_backend);
+#endif
         brain.LoadNavMeshPoints(); // завантажує існуючі точки з попередніх сесій
 
         // ── Threading: CPU affinity + workers ──────────────────────────────────

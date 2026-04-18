@@ -3,7 +3,7 @@
 #include <vector>
 #include <optional>
 #include <string>
-#include <sys/types.h>
+#include "platform.h"
 #include "l2_objects.h"
 #include "offset_scanner.h"
 

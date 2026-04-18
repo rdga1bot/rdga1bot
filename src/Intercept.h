@@ -49,6 +49,13 @@ public:
 
     void SetGameWindow(unsigned long wnd);
 
+#ifndef _WIN32
+    // Set which backend to use: "xtest" | "xsendevent" | "hybrid"
+    void SetBackend(const std::string& name);
+    // Store window position for window-relative coordinate conversion
+    void SetWindowRect(int x, int y, int w, int h);
+#endif
+
     void SendMouseMoveEvent(const Point &point) const;
     void SendMouseButtonEvent(MouseButtonEvent event) const;
     void SendKeyboardKeyEvent(int code, KeyboardKeyEvent event, bool e0, bool e1) const;
@@ -81,6 +88,14 @@ private:
     Point         m_last_mouse_pos;
     mutable bool  m_focus_verified = false; // кеш фокусу для поточної серії подій
     void EnsureGameFocused() const;         // перевіряє/встановлює фокус один раз
+
+    // ── Hybrid input backend (MR66) ────────────────────────────────────────
+    enum class LinuxInputBackend { XTest, XSendEvent, Hybrid };
+    LinuxInputBackend m_backend = LinuxInputBackend::Hybrid; // default
+
+    // Window rect for converting absolute → window-relative coords
+    int m_window_rect_x = 0;
+    int m_window_rect_y = 0;
 #endif
 
     std::array<bool, KEYBOARD_KEY_MAX> m_pressed_keyboard_keys;

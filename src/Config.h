@@ -36,6 +36,9 @@ struct ColorConfig {
 // Зчитує rdga1bot.ini і надає типізований доступ до параметрів.
 class Config {
 public:
+    // [Input] — input backend selection (Linux only)
+    std::string input_backend = "hybrid"; // "xtest" | "xsendevent" | "hybrid"
+
     // [General]
     std::string window_title = "Lineage II";
     bool debug    = true;

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <sys/types.h>
+#include "platform.h"
 #include "offsets_config.h"
 
 // ── OffsetScanner ─────────────────────────────────────────────────────────────

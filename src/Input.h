@@ -201,6 +201,9 @@ public:
 
     void SetGameWindow(unsigned long wnd) { m_intercept.SetGameWindow(wnd); }
 
+    // Accessor for platform-specific configuration (e.g. SetBackend, SetWindowRect on Linux)
+    Intercept& GetIntercept() { return m_intercept; }
+
     void Send(int sleep = 0);
     void Reset()            { m_events.clear(); }
     bool IsReady() const    { return m_threads.load() == 0; }

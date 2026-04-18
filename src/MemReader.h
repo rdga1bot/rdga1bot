@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include <optional>
-#include <sys/types.h>
+#include "platform.h"
 
 // ── MemReader ────────────────────────────────────────────────────────────────
 // Читає пам'ять процесу L2 (Wine) через process_vm_readv (Linux).
