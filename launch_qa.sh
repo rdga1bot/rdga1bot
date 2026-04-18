@@ -52,7 +52,7 @@ cleanup() {
     echo "[QA] Готово."
 }
 trap cleanup EXIT
-trap 'cleanup; exit 0' INT TERM
+trap 'cleanup; exit 0' INT TERM HUP
 
 # ── Запуск бота ───────────────────────────────────────────────────────────────
 echo "[QA] Запуск бота..."
