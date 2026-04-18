@@ -1833,6 +1833,7 @@ int main(int argc, char* argv[]) {
         uint64_t vision_frame_id = 0;
         std::atomic<bool>      kl_scan_running{false};
         std::atomic<uintptr_t> kl_scan_result{0};
+        std::thread            kl_scan_thread;  // MR74: join при shutdown (не detach)
         int  kl_scan_attempts = 0;
         bool kl_cache_tried   = false; // спробували playerBaseCache з offsets.json
         bool mem_calib_done   = false; // авто-калібрування HP/MP/CP вже запускалось
@@ -2092,11 +2093,12 @@ int main(int argc, char* argv[]) {
                     auto* result_ptr   = &kl_scan_result;
                     int   bs_timeout   = cfg.mem_blindscan_timeout_ms > 0
                                          ? cfg.mem_blindscan_timeout_ms : 0;
-                    std::thread([scanner_ptr, running_ptr, result_ptr, bs_timeout]() {
+                    if (kl_scan_thread.joinable()) kl_scan_thread.join();
+                    kl_scan_thread = std::thread([scanner_ptr, running_ptr, result_ptr, bs_timeout]() {
                         uintptr_t base = scanner_ptr->blindScan(bs_timeout);
                         result_ptr->store(base);
                         running_ptr->store(false);
-                    }).detach();
+                    });
                 }
             }
 
@@ -2229,6 +2231,10 @@ int main(int argc, char* argv[]) {
         } // restart loop
 
 bot_exit:
+        // MR74: abort background blindScan thread before kl_scanner is destroyed
+        if (kl_scanner) kl_scanner->abortScan();
+        if (kl_scan_thread.joinable()) kl_scan_thread.join();
+
         if (cfg.navmesh_cfg.save_on_exit)
             brain.SaveNavMeshPoints();
 

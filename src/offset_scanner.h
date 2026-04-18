@@ -91,6 +91,9 @@ public:
     // Зупинити Ctrl+C. Крутись у грі — побачиш heading offset одразу.
     void headingMonitor(uintptr_t playerBase) const;
 
+    // MR74: сигнал для передчасного завершення blindScan (thread-safe).
+    void abortScan() { m_scan_abort = true; }
+
     // Runtime-значення offsets (перевизначаються findKnownListOffset або loadOffsets)
     uintptr_t playerBaseCache = 0;          // зберігається в offsets.json після blindScan
     uintptr_t knownListOff   = OFF_KNOWN_LIST;
