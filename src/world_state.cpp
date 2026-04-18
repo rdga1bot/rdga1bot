@@ -68,17 +68,15 @@ void WorldState::bgLoop() {
 
         if (pb) {
             std::vector<L2Character> mobs;
-            std::vector<L2Object>    items;
+            std::vector<L2Object>    items; // server-side loot — завжди empty
             bool all_mobs_empty = false;
 
             if (++scan_skip >= SCAN_EVERY_N) {
                 scan_skip = 0;
                 mobs = m_reader.readMobsRegionScan(pb, mob_r);
-                if (mobs.empty()) {
-                    mobs = m_reader.readAllAsChars(pb);
-                }
+                // readAllAsChars fallback вилучено: KnownList ptr=0 у цьому клієнті → завжди empty
+                // readItemsRegionScan вилучено: OFF_OBJ_TYPE не розрізняє items + server-side loot
                 all_mobs_empty = mobs.empty();
-                items = m_reader.readItemsRegionScan(pb, item_r);
             } else {
                 // Між повними сканами: використовуємо попередній snapshot
                 std::lock_guard<std::mutex> lk(m_mutex);

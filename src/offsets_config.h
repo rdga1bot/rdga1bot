@@ -44,21 +44,20 @@ constexpr uintptr_t OFF_CHAR_HP      = 0x100;  // WARNING: reads interpolated X,
 constexpr uintptr_t OFF_CHAR_HP_MAX  = 0x000;  // N/A    — ElmoreLab не зберігає MaxHP в KnownList
 constexpr uintptr_t OFF_CHAR_IS_DEAD = 0x180;  // WARNING: reads 0x80000000 for live mobs (broken)
 
-// L2Character extended offsets (потребують калібровки через --calibrate)
-// MP гравця/моба — типові HF значення, перевір через HP scan в --calibrate
-constexpr uintptr_t OFF_CHAR_MP      = 0x1FC;  // float  — MP
-constexpr uintptr_t OFF_CHAR_MP_MAX  = 0x200;  // float  — MaxMP
-constexpr uintptr_t OFF_CHAR_LEVEL   = 0x214;  // int32  — рівень
+// L2Character extended offsets — НЕ відкалібровані. 0 = вимкнено.
+// Калібрувати через --calibrate коли потрібно.
+constexpr uintptr_t OFF_CHAR_MP      = 0x000;  // float  — MP (не відкалібровано)
+constexpr uintptr_t OFF_CHAR_MP_MAX  = 0x000;  // float  — MaxMP (не відкалібровано)
+constexpr uintptr_t OFF_CHAR_LEVEL   = 0x000;  // int32  — рівень (не відкалібровано)
 
 // Heading персонажа. Калібрувати: стоячи нерухомо запустити --calibrate,
 // потім повернутись на 90° і знову. Значення що змінилось — це heading.
 // Одиниці: float радіани [-pi..pi] або int16 [0..65535] (залежить від клієнту).
 constexpr uintptr_t OFF_PLAYER_HEADING = 0x30;
 
-// Назва об'єкту. Калібрувати через --calibrate --name "Назва моба поряд".
-// Формат: char[64] UTF-8 або wchar_t[32] UTF-16 (залежить від клієнту).
-// Перевір обидва через --calibrate dump.
-constexpr uintptr_t OFF_OBJ_NAME = 0x68;
+// Назва об'єкту — НЕ відкалібровано. 0 = вимкнено (readName не викликається).
+// Калібрувати через --calibrate --name "Назва моба поряд" коли потрібно.
+constexpr uintptr_t OFF_OBJ_NAME = 0x00;
 
 // Region scan параметри (Kamael ElmoreLab, перекалібровано 2026-04-18)
 // --find-pos знайшов L2Objects у діапазоні 0x317EA0..0x32D294 (stride=0x5C0).

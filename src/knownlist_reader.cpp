@@ -295,7 +295,7 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
     seen.reserve(64);
 
     // Діагностичні лічильники (логуються при кожному скані у stderr)
-    uint32_t dbg_in_range = 0, dbg_type0 = 0, dbg_valid_ptr = 0, dbg_hp_ok = 0;
+    uint32_t dbg_in_range = 0, dbg_valid_ptr = 0, dbg_hp_ok = 0;
 
     for (const auto& reg : m_scan_cache) {
         const uintptr_t rEnd = reg.base + reg.size;
@@ -324,10 +324,9 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                 uintptr_t objBase = xAddr - m_off.objXOff;
                 if (!seen.insert(objBase).second) continue;
 
-                int32_t typeRaw = readTypeFromBuf(
-                    m_pid, chunk.data(), addr, sz, objBase + m_off.objTypeOff);
-                if (typeRaw != 0) continue; // тільки Mob
-                ++dbg_type0;
+                // OFF_OBJ_TYPE завжди 0 у цьому клієнті — тип не відкалібровано.
+                // Реальний фільтр: HP через render_node (hp_u32 > 0).
+                // Гравець відсівається dist<100 у BotBehaviorTree (MR55).
 
                 // HP: render_node+0x58 → game_obj → +0x14 (uint32, NOT float).
                 // render_node+0x100 reads interpolated X — do NOT use as HP.
@@ -367,16 +366,11 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
             }
         }
     }
-    // Діагностика: виводимо лічильники фільтрів у stderr при кожному скані
-    // in_range → скільки XYZ кандидатів у дистанції від гравця
-    // type0    → пройшли type==0 (mob) фільтр
-    // validPtr → gObjPtr валідний ptr
-    // hp_ok    → hp_u32 ∈ (0, 500000] → реальний моб
+    // Діагностика: in_range → XYZ кандидати в дистанції; validPtr/hp_ok → реальні моби
     static uint32_t s_scan_n = 0;
     if ((++s_scan_n % 10) == 1) { // кожен 10-й скан (~30с)
         std::cerr << "[KnownList] scan#" << s_scan_n
                   << " in_range=" << dbg_in_range
-                  << " type0=" << dbg_type0
                   << " validPtr=" << dbg_valid_ptr
                   << " hp_ok=" << dbg_hp_ok
                   << " result=" << result.size() << "\n";
