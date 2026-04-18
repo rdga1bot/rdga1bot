@@ -56,6 +56,34 @@ def _check_ffmpeg() -> bool:
     return subprocess.run(["which", "ffmpeg"], capture_output=True).returncode == 0
 
 
+def _find_window(title: str) -> tuple[int, int, int, int] | None:
+    """Знаходить вікно за заголовком через xdotool. Повертає (x, y, w, h) або None."""
+    try:
+        r = subprocess.run(
+            ["xdotool", "search", "--name", title],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0 or not r.stdout.strip():
+            return None
+        wid = r.stdout.strip().splitlines()[0]
+        r2 = subprocess.run(
+            ["xdotool", "getwindowgeometry", "--shell", wid],
+            capture_output=True, text=True, timeout=5,
+        )
+        vals = {}
+        for line in r2.stdout.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                vals[k.strip()] = v.strip()
+        x = int(vals.get("X", 0))
+        y = int(vals.get("Y", 0))
+        w = int(vals.get("WIDTH",  1366))
+        h = int(vals.get("HEIGHT", 768))
+        return x, y, w, h
+    except Exception:
+        return None
+
+
 def _session_start_dt(log_path: str) -> datetime | None:
     m = _SESSION_DATE_RE.search(os.path.basename(log_path))
     if not m:
@@ -108,9 +136,25 @@ def cmd_record(args):
     out = os.path.join(VIDEOS_DIR, f"farm_{ts}.mkv")
 
     display = args.display
-    size    = args.size     # e.g. "1920x1080"
-    offset  = args.offset   # e.g. "1366,0" → "+1366,0" for x11grab
     fps     = str(args.fps)
+
+    # Авто-детект вікна L2 через xdotool
+    size   = args.size
+    offset = args.offset
+    if args.auto or (not args.size and not args.offset):
+        geo = _find_window(args.window_title)
+        if geo:
+            x, y, w, h = geo
+            # libx264 потребує парних розмірів
+            w = w - (w % 2)
+            h = h - (h % 2)
+            size   = f"{w}x{h}"
+            offset = f"{x},{y}"
+            logger.info(f"[REC] Авто-детект вікна '{args.window_title}': "
+                        f"{size} offset={offset}")
+        else:
+            logger.warning(f"[REC] Вікно '{args.window_title}' не знайдено — "
+                           f"використовую --size {size} --offset {offset}")
 
     input_url = f"{display}+{offset}" if offset else display
 
@@ -236,11 +280,13 @@ def main():
 
     # record
     rec = sub.add_parser("record", help="Безперервний запис екрана")
-    rec.add_argument("--display", default=":0.0",      help="X11 display (default :0.0)")
-    rec.add_argument("--size",    default="1920x1080", help="Розмір захвату WxH")
-    rec.add_argument("--offset",  default="",          help="Зсув X,Y (напр. 1366,0)")
-    rec.add_argument("--fps",     type=int, default=10, help="Кадрів/сек (default 10)")
-    rec.add_argument("--crf",     type=int, default=28, help="libx264 CRF (18=якість, 35=розмір)")
+    rec.add_argument("--display",      default=":0.0",     help="X11 display (default :0.0)")
+    rec.add_argument("--size",         default="1366x768", help="Розмір захвату WxH (fallback)")
+    rec.add_argument("--offset",       default="",         help="Зсув X,Y (fallback)")
+    rec.add_argument("--fps",          type=int, default=10, help="Кадрів/сек (default 10)")
+    rec.add_argument("--crf",          type=int, default=28, help="libx264 CRF (28=баланс)")
+    rec.add_argument("--auto",         action="store_true", help="Авто-детект вікна L2 (xdotool)")
+    rec.add_argument("--window-title", default="Lineage II", help="Заголовок вікна для авто-детекту")
 
     # clip
     cl = sub.add_parser("clip", help="Нарізка кліпів навколо подій з логу")
