@@ -199,10 +199,6 @@ private:
     std::deque<Crumb> m_breadcrumbs;
     bool              m_backtracking = false;
 
-    // ── QA frame capture ─────────────────────────────────────────────────────
-    TP m_frame_last_saved{};
-    void saveFrame(GameState& gs, const std::string& event);
-
     // ── Лог-функція (перенаправляє у Brain::Log) ─────────────────────────────
     LogFn m_log_fn;
 

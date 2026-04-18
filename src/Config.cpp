@@ -432,11 +432,6 @@ bool Config::Load(const std::string& path) {
     threading.geodata_thread = GetBool("Threading","GeodataThread", threading.geodata_thread);
     threading.geodata_core   = GetInt ("Threading","GeodataCore",   threading.geodata_core);
 
-    // [QA]
-    qa_frame_capture     = GetBool("QA", "FrameCapture",    qa_frame_capture);
-    qa_frame_max_per_min = GetInt ("QA", "FrameMaxPerMin",  qa_frame_max_per_min);
-    qa_frames_dir        = Get    ("QA", "FramesDir",        qa_frames_dir);
-
     // [BehaviorTree]
     use_behavior_tree = GetBool("BehaviorTree", "Enabled", use_behavior_tree);
 

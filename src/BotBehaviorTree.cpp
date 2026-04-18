@@ -9,36 +9,8 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
-#include <ctime>
 
 thread_local BotBehaviorTree* BotBehaviorTree::s_self = nullptr;
-
-// ── saveFrame ─────────────────────────────────────────────────────────────────
-void BotBehaviorTree::saveFrame(GameState& gs, const std::string& event) {
-    if (!gs.cfg.qa_frame_capture) return;
-
-    auto& self = *s_self;
-    const auto now_tp = Clock::now();
-    // Rate-limit: qa_frame_max_per_min frames/хв
-    const double min_interval_s = 60.0 / std::max(1, gs.cfg.qa_frame_max_per_min);
-    if (std::chrono::duration<double>(now_tp - self.m_frame_last_saved).count() < min_interval_s)
-        return;
-    self.m_frame_last_saved = now_tp;
-
-    // Timestamp: YYYYMMDD_HHMMSS_mmm
-    auto tt = std::chrono::system_clock::now();
-    std::time_t t = std::chrono::system_clock::to_time_t(tt);
-    char ts[32];
-    std::strftime(ts, sizeof(ts), "%Y%m%d_%H%M%S", std::localtime(&t));
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        tt.time_since_epoch()) % 1000;
-    char fname[256];
-    std::snprintf(fname, sizeof(fname), "%s/%s_%03lld_%s.png",
-        gs.cfg.qa_frames_dir.c_str(), ts, (long long)ms.count(), event.c_str());
-
-    gs.eyes.SaveFrame(fname);
-    gs.log("[QA] frame → " + std::string(fname));
-}
 
 BotBehaviorTree::BotBehaviorTree() {
     m_last_buff      = Clock::now() - std::chrono::hours(1);
@@ -301,7 +273,6 @@ BTStatus BotBehaviorTree::actDead(GameState& gs) {
     switch (self.m_dead_phase) {
     case 0:
         gs.log("[DEAD] Фаза 0: Enter");
-        self.saveFrame(gs, "death");
         gs.hands.PressKeyboardKey(Input::KeyboardKey::Enter);
         gs.hands.Send(5000);
         self.m_dead_phase = 1;
@@ -627,7 +598,6 @@ BTStatus BotBehaviorTree::actLoot(GameState& gs) {
             gs.stats.kills % gs.cfg.auto_save_kills == 0)
             gs.stats.SaveToFile();
         gs.log("[LOOTING] Вбивство #" + std::to_string(gs.stats.kills));
-        self.saveFrame(gs, "kill");
 
         if (gs.cfg.loot_enabled) {
             gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
@@ -1353,7 +1323,6 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleGeoPath(GameState& gs,
         m_tgt_nav_prev_was_walk = true;
         gs.log("[NAV] streak=" + std::to_string(m_atk_unreachable_streak)
             + " → WalkForward (вихід з текстур)");
-        saveFrame(gs, "stuck_streak" + std::to_string(m_atk_unreachable_streak));
     }
     (void)map_ref;
 
