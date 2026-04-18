@@ -210,17 +210,11 @@ void Intercept::SendMouseButtonEvent(MouseButtonEvent event) const
 
     if (button <= 0) return;
 
-    // ── Hybrid/XSendEvent: надсилаємо кнопку миші напряму у вікно гри ────
-    // Координати — window-relative (оновлено в SendMouseMoveEvent).
-    // Fallback на XTest якщо m_game_window не відомий.
-    bool use_xsend = (m_backend == LinuxInputBackend::XSendEvent ||
-                      m_backend == LinuxInputBackend::Hybrid);
+    // ── XSendEvent (тільки в режимі XSendEvent, не Hybrid) ──────────────────
+    // Hybrid: кнопки миші → XTest (Wine ігнорує XSendEvent ButtonPress у більшості версій).
+    // Клавіатура у Hybrid через XSendEvent — працює; миша — ні (Wine-версійно залежна).
+    bool use_xsend = (m_backend == LinuxInputBackend::XSendEvent);
     if (use_xsend && m_game_window == 0) {
-        static bool warned = false;
-        if (!warned) {
-            std::cerr << "[Intercept] WARNING: Hybrid mouse btn — m_game_window=0, fallback to XTest\n";
-            warned = true;
-        }
         use_xsend = false;
     }
 
