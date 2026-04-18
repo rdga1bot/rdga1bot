@@ -7,9 +7,11 @@
 #include <chrono>
 #include <ctime>
 
+#ifndef _WIN32
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 Notify::Notify(const std::string& token, const std::string& chat_id,
                bool on_death, int stats_interval)
@@ -47,7 +49,6 @@ void Notify::SendSync(const std::string& text) {
             case '\r': safe_text += "\\r";  break;
             case '\t': safe_text += "\\t";  break;
             default:
-                // Пропускаємо control characters (0x00-0x1F)
                 if (static_cast<unsigned char>(c) < 0x20) continue;
                 safe_text += c;
                 break;
@@ -59,9 +60,27 @@ void Notify::SendSync(const std::string& text) {
                        "\",\"parse_mode\":\"Markdown\"}";
     std::string url = "https://api.telegram.org/bot" + m_token + "/sendMessage";
 
+#ifdef _WIN32
+    // Windows: curl.exe bundled since Windows 10 1803
+    std::string cmd = "curl.exe -s -X POST"
+                      " -H \"Content-Type: application/json\""
+                      " -d \"" + safe_text + "\" " + url;
+    // Rebuild proper JSON arg for -d
+    cmd = "curl.exe -s -X POST -H \"Content-Type: application/json\" -d \""
+        + json + "\" " + url;
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    PROCESS_INFORMATION pi = {};
+    if (CreateProcessA(nullptr, cmd.data(), nullptr, nullptr,
+                       FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        WaitForSingleObject(pi.hProcess, 10000);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+#else
     pid_t pid = fork();
     if (pid == 0) {
-        // Дочірній процес: виконуємо curl
         close(STDOUT_FILENO);
         close(STDERR_FILENO);
         const char* args[] = {
@@ -74,9 +93,9 @@ void Notify::SendSync(const std::string& text) {
         execv("/usr/bin/curl", const_cast<char* const*>(args));
         _exit(1);
     } else if (pid > 0) {
-        // Батьківський процес: чекаємо завершення
         waitpid(pid, nullptr, 0);
     }
+#endif
 }
 
 void Notify::Send(const std::string& text) {

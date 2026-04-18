@@ -15,14 +15,48 @@
 #include <algorithm>
 #include <unordered_set>
 #include <csignal>
+#ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 #include <cerrno>
 
 static constexpr size_t MAX_REGION_SIZE = 64 * 1024 * 1024; // 64 MB
 
 OffsetScanner::OffsetScanner(pid_t pid) : m_pid(pid) {}
 
+#ifdef _WIN32
+// ── Читання регіонів через VirtualQueryEx (Windows) ──────────────────────────
+static constexpr DWORD PAGE_READABLE_MASK =
+    PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE;
+
+std::vector<OffsetScanner::MemRegion> OffsetScanner::getReadableRegions() const {
+    std::vector<MemRegion> result;
+    HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, m_pid);
+    if (!h) return result;
+
+    MEMORY_BASIC_INFORMATION mbi = {};
+    uintptr_t addr = 0;
+    while (VirtualQueryEx(h, (LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        if (mbi.State == MEM_COMMIT &&
+            (mbi.Protect & PAGE_READABLE_MASK) &&
+            !(mbi.Protect & PAGE_GUARD) &&
+            mbi.RegionSize > 0 &&
+            mbi.RegionSize <= MAX_REGION_SIZE) {
+            MemRegionType rtype = (mbi.Type == MEM_PRIVATE)
+                ? MemRegionType::Heap : MemRegionType::Misc;
+            if (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))
+                rtype = MemRegionType::Exe;
+            result.push_back({(uintptr_t)mbi.BaseAddress, mbi.RegionSize, rtype});
+        }
+        uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+        if (next <= addr) break; // overflow guard
+        addr = next;
+    }
+    CloseHandle(h);
+    return result;
+}
+#else
 // ── Читання регіонів з /proc/<pid>/maps (scanmem-style) ──────────────────────
 std::vector<OffsetScanner::MemRegion> OffsetScanner::getReadableRegions() const {
     std::vector<MemRegion> result;
@@ -77,8 +111,9 @@ std::vector<OffsetScanner::MemRegion> OffsetScanner::getReadableRegions() const 
     std::fclose(f);
     return result;
 }
+#endif // _WIN32
 
-// ── ReadBytes через process_vm_readv ─────────────────────────────────────────
+// ── ReadBytes ─────────────────────────────────────────────────────────────────
 bool OffsetScanner::readBytes(uintptr_t addr, void* buf, size_t len) const {
     return ProcessMemory::Read(m_pid, addr, buf, len);
 }

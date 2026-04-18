@@ -8,13 +8,42 @@
 #include <sstream>
 #include <string>
 #include <cstring>
+#include <cerrno>
+#include <iostream>
+#ifndef _WIN32
 #include <dirent.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <cerrno>
-#include <iostream>
+#endif
 
 // ── Знайти PID за іменем процесу ─────────────────────────────────────────────
+#ifdef _WIN32
+pid_t MemReader::FindPid(const std::string& proc_name) {
+    auto lower = [](std::string s) {
+        for (auto& c : s) c = (char)tolower((unsigned char)c);
+        return s;
+    };
+    const std::string target = lower(proc_name);
+
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+
+    PROCESSENTRY32 pe = {};
+    pe.dwSize = sizeof(pe);
+    pid_t found = 0;
+    if (Process32First(snap, &pe)) {
+        do {
+            std::string exe(pe.szExeFile);
+            if (lower(exe) == target) {
+                found = pe.th32ProcessID;
+                break;
+            }
+        } while (Process32Next(snap, &pe));
+    }
+    CloseHandle(snap);
+    return found;
+}
+#else
 pid_t MemReader::FindPid(const std::string& proc_name) {
     DIR* dir = opendir("/proc");
     if (!dir) return 0;
@@ -59,8 +88,45 @@ pid_t MemReader::FindPid(const std::string& proc_name) {
     closedir(dir);
     return 0;
 }
+#endif
 
-// ── Знайти base address модуля з /proc/PID/maps ──────────────────────────────
+// ── Знайти base address модуля ────────────────────────────────────────────────
+#ifdef _WIN32
+uintptr_t MemReader::FindModuleBase(pid_t pid, const std::string& module) {
+    auto lower = [](std::string s) {
+        for (auto& c : s) c = (char)tolower((unsigned char)c);
+        return s;
+    };
+    const std::string target = lower(module);
+
+    HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!h) return 0;
+
+    HMODULE mods[1024];
+    DWORD needed = 0;
+    uintptr_t base = 0;
+    if (EnumProcessModules(h, mods, sizeof(mods), &needed)) {
+        DWORD count = needed / sizeof(HMODULE);
+        char name[MAX_PATH];
+        for (DWORD i = 0; i < count; ++i) {
+            if (GetModuleFileNameExA(h, mods[i], name, sizeof(name))) {
+                std::string fname(name);
+                auto slash = fname.rfind('\\');
+                if (slash == std::string::npos) slash = fname.rfind('/');
+                std::string basename = (slash != std::string::npos) ? fname.substr(slash + 1) : fname;
+                if (lower(basename) == target) {
+                    MODULEINFO mi = {};
+                    GetModuleInformation(h, mods[i], &mi, sizeof(mi));
+                    base = (uintptr_t)mi.lpBaseOfDll;
+                    break;
+                }
+            }
+        }
+    }
+    CloseHandle(h);
+    return base;
+}
+#else
 uintptr_t MemReader::FindModuleBase(pid_t pid, const std::string& module) {
     std::ifstream maps("/proc/" + std::to_string(pid) + "/maps");
     if (!maps) return 0;
@@ -83,6 +149,7 @@ uintptr_t MemReader::FindModuleBase(pid_t pid, const std::string& module) {
     }
     return 0;
 }
+#endif
 
 // ── Open ─────────────────────────────────────────────────────────────────────
 bool MemReader::Open(const std::string& proc_name) {

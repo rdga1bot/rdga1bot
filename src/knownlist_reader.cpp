@@ -182,17 +182,40 @@ void KnownListReader::diagnoseTypes(uintptr_t playerBase) const {
     }
 }
 
-// ── Динамічне оновлення кешу регіонів пам'яті (/proc/<pid>/maps) ─────────────
-// Читає всі readable регіони Wine/l2.exe процесу.
-// Фільтри: readable (r--), base >= 0x10000, base < 0x70000000 (пропускаємо DLL),
-//          розмір [objXOff+12 .. 8MB].
-// Кешується 30с — не читаємо /proc щотіку.
+// ── Динамічне оновлення кешу регіонів пам'яті ────────────────────────────────
+// Windows: VirtualQueryEx. Linux: /proc/<pid>/maps.
+// Кешується 30с — не читаємо щотіку.
 void KnownListReader::refreshScanCache() const {
     time_t now = time(nullptr);
     if (!m_scan_cache.empty() && (now - m_scan_cache_time) < 30) return;
     m_scan_cache.clear();
     m_scan_cache_time = now;
 
+#ifdef _WIN32
+    HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, m_pid);
+    if (!h) {
+        m_scan_cache.push_back({OFF_REGION_SCAN_BASE,
+                                OFF_REGION_SCAN_END - OFF_REGION_SCAN_BASE});
+        return;
+    }
+    constexpr DWORD kReadable =
+        PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE;
+    MEMORY_BASIC_INFORMATION mbi = {};
+    uintptr_t addr = 0;
+    while (VirtualQueryEx(h, (LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+        if (mbi.State == MEM_COMMIT &&
+            (mbi.Protect & kReadable) &&
+            !(mbi.Protect & PAGE_GUARD) &&
+            mbi.RegionSize >= (size_t)(m_off.objXOff + 12) &&
+            mbi.RegionSize <= 32u * 1024 * 1024) {
+            m_scan_cache.push_back({(uintptr_t)mbi.BaseAddress, mbi.RegionSize});
+        }
+        if (next <= addr) break;
+        addr = next;
+    }
+    CloseHandle(h);
+#else
     char path[64];
     std::snprintf(path, sizeof(path), "/proc/%d/maps", (int)m_pid);
     FILE* f = std::fopen(path, "r");
@@ -209,19 +232,18 @@ void KnownListReader::refreshScanCache() const {
         char perms[8] = {};
         char name[256] = {};
         std::sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s", &start, &end, perms, name);
-        if (perms[0] != 'r') continue;             // тільки readable (r--, rw-, rwx — всі)
-        // Wine PE секції l2.exe часто rwxp або r--p — не фільтруємо по 'w' або 'x'
-        if (start < 0x10000u) continue;            // пропускаємо нульову сторінку
-        if (start >= 0x70000000u) continue;        // пропускаємо Wine DLL space
-        // Пропускаємо лише системні SO/ld бібліотеки (не l2.exe і не анонімні регіони)
+        if (perms[0] != 'r') continue;
+        if (start < 0x10000u) continue;
+        if (start >= 0x70000000u) continue;
         if (name[0] == '/' && (std::strstr(name, ".so") || std::strstr(name, "ld-")))
             continue;
         size_t sz = end - start;
-        if (sz < (size_t)(m_off.objXOff + 12)) continue; // надто маленький
-        if (sz > 32u * 1024 * 1024) continue;     // пропускаємо > 32MB (VRAM/system)
+        if (sz < (size_t)(m_off.objXOff + 12)) continue;
+        if (sz > 32u * 1024 * 1024) continue;
         m_scan_cache.push_back({start, sz});
     }
     std::fclose(f);
+#endif
 
     size_t total_mb = 0;
     for (const auto& r : m_scan_cache) total_mb += r.size;
