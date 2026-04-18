@@ -33,17 +33,26 @@ PYTHON="${PYTHON:-python3}"
 
 # ── PIDs дочірніх процесів ────────────────────────────────────────────────────
 PIDS=()
+_CLEANED=0
 
 cleanup() {
+    [ "$_CLEANED" -eq 1 ] && return
+    _CLEANED=1
     echo ""
     echo "[QA] Зупинка всіх процесів..."
     for pid in "${PIDS[@]}"; do
-        kill "$pid" 2>/dev/null || true
+        kill -INT "$pid" 2>/dev/null || true
+    done
+    # Даємо ffmpeg час на коректне завершення (flush + moov atom)
+    sleep 3
+    for pid in "${PIDS[@]}"; do
+        kill -KILL "$pid" 2>/dev/null || true
     done
     wait 2>/dev/null || true
     echo "[QA] Готово."
 }
-trap cleanup INT TERM EXIT
+trap cleanup EXIT
+trap 'cleanup; exit 0' INT TERM
 
 # ── Запуск бота ───────────────────────────────────────────────────────────────
 echo "[QA] Запуск бота..."
