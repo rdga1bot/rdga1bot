@@ -698,42 +698,55 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
             return BTStatus::Success; // → Selector спробує Loot
         }
 
-        // HP моба з пам'яті (якщо увімкнено) — НАЙБЛИЖЧИЙ моб (= поточний таргет).
-        // Раніше: мінімальний HP по всьому KL → вмираючий сусідній моб B (2% HP)
-        // підмінював target->hp і тригерив false kill / has_target=false на поточному A.
-        // Результат: 3-4 моби з ~0% HP гоняться за ботом + "unreachable" кожні 7-8 атак.
-        // Тепер: беремо моба найближчого до гравця (той якого ми атакуємо).
+        // KL-HP: вибір моба — спочатку за hp% (±15% від OCR), потім найближчий fallback.
+        // Проблема "nearest": поруч може бути моб B (ближчий), а атакуємо моб A.
+        // HP моба B не змінюється → hp_for_stable = const → false unreachable.
+        // Рішення: пріоритет mobу чий hp% найближчий до OCR target->hp (до перезапису).
         if (gs.cfg.mem_use_for_target_hp && gs.target.has_value() && gs.coords_valid) {
-            float best_dist = 1e12f;
-            const L2Character* best = nullptr;
+            const int ocr_hp = gs.target->hp;  // OCR value before any overwrite
+            float best_score  = 1e12f;
+            float best_dist   = 1e12f;
+            const L2Character* best      = nullptr;
+            const L2Character* best_near = nullptr;  // fallback: nearest
             for (const auto& mob : gs.kl_mobs) {
                 if (!mob.isAlive()) continue;
                 float d = mob.distanceTo(gs.player_x, gs.player_y);
-                // dist < 100 = player-об'єкт або garbage (player coords == mob coords)
                 if (d < 100.0f) continue;
-                if (d < best_dist) { best_dist = d; best = &mob; }
+                // fallback: closest by distance
+                if (d < best_dist) { best_dist = d; best_near = &mob; }
+                // primary: closest hp% to OCR reading (only if hpMax known)
+                if (mob.hpMax > 0.f) {
+                    float diff = std::abs(mob.hpPercent() - (float)ocr_hp);
+                    if (diff < 15.f && diff < best_score) {
+                        best_score = diff;
+                        best = &mob;
+                    }
+                }
             }
+            // hp%-match не знайшов → fallback до найближчого
+            if (!best) best = best_near;
             if (best) {
                 self.m_atk_mem_hp_valid = true;
                 const float absHp = best->hpAbs();
-                // absHp завжди використовується для hp_for_stable (точний, не int%)
                 self.m_atk_mem_hp_abs = absHp;
                 if (best->hpMax > 0.f) {
                     float pct = best->hpPercent();
                     const_cast<GameState&>(gs).target->hp = (int)pct;
                     if (absHp != self.m_atk_kl_hp_prev_abs) {
                         self.m_atk_kl_hp_prev_abs = absHp;
-                        gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
+                        float d = best->distanceTo(gs.player_x, gs.player_y);
+                        gs.log("[KL-HP] match dist=" + std::to_string((int)d) +
                             " hp%=" + std::to_string((int)pct) +
                             " hpAbs=" + std::to_string((int)absHp) +
-                            " ocr=" + std::to_string(gs.target->hp));
+                            " ocr=" + std::to_string(ocr_hp));
                     }
                 } else {
                     if (absHp != self.m_atk_kl_hp_prev_abs) {
                         self.m_atk_kl_hp_prev_abs = absHp;
-                        gs.log("[KL-HP] nearest dist=" + std::to_string((int)best_dist) +
+                        float d = best->distanceTo(gs.player_x, gs.player_y);
+                        gs.log("[KL-HP] near dist=" + std::to_string((int)d) +
                             " hpAbs=" + std::to_string((int)absHp) +
-                            " ocr=" + std::to_string(gs.target->hp));
+                            " ocr=" + std::to_string(ocr_hp));
                     }
                 }
             }
