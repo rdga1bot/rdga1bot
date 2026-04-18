@@ -55,28 +55,29 @@ trap cleanup EXIT
 trap 'cleanup; exit 0' INT TERM HUP
 
 # ── Запуск бота ───────────────────────────────────────────────────────────────
-echo "[QA] Запуск бота..."
+SESSION_LOG="logs/session_$(date +%Y%m%d_%H%M%S).log"
+echo "[QA] Запуск бота → $SESSION_LOG"
 if [ -f rdga1bot.ini ]; then
-    ./rdga1bot --quick 2>> "logs/stderr_$(date +%Y%m%d).log" &
+    ./rdga1bot --quick 2>> "logs/stderr_$(date +%Y%m%d).log" | tee "$SESSION_LOG" &
 else
-    ./rdga1bot 2>> "logs/stderr_$(date +%Y%m%d).log" &
+    ./rdga1bot 2>> "logs/stderr_$(date +%Y%m%d).log" | tee "$SESSION_LOG" &
 fi
 BOT_PID=$!
 PIDS+=("$BOT_PID")
 echo "[QA] Бот PID=$BOT_PID"
 
-# Чекаємо поки з'явиться session_*.log (бот стартував і почав писати лог)
-echo "[QA] Чекаємо на session_*.log..."
+# Чекаємо поки session_*.log з'явиться і стане непорожнім
+echo "[QA] Чекаємо на $SESSION_LOG..."
 for i in $(seq 1 30); do
-    LOG=$(ls -t logs/session_*.log 2>/dev/null | head -1 || true)
-    [ -n "$LOG" ] && break
+    [ -s "$SESSION_LOG" ] && break
     sleep 1
 done
 
-if [ -z "${LOG:-}" ]; then
-    echo "[QA] ПОМИЛКА: лог не з'явився за 30с — бот не стартував?"
+if [ ! -s "$SESSION_LOG" ]; then
+    echo "[QA] ПОМИЛКА: лог порожній за 30с — бот не стартував?"
     exit 1
 fi
+LOG="$SESSION_LOG"
 echo "[QA] Лог: $LOG"
 
 # ── Frame capture ─────────────────────────────────────────────────────────────
