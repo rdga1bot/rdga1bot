@@ -99,7 +99,21 @@
   - `main.cpp`: `<dirent.h>` guarded; `findL2Pid()` Windows branch; inline lambda → `findL2Pid()`
   - `CMakeLists.txt`: cross-platform split (Linux/Windows sources + libs); PDCurses + interception
   - `Capture.cpp`, `Window.cpp` вже існували (Steps 6-7 виконані раніше)
-- **Наступні пріоритети**: live farm 5+ год; тест XSendEvent (bot не перехоплює мишу/клаву); Windows нативний білд
+- **MR68** — Hybrid mouse buttons → XTest (Wine ігнорує XSendEvent ButtonPress):
+  - Root cause: `XSendEvent(XButtonEvent)` → Wine ігнорує у більшості GE-Proton версій
+  - Виправлено: mouse buttons завжди через `XTestFakeButtonEvent` навіть у Hybrid режимі
+  - Keyboard залишається через `XSendEvent(XKeyEvent)` — працює коректно
+- **MR69** — `--watch-pos`: alive heartbeat щосекунди (виводить поточні значення навіть без руху):
+  - Дозволяє підтвердити що offset читається правильно без необхідності рухати персонажа
+- **MR70** — перекалібровка L2Object offsets + region scan через `--find-pos`/`--watch-pos`:
+  - `OFF_OBJ_X/Y/Z`: `0x90→0x24` від playerBase (true L2ObjBase+0x6C → зсув 0x6C підтверджено)
+    - `--watch-pos` підтвердив: `pb+0x24` = серверна XYZ (стабільна); `pb+0x78` = клієнтська (стрибає)
+  - Region scan: `0x3F0000-0x500000 → 0x300000-0x350000` (фактичний діапазон підтверджено)
+    - `--find-pos` знайшов L2Objects у `0x317EA0..0x32D294`, stride=0x5C0 на 6+ об'єктах
+  - `OFF_OBJ_TYPE=0x5C` — завжди 0 в цьому клієнті (не розрізняє mob/player/item)
+  - KnownList ptr відсутній (`+0x88=0`, `+0x120=0`) → тільки regionScan
+  - `cache_valid`: AND-логіка `cx>200 AND cy>200` (проти false positive Y=0 з Wine .data секції)
+- **Наступні пріоритети**: live farm 5+ год; тест `--dump-objects` з новими offsets; Windows нативний білд
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками

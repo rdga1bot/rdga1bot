@@ -1,4 +1,4 @@
-# rdga1bot — v1.3
+# rdga1bot — v1.4
 
 C++ бот для автоматизації фарму в Lineage II.  
 Протестовано: ElmoreLab Kamael/Lionna, Arch Linux, Wine/Lutris (GE-Proton), X11.
@@ -47,7 +47,8 @@ C++ бот для автоматизації фарму в Lineage II.
 - **MR54 AutoCalibrate**: `AutoCalibratePlayer()` сканує `playerBase+0x00..0x300`, знаходить HP/MP/CP offsets через порівняння з OCR%; результат → `mem_calib.json` (автозавантаження при наступному старті)
 - **ShadowMode**: логує порівняння OCR vs Memory (`[MemCalib]`, `[KL-HP]`) — діагностика без зупинки
 - Thread-safe WorldState (snapshot copy під mutex, bgLoop scan кожну 1с)
-- `--dump-objects` / `--calibrate [--name "X"]` / `--hp-calibrate` — калібровка без Cheat Engine
+- `--dump-objects` / `--calibrate [--name "X"]` / `--hp-calibrate` / `--watch-pos` — калібровка без Cheat Engine
+- **MR70 Offsets**: `OFF_OBJ_X/Y/Z=0x24/28/2C` від playerBase (підтверджено `--watch-pos`); region scan `0x300000-0x350000` (підтверджено `--find-pos`, stride=0x5C0)
 - **Windows**: `ReadProcessMemory` (ProcessMemory.h), Toolhelp32 (FindPid), `EnumProcessModules` (FindModuleBase), `VirtualQueryEx` (region scan) — MR67
 
 ### BehaviorTree планувальник
@@ -64,9 +65,9 @@ C++ бот для автоматизації фарму в Lineage II.
 - Epsilon-greedy exploration: `epsilon` від 1.0 до 0.05
 - Ваги зберігаються в `weights.json`, автоматично завантажуються при старті
 
-### Input Backend (XSendEvent Hybrid, MR66)
+### Input Backend (XSendEvent Hybrid, MR66/68)
 - Keyboard events → `XSendEvent(XKeyEvent)` напряму до вікна гри (не глобальний grab)
-- Mouse buttons → `XSendEvent(XButtonEvent)` з window-relative координатами
+- Mouse buttons → `XTestFakeButtonEvent` (MR68: Wine ігнорує XSendEvent ButtonPress)
 - Mouse move → XTest (DirectInput ігнорує XSendEvent MotionNotify)
 - Переключення: `[Input] Backend = hybrid | xtest | xsendevent` в INI
 - ScrollLock зупинка: `XQueryKeymap` читає фізичний стан клавіатури — не залежить від бекенду
