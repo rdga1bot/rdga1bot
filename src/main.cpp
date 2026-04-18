@@ -327,15 +327,27 @@ static void watchPos(const std::string& offsets_file, uintptr_t override_pb = 0)
     for (auto& c : cands) ProcessMemory::Read(pid, base + c.off, &c.prev, 4);
 
     auto t0 = std::chrono::steady_clock::now();
+    int last_alive_sec = -1;
     while (true) {
         auto now = std::chrono::steady_clock::now();
         int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(now - t0).count();
+        int sec = ms / 1000;
 
         std::vector<float> vals(cands.size());
         bool any_changed = false;
         for (size_t i = 0; i < cands.size(); i++) {
             ProcessMemory::Read(pid, base + cands[i].off, &vals[i], 4);
             if (std::fabsf(vals[i] - cands[i].prev) > 10.f) any_changed = true;
+        }
+
+        // Щосекунди виводимо поточні значення навіть без змін (щоб видно що читаємо живий процес)
+        bool periodic = (sec != last_alive_sec);
+        if (periodic) {
+            last_alive_sec = sec;
+            std::cerr << "[alive " << sec << "s] ";
+            for (size_t i = 0; i < cands.size(); i++)
+                std::cerr << cands[i].name << "=" << (int)vals[i] << " ";
+            std::cerr << "\n";
         }
 
         if (any_changed) {
