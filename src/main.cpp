@@ -309,14 +309,16 @@ static void watchPos(const std::string& offsets_file, uintptr_t override_pb = 0)
     std::cerr << "[watch-pos] Рухай персонажа МИШЕЮ в L2 (клікай далеко). Ctrl+C щоб зупинити.\n";
     std::cerr << "[watch-pos] Показуємо тільки рядки де хоча б один offset змінився.\n\n";
 
-    // Читаємо набір кандидатів: 0x24/28/2C + 0x60/64/68 + 0x6C/70/74 + 0x78/7C/80
-    // З --find-pos: pb+0x60, pb+0x6C, pb+0x78 мали великі Δ при кліку
+    // Читаємо набір кандидатів: X/Y/Z + тип + L2Object X at +0x90 + KnownList ptr at +0x120
+    // +0x5C = type (0=mob,1=player,2=item,3=static); +0x90 = objX (L2Object layout)
+    // +0x120 = KnownList ptr (PlayerBase layout); +0x88 = alternative KL ptr
     struct PosCandidate { unsigned off; const char* name; float prev; };
     std::vector<PosCandidate> cands = {
-        {0x24, "0x24(X)",  0.f}, {0x28, "0x28(Y)",  0.f}, {0x2C, "0x2C(Z)",  0.f},
-        {0x60, "0x60(X2)", 0.f}, {0x64, "0x64(Y2)", 0.f}, {0x68, "0x68(Z2)", 0.f},
-        {0x6C, "0x6C(X3)", 0.f}, {0x70, "0x70(Y3)", 0.f}, {0x74, "0x74(Z3)", 0.f},
-        {0x78, "0x78(X4)", 0.f}, {0x7C, "0x7C(Y4)", 0.f}, {0x80, "0x80(Z4)", 0.f},
+        {0x24, "0x24(X)",    0.f}, {0x28, "0x28(Y)",    0.f}, {0x2C, "0x2C(Z)",    0.f},
+        {0x5C, "0x5C(type)", 0.f},
+        {0x78, "0x78(cX)",   0.f}, {0x7C, "0x7C(cY)",   0.f}, {0x80, "0x80(cZ)",   0.f},
+        {0x88, "0x88(kl?)",  0.f}, {0x90, "0x90(objX)", 0.f},
+        {0x120,"0x120(KL)",  0.f},
     };
     // Заголовок
     std::cerr << std::left << std::setw(7) << "t(мс)";
@@ -2037,9 +2039,10 @@ int main(int argc, char* argv[]) {
                     uintptr_t cached = kl_scanner->playerBaseCache;
                     float cx = kl_scanner->rpm_pub<float>(cached + OFF_PLAYER_X);
                     float cy = kl_scanner->rpm_pub<float>(cached + OFF_PLAYER_Y);
-                    bool cache_valid = (std::isfinite(cx) && std::fabsf(cx) < 327000.f
-                                     && std::isfinite(cy) && std::fabsf(cy) < 327000.f
-                                     && (std::fabsf(cx) > 100.f || std::fabsf(cy) > 100.f));
+                    // AND-логіка: обидві координати > 200 (OR раніше помилково приймало X=1098,Y=0).
+                    // Y=0 → false positive (Wine .data секція, статична адреса).
+                    bool cache_valid = (std::isfinite(cx) && std::fabsf(cx) > 200.f && std::fabsf(cx) < 327000.f
+                                     && std::isfinite(cy) && std::fabsf(cy) > 200.f && std::fabsf(cy) < 327000.f);
                     if (cache_valid) {
                         std::cerr << "[KnownList] playerBaseCache=0x" << std::hex << cached
                                   << " валідний XYZ=(" << (int)cx << "," << (int)cy << ")"
