@@ -1395,13 +1395,26 @@ void BotBehaviorTree::tgtHandlePatrolAndRotate(GameState& gs,
                 gs.hands.RotateRight(RandMs(m_tgt_rd_rotate.get(), gs, 350));
             else
                 gs.hands.RotateLeft(RandMs(m_tgt_rd_rotate.get(), gs, 350));
-            const bool explore_trigger = (!patrol_ready && !m_tgt_nav_prev_was_walk
-                && gs.eyes.IsGroundAhead()
-                && ((minimap_empty && m_tgt_macro_attempts % 15 == 0)
-                    || (!minimap_empty && m_tgt_macro_attempts % 20 == 0)));
-            if (explore_trigger) {
+            // Примусовий вихід зі стіни: якщо >20с немає жодного руху →
+            // WalkForward незалежно від IsGroundAhead (стіна = нескінченна ротація).
+            const double secs_no_walk = secsSince(m_tgt_last_walk_time);
+            const bool force_escape = !m_tgt_nav_prev_was_walk && secs_no_walk > 20.0;
+
+            const bool explore_trigger = !patrol_ready && !m_tgt_nav_prev_was_walk
+                && (gs.eyes.IsGroundAhead()
+                    && ((minimap_empty && m_tgt_macro_attempts % 15 == 0)
+                        || (!minimap_empty && m_tgt_macro_attempts % 20 == 0)));
+
+            if (force_escape) {
+                gs.hands.WalkForward(1500);
+                m_tgt_nav_prev_was_walk = true;
+                m_tgt_last_walk_time    = now();
+                gs.log("[TARGETING] Спроба " + std::to_string(m_tgt_macro_attempts) +
+                    " — force escape (>20с без руху, стіна?)");
+            } else if (explore_trigger) {
                 gs.hands.WalkForward(1200);
                 m_tgt_nav_prev_was_walk = true;
+                m_tgt_last_walk_time    = now();
                 gs.log("[TARGETING] Спроба " + std::to_string(m_tgt_macro_attempts) +
                     " — розвідка вперед (" +
                     (minimap_empty ? "мінімапа порожня" : "dot недосяжний") + ")");
@@ -1470,6 +1483,7 @@ void BotBehaviorTree::resetTargetState(GameState& gs) {
     m_tgt_walk_stuck_count     = 0;
     m_tgt_nav_prev_was_walk    = false;
     m_tgt_nav_stuck_recoveries = 0;
+    m_tgt_last_walk_time       = now();
     m_tgt_patrol_step_idx      = 0;
     m_tgt_running_to_mob       = false;
     m_tgt_run_started          = TP{};

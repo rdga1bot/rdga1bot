@@ -193,6 +193,7 @@ private:
 
     std::unique_ptr<RandomDelay> m_tgt_rd_rotate;
     std::unique_ptr<RandomDelay> m_tgt_rd_walk;
+    TP m_tgt_last_walk_time{};   // коли востаннє рухались у Target (для force escape)
 
     // Breadcrumbs
     struct Crumb { float x, y, z; };
