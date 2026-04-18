@@ -1,18 +1,19 @@
-# rdga1bot — v1.2
+# rdga1bot — v1.3
 
 C++ бот для автоматизації фарму в Lineage II.  
 Протестовано: ElmoreLab Kamael/Lionna, Arch Linux, Wine/Lutris (GE-Proton), X11.
 
-## Результати (v1.2)
+## Результати (v1.3)
 
 | Сесія | Kills | Deaths | Kill/хв |
 |-------|-------|--------|---------|
+| 116 хв (MR65) | ~200 | 0 | ~1.7 |
 | 31 хв (MR52) | 129 | 1 | 4.2 |
 | 10 хв (MR51) | 37 | 0 | 3.5 |
 | 125 хв (MR50) | 381 | 1 | 3.4 |
 | Тиждень (~54 сесії, v1.1) | ~15 700 | — | 4–15 |
 
-Ціль: **kill rate > 3/хв стабільно** — досягнуто.
+Ціль: **kill rate > 3/хв стабільно** — досягнуто на коротких сесіях; тривалий фарм в роботі.
 
 ---
 
@@ -27,6 +28,7 @@ C++ бот для автоматизації фарму в Lineage II.
 - **MR50**: `m_atk_unreachable_streak` — після 5 unreachable без kills → форсуємо повний цикл (Pokemon + patrol), ігноруючи minimap_close_threat
 - **MR51**: `m_atk_streak_force_count` — після 3 force-циклів (~75с) → ESC + `has_target=false` → patrol фізично переміщує бота (break 20хв Pokemon-loop)
 - **MR52**: `condNeedsRest` не відпочиває < 15с після kill; `hp_threshold` 70%→45% (TH Vampiric Rage лікується атакуючи)
+- **MR60/61**: фікс false `stuck_streak3` під час активного DPS — `m_atk_mem_hp_abs` завжди оновлюється; вибір KL-моба по hp% match (±15%) з fallback на nearest
 
 ### Навігація
 - Мінімапа Rotating Radar: детекція червоних/фіолетових точок мобів, ротація до цілі
@@ -34,6 +36,7 @@ C++ бот для автоматизації фарму в Lineage II.
 - Патруль PatrolPath (`F2000,R500,...`) при порожній мінімапі
 - Memory-based навігація: координати XYZ + heading (`[Navigation] Enabled=true`)
 - NavMesh Recast/Detour: `[NavMesh] Enabled=true` + зібрані точки руху
+- **MR65**: force escape після >20с без руху в Target state (антизастрявання у стін + "Ціль не видно")
 
 ### Memory Reading (KnownList + MemReader)
 - `process_vm_readv` — без root, без Cheat Engine, без Windows API
@@ -45,6 +48,7 @@ C++ бот для автоматизації фарму в Lineage II.
 - **ShadowMode**: логує порівняння OCR vs Memory (`[MemCalib]`, `[KL-HP]`) — діагностика без зупинки
 - Thread-safe WorldState (snapshot copy під mutex, bgLoop scan кожну 1с)
 - `--dump-objects` / `--calibrate [--name "X"]` / `--hp-calibrate` — калібровка без Cheat Engine
+- **Windows**: `ReadProcessMemory` (ProcessMemory.h), Toolhelp32 (FindPid), `EnumProcessModules` (FindModuleBase), `VirtualQueryEx` (region scan) — MR67
 
 ### BehaviorTree планувальник
 - Stackless BT VM: `BTNode` (24 bytes), `BTState` (8 bytes), плоскі масиви — без heap, без рекурсії
@@ -60,11 +64,30 @@ C++ бот для автоматизації фарму в Lineage II.
 - Epsilon-greedy exploration: `epsilon` від 1.0 до 0.05
 - Ваги зберігаються в `weights.json`, автоматично завантажуються при старті
 
+### Input Backend (XSendEvent Hybrid, MR66)
+- Keyboard events → `XSendEvent(XKeyEvent)` напряму до вікна гри (не глобальний grab)
+- Mouse buttons → `XSendEvent(XButtonEvent)` з window-relative координатами
+- Mouse move → XTest (DirectInput ігнорує XSendEvent MotionNotify)
+- Переключення: `[Input] Backend = hybrid | xtest | xsendevent` в INI
+- ScrollLock зупинка: `XQueryKeymap` читає фізичний стан клавіатури — не залежить від бекенду
+- Результат: можна використовувати мишу/клавіатуру паралельно з ботом
+
 ### QA Monitor
-- Python daemon (`qa/qa_monitor.py`): аналіз логів, IsolationForest аномалії
-- Режими: `--analyze-only stats.json --log session.log`, `--replay`, `--live`
-- Фільтрація по сесії: розрізняє кілька сесій в одному stats-файлі (uptime/kills reset детектор)
-- Аномалії: death_loop (лише "Фаза 0"), kl_hp_spike, targeting_failure_spike, slow_bt_tick
+- `launch_qa.sh` — єдиний скрипт запуску: бот + frame capture + video record
+- `qa/frame_capture.py` — зовнішній демон: tail session log → scrot при ключових подіях
+- `qa/video_record.py` — ffmpeg x11grab запис + нарізка кліпів по лог-подіям
+- `qa/qa_monitor.py` — IsolationForest аномалії, death_loop, kl_hp_spike
+- Бот не знає про QA — принцип розділення відповідальності
+
+### Windows Port (MR66-67)
+- `platform.h` — централізовані типи: `pid_t`, `ssize_t` (POSIX / Windows)
+- `ProcessMemory.h` — `ReadProcessMemory` на Windows, `process_vm_readv` на Linux
+- `MemReader.cpp` — Toolhelp32 `FindPid` + `EnumProcessModules` `FindModuleBase`
+- `offset_scanner.cpp` / `knownlist_reader.cpp` — `VirtualQueryEx` замість `/proc/maps`
+- `Notify.cpp` — `CreateProcess curl.exe` замість `fork/execv`
+- `Capture.cpp`, `Window.cpp` — GDI BitBlt + EnumWindows (вже існували)
+- `Intercept.cpp` — interception.dll kernel-mode driver (вже існував)
+- `CMakeLists.txt` — cross-platform: Linux (`X11 Xtst ncurses`) / Windows (`psapi interception PDCurses`)
 
 ### Антидетект
 - RandomDelay: нормальний розподіл затримок між атаками, поворотами, ходьбою
@@ -138,28 +161,62 @@ HpThreshold = 45      # відпочинок тільки при < 45% HP (TH Va
 ## Архітектура
 
 ```
-Brain.cpp/.h           — диспетчер: сприйняття + потіони + BotBehaviorTree dispatch
-BehaviorTree.h/.cpp    — stackless BT VM (BTNode 24B, BTState 8B)
-BotBehaviorTree.h/.cpp — Farm BT + Target піддерево + RL хуки (MR27/28/50/51/52)
-Eyes.cpp/.h            — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа
-Hands.h                — дії: XTest keyboard/mouse, рух стрілками
-Config.cpp/.h          — INI парсер + валідація + interactive TUI
-Dashboard.cpp/.h       — ncurses TUI
-MemReader.cpp/.h       — HP/MP/CP/XYZ гравця; UseKLBase + AutoCalibratePlayer (MR53/54)
-OffsetScanner          — blindScan, calibrateHeadingOffset, findNameOffset
-KnownListReader        — region scan мобів (KL_MAX_OBJECTS=2000)
-WorldState             — thread-safe агрегатор KnownList
-LinearQModel.h/.cpp    — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій
-LearningWorker.h/.cpp  — async IRLS batch update thread
-FeatureExtractor.h     — phi(s): 10 ознак з GameState → Eigen::VectorXf
-ShadowLogger.h/.cpp    — A/B Memory vs OCR JSONL лог
-qa/qa_monitor.py       — QA daemon: IsolationForest + session filtering
+Brain.cpp/.h              — диспетчер: сприйняття + потіони + BotBehaviorTree dispatch
+BehaviorTree.h/.cpp       — stackless BT VM (BTNode 24B, BTState 8B)
+BotBehaviorTree.h/.cpp    — Farm BT + Target піддерево + RL (MR27/28/50-52/60/61/65)
+Eyes.cpp/.h               — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа
+Hands.h                   — дії: keyboard/mouse через Intercept
+Intercept.h               — cross-platform input interface
+Intercept_Linux.cpp       — XSendEvent hybrid backend (MR66)
+Intercept.cpp             — Windows: interception.dll kernel-mode driver
+platform.h                — pid_t/ssize_t для Linux і Windows (MR66)
+ProcessMemory.h           — process_vm_readv (Linux) / ReadProcessMemory (Windows, MR67)
+Config.cpp/.h             — INI парсер + валідація + interactive TUI
+Dashboard.cpp/.h          — ncurses / PDCurses TUI
+MemReader.cpp/.h          — HP/MP/CP/XYZ гравця; UseKLBase + AutoCalibratePlayer (MR53/54)
+OffsetScanner             — blindScan + VirtualQueryEx (Windows, MR67)
+KnownListReader           — region scan мобів; VirtualQueryEx (Windows, MR67)
+WorldState                — thread-safe агрегатор KnownList
+LinearQModel.h/.cpp       — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій
+LearningWorker.h/.cpp     — async IRLS batch update thread
+FeatureExtractor.h        — phi(s): 10 ознак з GameState → Eigen::VectorXf
+ShadowLogger.h/.cpp       — A/B Memory vs OCR JSONL лог
+launch_qa.sh              — єдиний старт: bot + frame_capture + video_record
+qa/qa_monitor.py          — QA daemon: IsolationForest + session filtering (MR49)
+qa/frame_capture.py       — зовнішній демон скріншотів при ключових подіях (MR62)
+qa/video_record.py        — ffmpeg запис/нарізка сесій (MR63)
+CMakeLists.txt            — cross-platform CMake: Linux + Windows (MR67)
+```
+
+## Швидкий старт (з QA)
+
+```bash
+# Запуск бота + frame capture + video record одним скриптом
+./launch_qa.sh
+
+# Зупинка: натиснути ScrollLock в грі або Ctrl+C в терміналі
+# Нарізка кліпів з останньої сесії:
+python3 qa/video_record.py clip --log logs/session_*.log --video qa/videos/farm_*.mkv
 ```
 
 ## Вимоги
 
-- Linux, X11 (не Wayland)
-- Wine (GE-Proton через Flatpak Lutris)
-- g++ з C++17, OpenCV 4.x, ncurses, libx11, libxtst, libxext
-- Python 3.x + scikit-learn (QA Monitor, опціонально)
+### Linux
+- X11 (не Wayland), Wine/GE-Proton (Flatpak Lutris)
+- `g++` C++17, OpenCV 4.x, ncurses, libx11, libxtst, libxext
+- Python 3.x + scikit-learn + scrot + ffmpeg (QA, опціонально)
 - googletest (тести, опціонально)
+
+### Windows (нативний порт, MR66-67)
+- Windows 10 x64 (нативний L2 клієнт, без Wine)
+- MSVC 2022 або MinGW-w64 (g++ -D_WIN32), C++17
+- OpenCV 4.x prebuilt, [interception driver](https://github.com/oblitum/Interception) (встановити з правами адмін)
+- PDCurses (опціонально, для TUI)
+- curl.exe (вбудовано в Windows 10 1803+)
+
+```bash
+# Windows CMake збірка:
+set INTERCEPTION_DIR=C:\interception
+cmake -B build -G "Visual Studio 17 2022" .
+cmake --build build --config Release
+```

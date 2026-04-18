@@ -4,10 +4,10 @@
 - OS: Arch Linux (CachyOS), X11, користувач rdga1
 - Гра: Lineage 2, ElmoreLab (Kamael/Lionna), персонаж ManyaTheBond (Treasure Hunter/Dagger)
 - Клієнт: Flatpak Lutris + GE-Proton/Wine
-- Папка: ~/l2bot/rdga1bot/
+- Папка: /home/rdga1/rdga1prj/l2net/
 - Build: bash build.sh && ./launch.sh
 
-## Поточний стан (2026-04-17)
+## Поточний стан (2026-04-18)
 - **BotBehaviorTree** — єдиний планувальник. RL: `[Learning] Enabled=true` за замовчуванням.
 - **MR26** — MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B JSONL, ShadowMode=false)
 - **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
@@ -62,14 +62,51 @@
   - Результат → `mem_calib.json` (наступний запуск завантажує автоматично)
   - Якщо HP/MP/CP=100% → чекає до 6с (60 тіків) потім калібрує (менш точно)
   - Логи: `[MemCalib] HP cur=+0xXX max=+0xYY` тощо
-- **Наступні пріоритети**: live farm 5+ год; перевірити [MemCalib] + [KL-HP] логи; kill rate > 3/хв
+- **MR55** — KL-HP: фільтр dist<100 (виключає self/player з вибірки мобів) + throttle логу при зміні цілі
+- **MR58** — `actTgtF2AndMacro`: SKIP коли `has_target=1 && streak=0`; додано `[F2] SEND/SKIP` логування
+- **MR60** — `m_atk_mem_hp_abs = absHp` завжди (не тільки при hpMax==0):
+  - Root cause false stuck_streak3: при активному DPS damage <1% HP → int% не змінюється → 5с таймер спрацьовував
+- **MR61** — KL-HP вибір моба по hp% match (±15% від OCR) з fallback на nearest:
+  - Раніше: nearest-by-dist міг обрати іншого моба (B), B.HP незмінний → false unreachable
+  - Тепер: primary = моб де |kl.hpPercent - ocr_hp| < 15%; fallback = nearest
+- **MR62** — QA frame capture вилучено з бота → зовнішній демон `qa/frame_capture.py`:
+  - `frame_capture.py`: tail session_*.log → scrot при [LOOTING]/[DEAD]/[NAV]/[ATTACKING]
+  - Бот не знає про QA — принцип розділення відповідальності
+- **MR63/63b** — `qa/video_record.py`: ffmpeg x11grab запис сесій + нарізка кліпів
+  - `record` режим: → `qa/videos/farm_YYYYMMDD_HHMMSS.mkv`
+  - `clip` режим: парсинг log + `ffmpeg -ss -t -c copy` для кожної події
+  - Авто-детект вікна L2 через xdotool (X=1616, Y=209, 1366×768)
+- **MR64/64b/64c/64d** — `launch_qa.sh`: єдиний старт бот + frame_capture + video_record
+  - Bot stdout → `tee logs/session_YYYYMMDD_HHMMSS.log` (файл створюється в момент старту)
+  - `_CLEANED` guard запобігає double-cleanup при Ctrl+C; `sleep 3` для ffmpeg flush
+  - trap: `HUP` для закриття вікна терміналу; `INT/TERM` для Ctrl+C
+- **MR65** — `tgtHandlePatrolAndRotate`: force escape після >20с без руху (стіна + "Ціль не видно"):
+  - `m_tgt_last_walk_time` + `m_tgt_nav_prev_was_walk` → якщо >20с без WalkForward → форсуємо WalkForward(1500)
+  - Root cause смерті наприкінці сесії: `IsGroundAhead()=false` → нескінченна ротація без переміщення
+- **MR66** — XSendEvent hybrid input backend (Linux):
+  - Keyboard → `XSendEvent(XKeyEvent)` до вікна гри (без глобального grab)
+  - Mouse move → XTest (DirectInput ігнорує XSendEvent MotionNotify)
+  - Mouse buttons → `XSendEvent(XButtonEvent)` з window-relative координатами
+  - `[Input] Backend = hybrid` в INI; `SetBackend()`/`SetWindowRect()` в Intercept
+  - `platform.h` — централізовані платформо-залежні типи (pid_t, ssize_t)
+  - ScrollLock зупинка: XQueryKeymap читає фізичний стан → не залежить від XSendEvent
+- **MR67** — Windows порт Steps 2-11:
+  - `ProcessMemory.h`: `ReadProcessMemory` branch для Windows
+  - `MemReader.cpp`: `FindPid` через Toolhelp32; `FindModuleBase` через `EnumProcessModules`
+  - `offset_scanner.cpp`: `getReadableRegions()` через `VirtualQueryEx`
+  - `knownlist_reader.cpp`: `refreshScanCache()` через `VirtualQueryEx`
+  - `Notify.cpp`: `SendSync()` через `CreateProcess`/`curl.exe`; POSIX fork guarded
+  - `main.cpp`: `<dirent.h>` guarded; `findL2Pid()` Windows branch; inline lambda → `findL2Pid()`
+  - `CMakeLists.txt`: cross-platform split (Linux/Windows sources + libs); PDCurses + interception
+  - `Capture.cpp`, `Window.cpp` вже існували (Steps 6-7 виконані раніше)
+- **Наступні пріоритети**: live farm 5+ год; тест XSendEvent (bot не перехоплює мишу/клаву); Windows нативний білд
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
 - UseForKillDetect=false НАЗАВЖДИ (баг: fake kills)
 - Auto-loot server-side: LOOTING = ESC+300ms (без pickup key)
-- XTest для key injection (не xdotool --window)
-- ScrollLock = зупинка бота
+- XSendEvent hybrid backend для key/mouse injection (не xdotool --window)
+- ScrollLock = зупинка бота (через XQueryKeymap — читає фізичний стан, не залежить від XSendEvent)
 - Нові фічі: завжди feature flag в INI (Enabled=false за замовчуванням)
 - Мінімальні цільові зміни — не робити broad rewrites
 - BT tick() сигнатура: `std::string tick(GameState& gs)` — НЕ міняти
@@ -77,21 +114,29 @@
 
 ## Ключові файли
 - src/Brain.cpp               — координатор (сприйняття + потіони + dispatch)
-- src/BotBehaviorTree.h/.cpp  — Farm BT + RL + Target піддерево (MR27/28)
+- src/BotBehaviorTree.h/.cpp  — Farm BT + RL + Target піддерево (MR27/28/50-52/58/60/61/65)
 - src/BehaviorTree.h/.cpp     — Stackless VM (BTNode 24B, BTState 8B)
 - src/game_state.h            — GameState struct
 - src/MemoryValidator.h/.cpp  — валідація PlayerState/L2Character/coords (MR26)
 - src/ShadowLogger.h/.cpp     — A/B Memory vs OCR → JSONL лог (MR26)
 - src/LinearQModel.h/.cpp     — Q(s,a)=W^T*phi(s), IRLS+Huber, 6 дій
-- src/LearningWorker.h/.cpp   — async IRLS thread (аналог GeodataWorker)
+- src/LearningWorker.h/.cpp   — async IRLS thread
 - src/FeatureExtractor.h      — 10 ознак GameState → Eigen::VectorXf
 - src/ExperienceBuffer.h      — циклічний буфер Experience
 - src/RewardCalculator.h      — reward function
 - src/offsets_config.h        — ElmoreLab Kamael offsets (відкалібровано)
+- src/Intercept.h             — cross-platform input interface; LinuxInputBackend enum (MR66)
+- src/Intercept_Linux.cpp     — XSendEvent hybrid backend (MR66)
+- src/platform.h              — платформо-залежні типи: pid_t, ssize_t (MR66)
+- src/ProcessMemory.h         — ReadProcessMemory (Win) / process_vm_readv (Linux) (MR67)
 - third_party/eigen/          — Eigen 3.4.0 header-only
 - build.sh                    — компіляція (g++, без cmake)
+- CMakeLists.txt              — cross-platform CMake (Linux + Windows, MR67)
 - rdga1bot.example.ini        — всі опції з коментарями
-- qa/qa_monitor.py            — QA daemon (IsolationForest + MemPalace bridge)
+- launch_qa.sh                — єдиний старт: бот + frame_capture + video_record (MR64)
+- qa/qa_monitor.py            — QA daemon (IsolationForest + session filtering)
+- qa/frame_capture.py         — зовнішній демон скріншотів (MR62)
+- qa/video_record.py          — ffmpeg запис/нарізка сесій (MR63)
 
 ## НЕ включати в білд
 Runloop.cpp — legacy від l2cvbot (Options.cpp/.h видалено в MR36)
