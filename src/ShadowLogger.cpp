@@ -114,6 +114,7 @@ void ShadowLogger::logPlayerComparison(const MemReader::PlayerState& mem,
 }
 
 void ShadowLogger::logMobComparison(int mem_alive_count, int ocr_mob_count) {
+    m_totalComparisons++;  // MR75: fix — cmp раніше не рахувалось → diff > cmp
     int diff = std::abs(mem_alive_count - ocr_mob_count);
     if (diff <= MOB_COUNT_DIFF_MAX) return;
 

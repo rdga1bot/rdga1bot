@@ -165,6 +165,8 @@ private:
     int   m_tgt_step_count         = 0;
     int   m_tgt_macro_idx          = 0;     // НЕ скидається між циклами
     int   m_tgt_minimap_rotate_count = 0;
+    int   m_tgt_prev_dx            = 0;   // MR75: останній dx при ротації
+    int   m_tgt_dx_stuck_count     = 0;   // MR75: кількість ротацій без прогресу dx
     int   m_tgt_far_rejects        = 0;
     bool  m_tgt_pokemon_fired      = false;
     bool  m_tgt_pokemon_targeted   = false;

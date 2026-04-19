@@ -696,11 +696,12 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
             // hp%-match не знайшов → fallback до найближчого
             if (!best) best = best_near;
             if (best) {
-                self.m_atk_mem_hp_valid = true;
                 const float absHp = best->hpAbs();
-                self.m_atk_mem_hp_abs = absHp;
                 if (best->hpMax > 0.f) {
+                    // Підтверджений моб з hpMax — оновлюємо OCR HP та трекер стабільності
                     float pct = best->hpPercent();
+                    self.m_atk_mem_hp_valid = true;
+                    self.m_atk_mem_hp_abs   = absHp;
                     const_cast<GameState&>(gs).target->hp = (int)pct;
                     if (absHp != self.m_atk_kl_hp_prev_abs) {
                         self.m_atk_kl_hp_prev_abs = absHp;
@@ -710,7 +711,13 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
                             " hpAbs=" + std::to_string((int)absHp) +
                             " ocr=" + std::to_string(ocr_hp));
                     }
-                } else {
+                } else if (absHp >= 10.f) {
+                    // MR75: fallback nearest без hpMax — тільки якщо absHp реалістичний (≥10).
+                    // absHp < 10 = false positive (підтверджено: hpAbs=3 при ocr=94).
+                    // Не оновлюємо OCR HP (hpMax невідомий → pct ненадійний).
+                    // Тільки трекер стабільності — для детекції unreachable.
+                    self.m_atk_mem_hp_valid = true;
+                    self.m_atk_mem_hp_abs   = absHp;
                     if (absHp != self.m_atk_kl_hp_prev_abs) {
                         self.m_atk_kl_hp_prev_abs = absHp;
                         float d = best->distanceTo(gs.player_x, gs.player_y);
@@ -719,6 +726,7 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
                             " ocr=" + std::to_string(ocr_hp));
                     }
                 }
+                // absHp < 10 && hpMax=0 → ігноруємо (false positive з регіон-скану)
             }
         }
     }
@@ -984,19 +992,47 @@ void BotBehaviorTree::tgtHandleMinimap(GameState& gs,
         const int dy = map_ref->dy;
         const char* who = map_ref_selected ? "Вибраний" : "Найближчий";
         if (dx < -kMinimapDxThreshold) {
+            // MR75: відстежуємо прогрес dx — чи ротація наближає нас до моба?
+            bool no_progress = (m_tgt_prev_dx < 0 && std::abs(dx - m_tgt_prev_dx) < 4);
+            m_tgt_prev_dx = dx;
+            m_tgt_dx_stuck_count = no_progress ? m_tgt_dx_stuck_count + 1 : 0;
             gs.hands.RotateLeft(RandMs(m_tgt_rd_rotate.get(), gs, 120));
             m_tgt_minimap_rotate_count++;
             gs.log(std::string("[MAP] ") + who + " моб ліворуч (dx=" +
                 std::to_string(dx) + ", rot=" +
                 std::to_string(m_tgt_minimap_rotate_count) + ") → RotateLeft");
+            if (m_tgt_dx_stuck_count >= 3) {
+                // dx не змінюється: моб за стіною/геодата → WalkForward без умов
+                gs.log("[MAP] dx stuck×" + std::to_string(m_tgt_dx_stuck_count) +
+                    " (dx=" + std::to_string(dx) + ") → WalkForward (bypass geodata)");
+                gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 800));
+                m_tgt_nav_prev_was_walk = true;
+                m_tgt_dx_stuck_count = 0;
+                m_tgt_minimap_rotate_count = 0;
+                m_tgt_prev_dx = 0;
+            }
         } else if (dx > kMinimapDxThreshold) {
+            bool no_progress = (m_tgt_prev_dx > 0 && std::abs(dx - m_tgt_prev_dx) < 4);
+            m_tgt_prev_dx = dx;
+            m_tgt_dx_stuck_count = no_progress ? m_tgt_dx_stuck_count + 1 : 0;
             gs.hands.RotateRight(RandMs(m_tgt_rd_rotate.get(), gs, 120));
             m_tgt_minimap_rotate_count++;
             gs.log(std::string("[MAP] ") + who + " моб праворуч (dx=" +
                 std::to_string(dx) + ", rot=" +
                 std::to_string(m_tgt_minimap_rotate_count) + ") → RotateRight");
+            if (m_tgt_dx_stuck_count >= 3) {
+                gs.log("[MAP] dx stuck×" + std::to_string(m_tgt_dx_stuck_count) +
+                    " (dx=" + std::to_string(dx) + ") → WalkForward (bypass geodata)");
+                gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 800));
+                m_tgt_nav_prev_was_walk = true;
+                m_tgt_dx_stuck_count = 0;
+                m_tgt_minimap_rotate_count = 0;
+                m_tgt_prev_dx = 0;
+            }
         } else {
             m_tgt_minimap_rotate_count = 0;
+            m_tgt_dx_stuck_count = 0;
+            m_tgt_prev_dx = 0;
             if (dy > 30) {
                 gs.hands.RotateRight(RandMs(m_tgt_rd_rotate.get(), gs, 700));
                 gs.log(std::string("[MAP] ") + who + " моб позаду (dy=" +
@@ -1005,14 +1041,16 @@ void BotBehaviorTree::tgtHandleMinimap(GameState& gs,
         }
     } else if (map_ref && m_tgt_minimap_rotate_count >= kMinimapRotateLimit) {
         m_tgt_minimap_rotate_count = 0;
+        m_tgt_prev_dx = 0;
         gs.log("[MAP] Ліміт ротацій → WalkForward до моба (dx=" +
             std::to_string(map_ref->dx) + ")");
-        if (gs.eyes.IsGroundAhead()) {
-            gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 600));
-            m_tgt_nav_prev_was_walk = true;
-        }
+        // MR75: WalkForward без умови IsGroundAhead — зміна позиції важливіша за перевірку
+        gs.hands.WalkForward(RandMs(m_tgt_rd_walk.get(), gs, 600));
+        m_tgt_nav_prev_was_walk = true;
     } else if (!map_ref) {
         m_tgt_minimap_rotate_count = 0;
+        m_tgt_prev_dx = 0;
+        m_tgt_dx_stuck_count = 0;
     }
 }
 
@@ -1471,6 +1509,8 @@ void BotBehaviorTree::resetTargetState(GameState& gs) {
     m_tgt_step_count           = 0;
     // m_tgt_macro_idx НЕ скидаємо — зберігається між циклами
     m_tgt_minimap_rotate_count = 0;
+    m_tgt_prev_dx              = 0;
+    m_tgt_dx_stuck_count       = 0;
     m_tgt_far_rejects          = 0;
     m_tgt_pokemon_fired        = false;
     m_tgt_pokemon_targeted     = false;
