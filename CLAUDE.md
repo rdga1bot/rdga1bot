@@ -130,7 +130,16 @@
   - Root cause: KL-HP false positives (hp_u32<500k = 157 "мобів") → stable HP 5s → streak++ → крокував від моба після 3-5 атак
   - `knownlist_reader`: `hp_u32 > 500000 → > 2000` (real mob hpAbs=70, підтверджено логами)
   - Реальний вихід зі застрягань залишився: tgtHandlePatrolAndRotate MR65 (20с без руху)
-- **Наступні пріоритети**: live farm тест MR73; дослідити `double free` crash при shutdown
+- **MR74** — crash при shutdown: `std::thread(...).detach()` blindScan → use-after-free при знищенні kl_scanner.
+  Fix: kl_scan_thread (join, не detach) + OffsetScanner::abortScan() + join при bot_exit.
+- **MR75** — аналіз сесії (921 kills, 0 deaths, 3h) → 5 виправлень:
+  1. `tgtHandleMinimap`: dx stability tracking — WalkForward без IsGroundAhead якщо dx застряг 3+ ротації
+     Root cause 315с gap: dx=71 (1px вище kClosePx=70) → нескінченна RotateRight без прогресу
+  2. KL-HP false positive: `absHp < 10 && hpMax=0` → ігноруємо (false positive hpAbs=3 → 139 false unreachable)
+  3. ShadowLogger::logMobComparison: `m_totalComparisons++` fix (diff > cmp раніше)
+  4. rdga1bot.ini: HP_Threshold 70→45 (MR52 TH Vampiric Rage)
+  5. PERF slow ticks (300-656мс) → inherent від ESC+200ms; покращиться з Priority 1+2
+- **Наступні пріоритети**: live farm тест MR75; перевірити KL-HP events (очікується > 1 за сесію)
 
 ## Критичні правила (НІКОЛИ не порушувати)
 - W/S/A/D — НЕ використовувати (відкривають чат L2), рух тільки стрілками
