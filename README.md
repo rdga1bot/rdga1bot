@@ -3,17 +3,19 @@
 C++ бот для автоматизації фарму в Lineage II.  
 Протестовано: ElmoreLab Kamael/Lionna, Arch Linux, Wine/Lutris (GE-Proton), X11.
 
-## Результати (v1.3)
+## Результати (v1.4)
 
 | Сесія | Kills | Deaths | Kill/хв |
 |-------|-------|--------|---------|
+| 311 хв (MR75) | 921 | 0 | **3.0** |
+| 182 хв (MR76) | 1072 | 1* | **5.9** |
 | 116 хв (MR65) | ~200 | 0 | ~1.7 |
-| 31 хв (MR52) | 129 | 1 | 4.2 |
-| 10 хв (MR51) | 37 | 0 | 3.5 |
 | 125 хв (MR50) | 381 | 1 | 3.4 |
 | Тиждень (~54 сесії, v1.1) | ~15 700 | — | 4–15 |
 
-Ціль: **kill rate > 3/хв стабільно** — досягнуто на коротких сесіях; тривалий фарм в роботі.
+\* 1 реальна смерть (закінчився 5-годинний зовнішній бафф); MR76 усуває подальший death loop
+
+Ціль: **kill rate > 3/хв стабільно** — стабільно досягнуто (3.0–5.9 kills/хв у 5-годинних тестах).
 
 ---
 
@@ -29,6 +31,8 @@ C++ бот для автоматизації фарму в Lineage II.
 - **MR51**: `m_atk_streak_force_count` — після 3 force-циклів (~75с) → ESC + `has_target=false` → patrol фізично переміщує бота (break 20хв Pokemon-loop)
 - **MR52**: `condNeedsRest` не відпочиває < 15с після kill; `hp_threshold` 70%→45% (TH Vampiric Rage лікується атакуючи)
 - **MR60/61**: фікс false `stuck_streak3` під час активного DPS — `m_atk_mem_hp_abs` завжди оновлюється; вибір KL-моба по hp% match (±15%) з fallback на nearest
+- **MR75/76**: dx stability tracking — WalkForward при stuck dx ×3 (без IsGroundAhead); buff під час grace period (`m_buff_after_death`) — єдине безпечне вікно в зоні агресивних мобів
+- **MR76**: `m_close_unreachable_count` — max 3 "close on minimap but unreachable" скидань streak → force cycle + `WalkForward(4000)` при force#3 (вихід зі stuck zone за стіною)
 
 ### Навігація
 - Мінімапа Rotating Radar: детекція червоних/фіолетових точок мобів, ротація до цілі
@@ -52,6 +56,9 @@ C++ бот для автоматизації фарму в Lineage II.
 - **MR71 Cleanup**: вилучено непідтверджені offsets (NAME/LEVEL/MP=0) і мертвий код (readAllAsChars, readItemsRegionScan, OFF_OBJ_TYPE фільтр); реальні фільтри: XYZ + HP через render_node + dist<100
 - **MR72**: `safePct()` guardrail (memory HP поза [0,100] → OCR fallback); `[Shadow]` spam fix (лог один раз); видалено false-positive mem_calib.json
 - **MR73**: WalkForward вилучено з GeoNav (root cause: KL-HP false positives → крокував від моба); HP filter `500k→2k` (hpAbs=70 підтверджено)
+- **MR74**: crash при shutdown — `std::thread::detach()` blindScan → use-after-free; fix: stored thread + `abortScan()` + join при `bot_exit`
+- **MR75**: dx stability tracking у `tgtHandleMinimap` (WalkForward bypass при stuck dx ×3); KL-HP фільтр `absHp<10 && hpMax=0` (false positive hpAbs=3 → 139 false unreachable); Shadow counter fix; HP_Threshold 70→45%
+- **MR76**: buff під час grace якщо `m_buff_after_death` (fix death loop після смерті без бафів); `m_close_unreachable_count` ліміт 3 + force#3 `WalkForward(4000)` (fix 17-хв gap з 14 недосяжними мобами); crash fix — `SetLogCallback(nullptr)` перед `dashboard.Shutdown()` (double free)
 - **Windows**: `ReadProcessMemory` (ProcessMemory.h), Toolhelp32 (FindPid), `EnumProcessModules` (FindModuleBase), `VirtualQueryEx` (region scan) — MR67
 
 ### BehaviorTree планувальник
