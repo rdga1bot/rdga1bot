@@ -2238,6 +2238,9 @@ bot_exit:
         if (cfg.navmesh_cfg.save_on_exit)
             brain.SaveNavMeshPoints();
 
+        // MR76: очищаємо log callback перед Shutdown dashboard — інакше shutdownRL()
+        // викличе dashboard.AddLog() після звільнення TUI буферів → double free crash
+        brain.SetLogCallback(nullptr);
         if (use_tui) dashboard.Shutdown();
 
         brain.GetStats().PrintSummary();

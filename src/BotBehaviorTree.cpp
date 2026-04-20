@@ -224,9 +224,15 @@ bool BotBehaviorTree::condZoneViolated(GameState& gs) {
 }
 
 bool BotBehaviorTree::condNeedsBuff(GameState& gs) {
-    if (!gs.cfg.buff_enabled || gs.is_dead || gs.in_grace)
-        return false;
+    if (!gs.cfg.buff_enabled || gs.is_dead) return false;
     if (!s_self) return false;
+    // MR76: buff під час grace якщо m_buff_after_death — єдине безпечне вікно
+    // в зоні агресивних мобів (вони атакують відразу після grace).
+    // Root cause death loop: respawn → grace → targeting → grace ends → attack HP=1% no buffs
+    if (gs.in_grace) {
+        if (!s_self->m_buff_after_death) return false;
+        return gs.buff_needed();  // bypass has_target — під час grace можна бафатися безпечно
+    }
     // Якщо баф вже у процесі (stage > 0) — продовжуємо незалежно від has_target.
     // actBuff сам закриє ALT+B і скине stage якщо є таргет.
     if (s_self->m_buff_stage > 0) return true;
@@ -1060,13 +1066,18 @@ void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
 
     // Скидаємо unreachable flag тільки якщо є БЛИЗЬКІ моби (minimap_close_threat)
     // І streak невеликий (< 5 послідовних unreachable).
-    // Якщо streak >= 5 — ігноруємо minimap, форсуємо повний цикл macro / patrol,
-    // бо бот застряг в unreachable-loop з одним і тим же мобом.
+    // MR76: обмежуємо до 3 скидань поспіль — якщо всі 14 мобів за стіною,
+    // "close on minimap" ніколи не стане reachable і ми ніколи не дійдемо до force cycle.
+    // Root cause 17-хвилинного gap: 540 close-resets у сесії, force#1 ніколи не accumulate.
     static constexpr int kUnreachStreakForceRetarget = 5;
+    static constexpr int kCloseResetMax = 3;  // MR76
     if (gs.minimap_close_threat && m_attack_was_unreachable
-        && m_atk_unreachable_streak < kUnreachStreakForceRetarget) {
+        && m_atk_unreachable_streak < kUnreachStreakForceRetarget
+        && m_close_unreachable_count < kCloseResetMax) {
+        m_close_unreachable_count++;
         m_attack_was_unreachable = false;
-        gs.log("[TARGETING] Близькі моби (minimap) → скидаємо unreachable, F2 вже відіслано");
+        gs.log("[TARGETING] Близькі моби (minimap) → скидаємо unreachable ×"
+               + std::to_string(m_close_unreachable_count) + ", F2 вже відіслано");
         return;
     }
     if (m_atk_unreachable_streak >= kUnreachStreakForceRetarget) {
@@ -1076,17 +1087,20 @@ void BotBehaviorTree::tgtSendF2AndMacro(GameState& gs) {
             + " → форсуємо повний цикл (ігноруємо minimap_close_threat)");
         m_atk_unreachable_streak = 0;
 
-        // Після 3 форс-циклів поспіль (~75с без kills) — ESC таргет + пауза,
-        // щоб бот фізично змінив позицію через patrol/nav замість Pokemon-loop.
+        // Після 3 форс-циклів поспіль (~75с без kills) — ESC + WalkForward,
+        // щоб бот фізично вийшов зі stuck zone (стіна / різниця рівнів).
+        // MR76: WalkForward(4000) — 4с руху вперед перед наступним targeting.
         static constexpr int kForceEscAfter = 3;
         if (m_atk_streak_force_count >= kForceEscAfter) {
             gs.log("[TARGETING] force#" + std::to_string(m_atk_streak_force_count)
-                + " → ESC таргет, patrol шукатиме нову ціль");
+                + " → ESC + WalkForward (вихід зі stuck zone)");
             gs.hands.PressKeyboardKey(Input::KeyboardKey::Escape);
             gs.hands.Send(300);
+            gs.hands.WalkForward(4000);  // MR76: фізично виходимо із stuck area
             const_cast<GameState&>(gs).has_target = false;
             m_atk_streak_force_count = 0;
             m_attack_was_unreachable = false;
+            m_close_unreachable_count = 0;  // MR76
             return; // не надсилаємо F2/macro — patrol сам знайде
         }
     }
