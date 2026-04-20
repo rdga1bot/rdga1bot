@@ -687,7 +687,7 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
             for (const auto& mob : gs.kl_mobs) {
                 if (!mob.isAlive()) continue;
                 float d = mob.distanceTo(gs.player_x, gs.player_y);
-                if (d < 100.0f) continue;
+                if (d < 100.0f || d > 5000.0f) continue;  // MR77: виключаємо self (<100) та garbage coords (>5000)
                 // fallback: closest by distance
                 if (d < best_dist) { best_dist = d; best_near = &mob; }
                 // primary: closest hp% to OCR reading (only if hpMax known)
