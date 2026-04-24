@@ -165,6 +165,182 @@ static pid_t findL2Pid() {
 #endif
 }
 
+// ─── --diff-scan: двофазне калібрування HP/MP/CP через diff пам'яті ──────────
+// Запуск: ./rdga1bot --diff-scan
+// Фаза 1: знаходить playerBase, зчитує знімок пам'яті pb+0x00..0x3FC
+// Фаза 2: після урону — зчитує другий знімок, порівнює, знаходить кандидатів
+// Результат → mem_calib.json
+static void diffScan(const std::string& offsets_file) {
+    pid_t pid = findL2Pid();
+    if (!pid) { std::cerr << "[DIFF] L2 процес не знайдено\n"; return; }
+    std::cerr << "[DIFF] L2 pid=" << pid << "\n";
+
+    OffsetScanner scanner(pid);
+
+    // Знаходимо playerBase: кеш з offsets.json або blindScan
+    uintptr_t pb = 0;
+    if (!offsets_file.empty() && scanner.loadOffsets(offsets_file)) {
+        uintptr_t cached = scanner.playerBaseCache;
+        if (cached) {
+            float cx = scanner.rpm_pub<float>(cached + OFF_PLAYER_X);
+            float cy = scanner.rpm_pub<float>(cached + OFF_PLAYER_Y);
+            bool valid = std::isfinite(cx) && std::isfinite(cy)
+                      && std::fabsf(cx) > 200.f && std::fabsf(cy) > 200.f;
+            if (valid) {
+                pb = cached;
+                std::cerr << "[DIFF] PlayerBase з кешу: 0x" << std::hex << pb << std::dec
+                          << " XY=(" << (int)cx << "," << (int)cy << ")\n";
+            }
+        }
+    }
+    if (!pb) {
+        std::cerr << "[DIFF] blindScan()...\n";
+        pb = scanner.blindScan();
+    }
+    if (!pb) { std::cerr << "[DIFF] PlayerBase не знайдено. L2 запущено?\n"; return; }
+
+    float px = scanner.rpm_pub<float>(pb + OFF_PLAYER_X);
+    float py = scanner.rpm_pub<float>(pb + OFF_PLAYER_Y);
+    float pz = scanner.rpm_pub<float>(pb + OFF_PLAYER_Z);
+    std::cerr << "[DIFF] PlayerBase=0x" << std::hex << pb << std::dec
+              << "  XYZ=(" << (int)px << "," << (int)py << "," << (int)pz << ")\n\n";
+
+    // Snapshot helper
+    constexpr uintptr_t kScanMax = 0x400;
+    constexpr size_t    kN       = kScanMax / 4;
+    auto takeSnapshot = [&]() {
+        std::vector<uint32_t> buf(kN, 0);
+        ProcessMemory::Read(pid, pb, buf.data(), kN * 4);
+        return buf;
+    };
+
+    // match: cur/max*100 ≈ pct (±tol%), фізичні обмеження
+    auto matchPct = [](uint32_t cur, uint32_t mx, int pct, int tol = 5) -> bool {
+        if (mx < 100u || mx > 500000u) return false;
+        if (cur == 0u || cur > mx)     return false;
+        int ratio = (int)((uint64_t)cur * 100u / mx);
+        return std::abs(ratio - pct) <= tol;
+    };
+
+    // Фаза 1
+    std::cerr << "[DIFF] Введи поточні HP% MP% CP% (дивися на екран гри).\n"
+              << "[DIFF] Наприклад: 87 100 100\n"
+              << "[DIFF] HP% MP% CP%: ";
+    int hp1 = 100, mp1 = 100, cp1 = 100;
+    std::cin >> hp1 >> mp1 >> cp1;
+    std::cin.ignore(4096, '\n');
+
+    auto snap1 = takeSnapshot();
+    std::cerr << "[DIFF] Snapshot 1 готовий  HP=" << hp1 << "% MP=" << mp1 << "% CP=" << cp1 << "%\n\n";
+    std::cerr << "[DIFF] Отримай урон у грі (або використай скіл щоб витратити MP/CP).\n"
+              << "[DIFF] Після зміни HP/MP/CP — натисни Enter...\n";
+    std::string dummy;
+    std::getline(std::cin, dummy);
+
+    // Фаза 2
+    auto snap2 = takeSnapshot();
+    std::cerr << "[DIFF] Введи нові HP% MP% CP% після зміни: ";
+    int hp2 = 100, mp2 = 100, cp2 = 100;
+    std::cin >> hp2 >> mp2 >> cp2;
+    std::cin.ignore(4096, '\n');
+
+    std::cerr << "[DIFF] Snapshot 2 готовий  HP=" << hp2 << "% MP=" << mp2 << "% CP=" << cp2 << "%\n\n";
+
+    // Пошук кандидатів: offset i змінився + пара (i,j) відповідає обом знімкам
+    // j — сусідній offset у вікні 64 байти (16 uint32), або фіксований j=i+1..i+15
+    constexpr size_t kWindow = 16;
+
+    struct Candidate {
+        uintptr_t cur_off, max_off;
+        uint32_t  cur1, max1, cur2, max2;
+        int       pct1_got, pct2_got;
+        char      stat; // 'H','M','C'
+        int       score; // |diff1| + |diff2| → менше = краще збіг
+    };
+    std::vector<Candidate> all_cands;
+
+    for (size_t i = 0; i < kN; ++i) {
+        // cur має змінитися між знімками
+        if (snap1[i] == snap2[i]) continue;
+        uint32_t cur1 = snap1[i], cur2 = snap2[i];
+
+        size_t jend = std::min(i + kWindow, kN);
+        for (size_t j = i + 1; j < jend; ++j) {
+            uint32_t mx1 = snap1[j], mx2 = snap2[j];
+            // max не повинен суттєво змінюватися між знімками (±2%)
+            if (mx1 < 100u || mx1 > 500000u) continue;
+            if (mx2 < 100u || mx2 > 500000u) continue;
+            int mx_delta = (int)mx2 - (int)mx1;
+            if (std::abs(mx_delta) > (int)(mx1 / 50 + 1)) continue; // >2% зміна → не max
+
+            bool m1h = matchPct(cur1, mx1, hp1);
+            bool m2h = matchPct(cur2, mx2, hp2);
+            bool m1m = matchPct(cur1, mx1, mp1);
+            bool m2m = matchPct(cur2, mx2, mp2);
+            bool m1c = matchPct(cur1, mx1, cp1);
+            bool m2c = matchPct(cur2, mx2, cp2);
+
+            auto addCand = [&](char stat, int p1, int p2) {
+                int got1 = (int)((uint64_t)cur1 * 100u / mx1);
+                int got2 = (int)((uint64_t)cur2 * 100u / mx2);
+                all_cands.push_back({i*4, j*4, cur1, mx1, cur2, mx2,
+                                     got1, got2, stat,
+                                     std::abs(got1-p1) + std::abs(got2-p2)});
+            };
+            if (m1h && m2h) addCand('H', hp1, hp2);
+            if (m1m && m2m) addCand('M', mp1, mp2);
+            if (m1c && m2c) addCand('C', cp1, cp2);
+        }
+    }
+
+    // Для кожної статики беремо найкращого кандидата (мінімальний score)
+    auto bestFor = [&](char stat) -> Candidate* {
+        Candidate* best = nullptr;
+        for (auto& c : all_cands)
+            if (c.stat == stat && (!best || c.score < best->score)) best = &c;
+        return best;
+    };
+
+    auto printCand = [](const char* tag, const Candidate* c) {
+        if (!c) { std::cerr << "[DIFF] " << tag << ": не знайдено\n"; return; }
+        std::cerr << "[DIFF] " << tag << " offset candidate:"
+                  << "  cur=+0x" << std::hex << c->cur_off
+                  << "  max=+0x" << c->max_off << std::dec
+                  << "  snap1=(" << c->cur1 << "/" << c->max1 << " → " << c->pct1_got << "%)"
+                  << "  snap2=(" << c->cur2 << "/" << c->max2 << " → " << c->pct2_got << "%)\n";
+    };
+
+    Candidate* bH = bestFor('H');
+    Candidate* bM = bestFor('M');
+    Candidate* bC = bestFor('C');
+
+    std::cerr << "\n── Результати diff-scan ──────────────────────────────\n";
+    printCand("HP", bH);
+    printCand("MP", bM);
+    printCand("CP", bC);
+    std::cerr << "─────────────────────────────────────────────────────\n";
+
+    if (!bH && !bM && !bC) {
+        std::cerr << "[DIFF] Нічого не знайдено.\n"
+                  << "[DIFF] Поради:\n"
+                  << "[DIFF]   1. Переконайся що HP/MP/CP реально змінились між снімками\n"
+                  << "[DIFF]   2. Зміна має бути помітною (≥5%)\n"
+                  << "[DIFF]   3. Введи точні значення % з екрану гри\n";
+        return;
+    }
+
+    // Зберігаємо в mem_calib.json через MemReader
+    MemReader::AutoCalibResult r;
+    if (bH) { r.hp_off = bH->cur_off; r.max_hp_off = bH->max_off; r.found_hp = true; }
+    if (bM) { r.mp_off = bM->cur_off; r.max_mp_off = bM->max_off; r.found_mp = true; }
+    if (bC) { r.cp_off = bC->cur_off; r.max_cp_off = bC->max_off; r.found_cp = true; }
+
+    MemReader mr;
+    mr.SaveCalib(r);
+    std::cerr << "[DIFF] Offsets збережено в mem_calib.json\n"
+              << "[DIFF] Перевір: ./rdga1bot --watch-pos і порівняй з HP на екрані.\n";
+}
+
 // ─── --find-pos: сканує ВСЮ пам'ять L2 на XYZ гравця (як Cheat Engine) ──────
 // Запуск у фоні: ./rdga1bot --find-pos &
 // 1) Відразу клікни мишею в L2 вікно (переключи фокус)
@@ -909,6 +1085,7 @@ int main(int argc, char* argv[]) {
     bool find_pos  = false;
     bool scan_pos  = false;
     bool discover_klist = false;
+    bool diff_scan = false;
     uintptr_t override_pb = 0;  // --pb 0xADDR — переназначити PlayerBase для watch-pos/map
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -923,6 +1100,7 @@ int main(int argc, char* argv[]) {
         if (a == "--find-pos")        find_pos       = true;
         if (a == "--scan-pos")        scan_pos       = true;
         if (a == "--discover-klist")  discover_klist = true;
+        if (a == "--diff-scan")       diff_scan      = true;
         if (a == "--pb" && i + 1 < argc) {
             override_pb = (uintptr_t)std::stoull(argv[++i], nullptr, 16);
         }
@@ -1468,6 +1646,13 @@ int main(int argc, char* argv[]) {
     if (watch_pos) {
         Config cfg; cfg.Load(config_path);
         watchPos(cfg.knownlist_offsets_file, override_pb);
+        return 0;
+    }
+
+    // ─── --diff-scan: двофазне калібрування HP/MP/CP через diff пам'яті ─────────
+    if (diff_scan) {
+        Config cfg; cfg.Load(config_path);
+        diffScan(cfg.knownlist_offsets_file);
         return 0;
     }
 
