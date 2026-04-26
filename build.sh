@@ -54,7 +54,8 @@ SRCS="
   $SRC/navmesh_builder.cpp
   $SRC/navmesh_worker.cpp
   $SRC/BehaviorTree.cpp
-  $SRC/BotBehaviorTree.cpp
+  $SRC/BotBehaviorTree.cpp $SRC/BotBT_Dead.cpp $SRC/BotBT_Buff.cpp $SRC/BotBT_Attack.cpp \
+  $SRC/BotBT_Target.cpp $SRC/BotBT_Nav.cpp $SRC/BotBT_RL.cpp
   $SRC/LinearQModel.cpp
   $SRC/LearningWorker.cpp
   $SRC/MemoryValidator.cpp
