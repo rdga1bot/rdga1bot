@@ -14,6 +14,8 @@
 // tgtHandlePatrolAndRotate — patrol rotation + stuck recovery.
 #include "BotBehaviorTree.h"
 #include "Input.h"
+#include "Geodata.h"
+#include "navmesh_builder.h"
 #include <cmath>
 
 // actTarget — замінено піддеревом tgt_root в MR28. Не використовується.
