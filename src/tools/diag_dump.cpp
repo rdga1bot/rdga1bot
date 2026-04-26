@@ -839,5 +839,5 @@ void runDiscoverKlist(const std::string& config_path) {
                 scanner.saveOffsets(cfg.knownlist_offsets_file);
         }
         return;
-    }
 }
+
