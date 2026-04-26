@@ -279,6 +279,8 @@ BTStatus BotBehaviorTree::actDead(GameState& gs) {
     switch (self.m_dead_phase) {
     case 0:
         gs.log("[DEAD] Фаза 0: Enter");
+        gs.stats.RecordDeath();               // рівно 1 раз на реальну смерть
+        if (gs.notify_death_fn) gs.notify_death_fn();
         gs.hands.PressKeyboardKey(Input::KeyboardKey::Enter);
         gs.hands.Send(5000);
         self.m_dead_phase = 1;

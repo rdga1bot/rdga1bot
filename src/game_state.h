@@ -93,11 +93,12 @@ struct GameState {
     std::function<std::optional<L2Character>(
         const std::vector<L2Character>&, float, float, float)> find_nearest_mob;
 
-    // ── Логування ────────────────────────────────────────────────────────────
+    // ── Логування та нотифікації ─────────────────────────────────────────────
     std::function<void(const std::string&)> log_fn;
     void log(const std::string& msg) const {
         if (log_fn) log_fn(msg);
     }
+    std::function<void()> notify_death_fn;
 
     // ── Утиліти ───────────────────────────────────────────────────────────────
     bool hasLiveMobs() const { return kl_alive_count > 0 || !minimap_dots.empty(); }

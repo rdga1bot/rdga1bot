@@ -148,10 +148,11 @@ void Brain::Process(bool debug) {
         }
     }
 
-    // Переходи стану — обробляємо тут щоб RecordDeath/NotifyDeath не дублювались
+    // Тригер смерті: тільки логуємо для діагностики.
+    // RecordDeath() і NotifyDeath() перенесено в actDead Фаза 0 (BT) —
+    // виконуються рівно 1 раз на реальну смерть.
+    // OCR-based is_dead_now може хибно спрацьовувати при HP=1% (TH Vampiric Rage).
     if (is_dead_now && m_prev_obj_name != "Dead") {
-        m_stats.RecordDeath();
-        m_notify.NotifyDeath();
         Log("[DEAD] Персонаж загинув. Спроба відродження...", LogLevel::Error);
     }
 
@@ -187,7 +188,8 @@ void Brain::Process(bool debug) {
 
     // Objectives tick — вся решта логіки
     GameState gs{ m_eyes, m_hands, m_cfg, m_stats };
-    gs.log_fn = [this](const std::string& msg) { Log(msg); };
+    gs.log_fn          = [this](const std::string& msg) { Log(msg); };
+    gs.notify_death_fn = [this]() { m_notify.NotifyDeath(); };
     updateGameState(gs);
     gs.is_dead = is_dead_now;  // передаємо поточний стан смерті
 
