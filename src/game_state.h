@@ -85,20 +85,23 @@ struct GameState {
     NavMeshBuilder* navmesh = nullptr;
 
     // ── Callbacks (Brain methods exposed for Objectives) ─────────────────────
-    std::function<bool(const L2Character&)>    navigate_to_mob;
-    std::function<bool(int)>                   is_blacklisted;
-    std::function<void(int, float)>            blacklist_mob;
-    std::function<std::optional<L2Character>(
-        const std::vector<L2Character>&, float, float)> select_target;
-    std::function<std::optional<L2Character>(
-        const std::vector<L2Character>&, float, float, float)> find_nearest_mob;
+    // Згруповано для читабельності. Використання: gs.cb.navigate_to_mob(...)
+    struct Callbacks {
+        std::function<bool(const L2Character&)>    navigate_to_mob;
+        std::function<bool(int)>                   is_blacklisted;
+        std::function<void(int, float)>            blacklist_mob;
+        std::function<std::optional<L2Character>(
+            const std::vector<L2Character>&, float, float)> select_target;
+        std::function<std::optional<L2Character>(
+            const std::vector<L2Character>&, float, float, float)> find_nearest_mob;
+        std::function<void(const std::string&)>    log_fn;
+        std::function<void()>                      notify_death_fn;
+    } cb;
 
-    // ── Логування та нотифікації ─────────────────────────────────────────────
-    std::function<void(const std::string&)> log_fn;
+    // log() — зручний helper (НЕ чіпати)
     void log(const std::string& msg) const {
-        if (log_fn) log_fn(msg);
+        if (cb.log_fn) cb.log_fn(msg);
     }
-    std::function<void()> notify_death_fn;
 
     // ── Утиліти ───────────────────────────────────────────────────────────────
     bool hasLiveMobs() const { return kl_alive_count > 0 || !minimap_dots.empty(); }

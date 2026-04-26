@@ -408,14 +408,14 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleNavigation(GameState& gs,
     }
 
     // ── Breadcrumbs: виконання повернення ────────────────────────────────────
-    if (m_backtracking && gs.coords_valid && gs.navigate_to_mob) {
+    if (m_backtracking && gs.coords_valid && gs.cb.navigate_to_mob) {
         auto bc = findBacktrackCrumb(gs.player_x, gs.player_y,
                                      gs.cfg.breadcrumbs.backtrack_range);
         if (bc.has_value()) {
             L2Character dummy{};
             dummy.x = bc->x; dummy.y = bc->y; dummy.z = bc->z;
             dummy.hp = 100.f; dummy.hpMax = 100.f;
-            if (!gs.navigate_to_mob(dummy)) {
+            if (!gs.cb.navigate_to_mob(dummy)) {
                 m_backtracking = false;
                 m_tgt_nav_stuck_recoveries = 0;
                 gs.log("[BREADCRUMB] Точку досягнуто → відновлюємо пошук");
@@ -435,26 +435,26 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleNavigation(GameState& gs,
         && m_rl_suggested_action == LinearQModel::Action::NavigateMemory
         && m_rl_action_confidence > 0.5f
         && !gs.kl_mobs.empty()
-        && gs.coords_valid && gs.navigate_to_mob;
+        && gs.coords_valid && gs.cb.navigate_to_mob;
 
     if ((gs.cfg.navigation.enabled || rl_nav_forced) && !gs.kl_mobs.empty()) {
         auto kl_mobs = gs.kl_mobs;
         kl_mobs.erase(std::remove_if(kl_mobs.begin(), kl_mobs.end(),
             [&gs](const L2Character& mob) {
-                return gs.is_blacklisted && gs.is_blacklisted(mob.objectID);
+                return gs.cb.is_blacklisted && gs.cb.is_blacklisted(mob.objectID);
             }), kl_mobs.end());
         if (!kl_mobs.empty()) {
             std::optional<L2Character> nearest;
             if (rl_nav_forced && !gs.cfg.navigation.enabled) {
                 // NavigateMemory override: завжди найближчий (не зважений)
                 gs.log("[RL] NavigateMemory override → nav до найближчого моба");
-                if (gs.find_nearest_mob)
-                    nearest = gs.find_nearest_mob(kl_mobs, gs.player_x, gs.player_y,
+                if (gs.cb.find_nearest_mob)
+                    nearest = gs.cb.find_nearest_mob(kl_mobs, gs.player_x, gs.player_y,
                                                   gs.cfg.weighted_target.max_range);
-            } else if (gs.cfg.weighted_target.enabled && gs.select_target) {
-                nearest = gs.select_target(kl_mobs, gs.player_x, gs.player_y);
-            } else if (gs.find_nearest_mob) {
-                nearest = gs.find_nearest_mob(kl_mobs, gs.player_x, gs.player_y,
+            } else if (gs.cfg.weighted_target.enabled && gs.cb.select_target) {
+                nearest = gs.cb.select_target(kl_mobs, gs.player_x, gs.player_y);
+            } else if (gs.cb.find_nearest_mob) {
+                nearest = gs.cb.find_nearest_mob(kl_mobs, gs.player_x, gs.player_y,
                                               gs.cfg.weighted_target.max_range);
             }
             // RL: підтвердження TargetNearest / TargetWeighted (BT вже виконує цю дію)
@@ -468,8 +468,8 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleNavigation(GameState& gs,
                         + " підтверджено → " + who);
                 }
             }
-            if (nearest.has_value() && gs.navigate_to_mob) {
-                bool navigated = gs.navigate_to_mob(*nearest);
+            if (nearest.has_value() && gs.cb.navigate_to_mob) {
+                bool navigated = gs.cb.navigate_to_mob(*nearest);
                 if (navigated) {
                     std::string who = nearest->name.empty()
                         ? ("ID=" + std::to_string(nearest->objectID))
@@ -542,7 +542,7 @@ std::optional<BTStatus> BotBehaviorTree::tgtHandleGeoPath(GameState& gs,
             L2Character wp{};
             wp.x = wx; wp.y = wy; wp.z = gs.player_z;
             wp.hp = 100.f; wp.hpMax = 100.f;
-            if (gs.navigate_to_mob && gs.navigate_to_mob(wp)) {
+            if (gs.cb.navigate_to_mob && gs.cb.navigate_to_mob(wp)) {
                 gs.log("[GEO] → waypoint " + std::to_string(m_tgt_geo_path_idx) +
                     " dist=" + std::to_string((int)dist_wp));
                 gs.hands.Send(150);

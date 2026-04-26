@@ -293,7 +293,7 @@ void BotBehaviorTree::resetTargetState(GameState& gs) {
 }
 
 void BotBehaviorTree::blacklistCurrentTarget(GameState& gs) {
-    if (!gs.blacklist_mob || gs.kl_mobs.empty()) return;
+    if (!gs.cb.blacklist_mob || gs.kl_mobs.empty()) return;
     int   bid     = 0;
     float best_hp = 1e9f, best_pct = 101.f;
     for (const auto& mob : gs.kl_mobs) {
@@ -305,5 +305,5 @@ void BotBehaviorTree::blacklistCurrentTarget(GameState& gs) {
             best_hp = mob.hpAbs(); bid = mob.objectID;
         }
     }
-    if (bid != 0) gs.blacklist_mob(bid, 60.f);
+    if (bid != 0) gs.cb.blacklist_mob(bid, 60.f);
 }

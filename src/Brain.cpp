@@ -188,8 +188,8 @@ void Brain::Process(bool debug) {
 
     // Objectives tick — вся решта логіки
     GameState gs{ m_eyes, m_hands, m_cfg, m_stats };
-    gs.log_fn          = [this](const std::string& msg) { Log(msg); };
-    gs.notify_death_fn = [this]() { m_notify.NotifyDeath(); };
+    gs.cb.log_fn          = [this](const std::string& msg) { Log(msg); };
+    gs.cb.notify_death_fn = [this]() { m_notify.NotifyDeath(); };
     updateGameState(gs);
     gs.is_dead = is_dead_now;  // передаємо поточний стан смерті
 
@@ -316,20 +316,20 @@ void Brain::updateGameState(GameState& gs) {
     // кожну ітерацію (навіть hands busy), щоб не пропускати рух під час дій
 
     // Callbacks
-    gs.navigate_to_mob = [this](const L2Character& mob) {
+    gs.cb.navigate_to_mob = [this](const L2Character& mob) {
         return NavigateToMob(mob);
     };
-    gs.is_blacklisted = [this](int id) {
+    gs.cb.is_blacklisted   = [this](int id) {
         return IsBlacklisted(id);
     };
-    gs.blacklist_mob = [this](int id, float secs) {
+    gs.cb.blacklist_mob     = [this](int id, float secs) {
         BlacklistMob(id, secs);
     };
-    gs.select_target = [this](const std::vector<L2Character>& mobs,
+    gs.cb.select_target     = [this](const std::vector<L2Character>& mobs,
                                float px, float py) -> std::optional<L2Character> {
         return SelectWeightedTarget(mobs, px, py);
     };
-    gs.find_nearest_mob = [this](const std::vector<L2Character>& mobs,
+    gs.cb.find_nearest_mob = [this](const std::vector<L2Character>& mobs,
                                   float px, float py, float range) -> std::optional<L2Character> {
         if (!m_world) return std::nullopt;
         return m_world->findNearestMob(mobs, px, py, range);

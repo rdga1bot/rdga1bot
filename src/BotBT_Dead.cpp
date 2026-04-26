@@ -22,7 +22,7 @@ BTStatus BotBehaviorTree::actDead(GameState& gs) {
     case 0:
         gs.log("[DEAD] Фаза 0: Enter");
         gs.stats.RecordDeath();               // рівно 1 раз на реальну смерть
-        if (gs.notify_death_fn) gs.notify_death_fn();
+        if (gs.cb.notify_death_fn) gs.cb.notify_death_fn();
         gs.hands.PressKeyboardKey(Input::KeyboardKey::Enter);
         gs.hands.Send(5000);
         self.m_dead_phase = 1;
@@ -91,11 +91,11 @@ BTStatus BotBehaviorTree::actZone(GameState& gs) {
     }
 
     gs.log("[ZONE] Поза зоною (dist=" + std::to_string((int)dist) + ")");
-    if (gs.navigate_to_mob) {
+    if (gs.cb.navigate_to_mob) {
         L2Character dummy{};
         dummy.x = self.m_zone_cx; dummy.y = self.m_zone_cy;
         dummy.hp = 100.f; dummy.hpMax = 100.f;
-        gs.navigate_to_mob(dummy);
+        gs.cb.navigate_to_mob(dummy);
     } else {
         gs.hands.WalkForward(800);
     }
