@@ -1,21 +1,21 @@
-# rdga1bot — v1.4
+# rdga1bot — v1.5
 
 C++ бот для автоматизації фарму в Lineage II.  
 Протестовано: ElmoreLab Kamael/Lionna, Arch Linux, Wine/Lutris (GE-Proton), X11.
 
-## Результати (v1.4)
+## Результати (v1.5)
 
 | Сесія | Kills | Deaths | Kill/хв |
 |-------|-------|--------|---------|
-| 311 хв (MR75) | 921 | 0 | **3.0** |
-| 182 хв (MR76) | 1072 | 1* | **5.9** |
-| 116 хв (MR65) | ~200 | 0 | ~1.7 |
-| 125 хв (MR50) | 381 | 1 | 3.4 |
+| **137 хв (MR76+)** | **640** | **0** | **4.7** |
+| 252 хв (MR77+) | 732 | 1* | 2.9 |
+| 311 хв (MR75) | 921 | 0 | 3.0 |
+| 182 хв (MR76) | 1072 | 1 | 5.9 |
 | Тиждень (~54 сесії, v1.1) | ~15 700 | — | 4–15 |
 
-\* 1 реальна смерть (закінчився 5-годинний зовнішній бафф); MR76 усуває подальший death loop
+\* D-лічильник v1.4 хибно показував множинні смерті через OCR HP=1% (MR79 fix)
 
-Ціль: **kill rate > 3/хв стабільно** — стабільно досягнуто (3.0–5.9 kills/хв у 5-годинних тестах).
+Ціль: **kill rate > 3/хв стабільно** — стабільно досягнуто, найкраща сесія 4.7 kills/хв за 137 хв без смертей.
 
 ---
 
@@ -59,6 +59,9 @@ C++ бот для автоматизації фарму в Lineage II.
 - **MR74**: crash при shutdown — `std::thread::detach()` blindScan → use-after-free; fix: stored thread + `abortScan()` + join при `bot_exit`
 - **MR75**: dx stability tracking у `tgtHandleMinimap` (WalkForward bypass при stuck dx ×3); KL-HP фільтр `absHp<10 && hpMax=0` (false positive hpAbs=3 → 139 false unreachable); Shadow counter fix; HP_Threshold 70→45%
 - **MR76**: buff під час grace якщо `m_buff_after_death` (fix death loop після смерті без бафів); `m_close_unreachable_count` ліміт 3 + force#3 `WalkForward(4000)` (fix 17-хв gap з 14 недосяжними мобами); crash fix — `SetLogCallback(nullptr)` перед `dashboard.Shutdown()` (double free)
+- **MR77**: KL-HP фільтр dist>5000 → виключаємо garbage coords (false positive dist=112456 з region scan)
+- **MR78**: `--diff-scan` — двофазне калібрування HP/MP/CP без Cheat Engine (snapshot 1 → урон → snapshot 2 → diff → `mem_calib.json`)
+- **MR79**: `RecordDeath()` перенесено в `actDead` Фаза 0 (виконується рівно 1 раз/смерть); fix хибного D-лічильника при HP=1% (TH Vampiric Rage → multiple false triggers)
 - **Windows**: `ReadProcessMemory` (ProcessMemory.h), Toolhelp32 (FindPid), `EnumProcessModules` (FindModuleBase), `VirtualQueryEx` (region scan) — MR67
 
 ### BehaviorTree планувальник
@@ -150,13 +153,16 @@ HpThreshold = 45      # відпочинок тільки при < 45% HP (TH Va
 ## Калібровка
 
 ```bash
-# Автоматична (при першому запуску з UseKLBase=true):
-# → [MemCalib] знаходить HP/MP/CP offsets, зберігає в mem_calib.json
+# Двофазне авто-калібрування HP/MP/CP (MR78):
+./rdga1bot --diff-scan
+# → Snapshot 1 (введи HP%/MP%/CP%), отримай урон, Enter → Snapshot 2 → mem_calib.json
 
 # Ручна діагностика:
 ./rdga1bot --calibrate              # дамп KnownList об'єктів
 ./rdga1bot --calibrate --name "Mob" # пошук по імені
 ./rdga1bot --hp-calibrate           # пошук HP offset мобів
+./rdga1bot --find-pos               # пошук PlayerBase XYZ offset
+./rdga1bot --watch-pos              # live monitor XYZ при русі
 ```
 
 ## Клавіші
@@ -169,12 +175,33 @@ HpThreshold = 45      # відпочинок тільки при < 45% HP (TH Va
 | R / Space | Скинути детекцію HP/MP/CP барів |
 | F12 | Зберегти calibrate_*.png |
 
+## Рефакторинг R1 (2026-04)
+
+Без змін логіки, тільки структура:
+
+| До | Після |
+|----|-------|
+| `BotBehaviorTree.cpp` 1764 рядки | 273 + 6 файлів `BotBT_*.cpp` |
+| `main.cpp` 2442 рядки | 774 + 6 файлів `src/tools/diag_*.cpp` |
+| `GameState`: 7 плоских `std::function<>` | `struct Callbacks { } cb` (доступ `gs.cb.X`) |
+
+Діагностичні режими (`--calibrate`, `--diff-scan`, `--map` тощо) виділені в `src/tools/`.  
+Три критичних інваріанти задокументовані в коді (s_self thread_local, BFS init, condIsDead+grace).
+
 ## Архітектура
 
 ```
 Brain.cpp/.h              — диспетчер: сприйняття + потіони + BotBehaviorTree dispatch
 BehaviorTree.h/.cpp       — stackless BT VM (BTNode 24B, BTState 8B)
-BotBehaviorTree.h/.cpp    — Farm BT + Target піддерево + RL (MR27/28/50-52/60/61/65)
+BotBehaviorTree.h/.cpp    — Farm BT ctor/init/tick/reset/conditions (~273 рядки)
+BotBT_Dead.cpp            — actDead, actRest, actZone, actLoot
+BotBT_Buff.cpp            — actBuff (ALT+B FSM, template matching)
+BotBT_Attack.cpp          — actAttack, resetAttackState, resetTargetState, blacklist
+BotBT_Target.cpp          — Target піддерево (7 вузлів + tgt helpers)
+BotBT_Nav.cpp             — deliverGeoPath, addCrumb, takePendingPathRequest
+BotBT_RL.cpp              — initRL, shutdownRL, rlPreTick, rlPostTick
+src/tools/diag.h          — forward declarations CLI-діагностики
+src/tools/diag_*.cpp      — --calibrate, --diff-scan, --map, --find-pos тощо
 Eyes.cpp/.h               — OpenCV детекція: HP/MP/CP бари, target HP, мінімапа
 Hands.h                   — дії: keyboard/mouse через Intercept
 Intercept.h               — cross-platform input interface
