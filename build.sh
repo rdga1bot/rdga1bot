@@ -60,6 +60,9 @@ SRCS="
   $SRC/LearningWorker.cpp
   $SRC/MemoryValidator.cpp
   $SRC/ShadowLogger.cpp
+  $SRC/tools/diag_helpers.cpp $SRC/tools/diag_findpos.cpp \
+  $SRC/tools/diag_map.cpp $SRC/tools/diag_calibrate.cpp \
+  $SRC/tools/diag_dump.cpp
 "
 
 # Detour sources (тільки якщо src/recast/Detour існує)
