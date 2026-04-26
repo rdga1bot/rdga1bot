@@ -244,7 +244,10 @@ uintptr_t OffsetScanner::performBlindScan() {
             if (!isL2Coord(px, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(py, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
             if (!isL2Coord(pz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-            // Обидві координати X та Y мають бути ненульовими.
+            // coordinate filter: |X|>200 AND |Y|>200 — НЕ |X|<1000.
+            // ElmoreLab Kamael: зона фарму ToI має X<30000, LoA має X~83000.
+            // Попередній фільтр |X|<1000 відхиляв валідні ToI координати.
+            // Поточний фільтр <200 відхиляє тільки нульову Wine .data секцію. (MR32)
             // Y=0 → гравець ніколи не стоїть на осі симетрії (або стала адреса).
             // X=1098,Y=0 — false positive у Wine .data секції.
             if (std::fabsf(px) < 200.f || std::fabsf(py) < 200.f) continue;

@@ -10,6 +10,10 @@
 #include <cmath>
 #include <algorithm>
 
+// thread_local: BT виконується тільки в main thread (single-threaded Brain).
+// static Action/Condition функції не мають доступу до `this` —
+// звертаються через s_self. Безпечно тому що Brain::Process() не
+// викликається з worker threads. НЕ видаляти.
 thread_local BotBehaviorTree* BotBehaviorTree::s_self = nullptr;
 
 BotBehaviorTree::BotBehaviorTree() {
@@ -23,9 +27,12 @@ BotBehaviorTree::~BotBehaviorTree() {
 }
 
 // ── init ──────────────────────────────────────────────────────────────────────
-// ВАЖЛИВО: будуємо дерево в BFS-порядку — спочатку всі прямі нащадки root,
-// потім нащадки кожної гілки. Це необхідно для коректного childStart/childCount
-// у плоскому масиві m_children (lazy-assign у addChild).
+// КРИТИЧНО: BFS порядок побудови дерева.
+// Фаза 1: root отримує ВСІХ прямих нащадків підряд (всі seq/action addChild).
+// Фаза 2: кожна гілка отримує своїх нащадків.
+// Порушення → неправильний childStart у плоскому m_children[] масиві
+// → circular childStart → infinite loop у BT stackless VM.
+// Детальніше: CLAUDE_ARCH.md §BotBehaviorTree BFS init.
 void BotBehaviorTree::init(const Config& cfg) {
     m_zone_cx      = cfg.zone_x;
     m_zone_cy      = cfg.zone_y;
@@ -173,6 +180,9 @@ void BotBehaviorTree::reset() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool BotBehaviorTree::condIsDead(GameState& gs) {
+    // !inGrace(): запобігає дублюванню notifyDeathRL після respawn.
+    // Після смерті memory lag може тримати is_dead=true ще кілька тіків →
+    // без inGrace() три Death episodes з однієї смерті. Виправлено MR31.
     return gs.is_dead && !s_self->inGrace();
 }
 
