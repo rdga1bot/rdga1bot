@@ -104,6 +104,7 @@ void Dashboard::RecreateWindows() {
 
 void Dashboard::Shutdown() {
     if (!m_active) return;
+    mousemask(0, nullptr); // вимикаємо mouse reporting перед endwin()
     auto del = [](WINDOW*& w) { if (w) { delwin(w); w = nullptr; } };
     del(m_win_header);
     del(m_win_status);
