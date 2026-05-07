@@ -382,16 +382,17 @@ int main(int argc, char* argv[]) {
                 else         std::cout << msg << "\n";
                 goto bot_exit;
             }
-            // PgUp — пауза/відновлення (edge detection: тільки на відпусканні клавіші)
+            // Fn+PgUp (Pause/Break) — пауза/відновлення, аналог Fn+Home (ScrollLock)
+            // Edge detection на відпусканні: toggle виникає один раз
             {
-                bool pgup_now = hands.KeyboardKeyPressed(Input::KeyboardKey::PageUp);
-                if (!pgup_now && pgup_prev) { // відпустили → toggle
+                bool pause_now = hands.KeyboardKeyPressed(Input::KeyboardKey::Pause);
+                if (!pause_now && pgup_prev) {
                     brain.TogglePause();
-                    std::string msg = brain.IsPaused() ? "[PAUSE] PgUp → пауза" : "[PAUSE] PgUp → продовження";
+                    std::string msg = brain.IsPaused() ? "[PAUSE] Pause/Break → пауза" : "[PAUSE] Pause/Break → продовження";
                     if (use_tui) dashboard.AddLog(msg);
                     else         std::cout << msg << "\n";
                 }
-                pgup_prev = pgup_now;
+                pgup_prev = pause_now;
             }
             if (hands.IsReady() &&
                 std::chrono::steady_clock::now() - loop_start_time >= ESC_GRACE &&

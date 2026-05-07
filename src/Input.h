@@ -111,6 +111,7 @@ public:
         F10                 = 0x44,
         NumLock             = 0x45,
         ScrollLock          = 0x46,
+        Pause               = 119,   // evdev KEY_PAUSE → X11 keycode 127 (XK_Pause = Fn+PgUp на ноуті)
         Num7                = 0x47,
         Home                = 0x47 | E0,
         Num8                = 0x48,
