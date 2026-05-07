@@ -21,7 +21,16 @@ Dashboard::~Dashboard() {
 
 void Dashboard::Init() {
     setlocale(LC_ALL, "");
-    initscr();
+    // stdout може бути piped (tee session.log) — ncurses через pipe не може
+    // коректно обмінюватись з терміналом для mouse events.
+    // Відкриваємо /dev/tty напряму як htop і передаємо в newterm().
+    m_tty = fopen("/dev/tty", "r+");
+    if (m_tty) {
+        newterm(getenv("TERM"), m_tty, m_tty);
+    } else {
+        initscr(); // fallback якщо /dev/tty недоступний
+    }
+
     cbreak();
     noecho();
     curs_set(0);
@@ -29,11 +38,6 @@ void Dashboard::Init() {
     timeout(1);
     mousemask(BUTTON1_RELEASED, nullptr);
     mouseinterval(0);
-    // Явно вмикаємо SGR extended mouse mode (\033[?1006h).
-    // xterm-256color надсилає події в SGR форматі, а не X10 —
-    // без цього ncurses отримує нерозпізнані bytes що течуть в stdout.
-    putp("\033[?1006h");
-    fflush(stdout);
 
     if (!has_colors()) { endwin(); return; }
 
@@ -110,8 +114,6 @@ void Dashboard::RecreateWindows() {
 
 void Dashboard::Shutdown() {
     if (!m_active) return;
-    putp("\033[?1006l"); // вимикаємо SGR mouse mode
-    fflush(stdout);
     mousemask(0, nullptr);
     auto del = [](WINDOW*& w) { if (w) { delwin(w); w = nullptr; } };
     del(m_win_header);
@@ -120,6 +122,7 @@ void Dashboard::Shutdown() {
     del(m_win_content);
     del(m_win_footer);
     endwin();
+    if (m_tty) { fclose(m_tty); m_tty = nullptr; }
     m_active = false;
 }
 

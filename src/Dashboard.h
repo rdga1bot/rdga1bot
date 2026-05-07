@@ -56,6 +56,7 @@ public:
     bool IsActive() const { return m_active; }
 
 private:
+    FILE*  m_tty     = nullptr; // /dev/tty для прямого доступу до терміналу
     bool   m_active  = false;
     bool   m_paused  = false;
     int    m_tab     = 0;      // 0=Main 1=Stats 2=Memory 3=RL
