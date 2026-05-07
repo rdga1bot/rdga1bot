@@ -60,9 +60,9 @@ SESSION_LOG="logs/session_$(date +%Y%m%d_%H%M%S).log"
 LAUNCH_LOG="logs/launch_$(date +%Y%m%d).log"
 echo "[QA] Запуск бота → $SESSION_LOG" >> "$LAUNCH_LOG"
 if [ -f rdga1bot.ini ]; then
-    ./rdga1bot --quick 2>> "logs/stderr_$(date +%Y%m%d).log" | tee "$SESSION_LOG" &
+    ./rdga1bot --quick >> "$SESSION_LOG" 2>> "logs/stderr_$(date +%Y%m%d).log" &
 else
-    ./rdga1bot 2>> "logs/stderr_$(date +%Y%m%d).log" | tee "$SESSION_LOG" &
+    ./rdga1bot >> "$SESSION_LOG" 2>> "logs/stderr_$(date +%Y%m%d).log" &
 fi
 BOT_PID=$!
 PIDS+=("$BOT_PID")
