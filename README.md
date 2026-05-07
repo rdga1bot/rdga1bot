@@ -3,6 +3,21 @@
 C++ бот для автоматизації фарму в Lineage II.  
 Протестовано: ElmoreLab Kamael/Lionna, Arch Linux, Wine/Lutris (GE-Proton), X11.
 
+## TUI Dashboard (htop-style)
+
+| Main — лог подій | Stats — метри |
+|---|---|
+| ![Main](docs/tui_main.png) | ![Stats](docs/tui_stats.png) |
+
+| Memory — offsets + Shadow | RL — Q-model |
+|---|---|
+| ![Memory](docs/tui_memory.png) | ![RL](docs/tui_rl.png) |
+
+**Керування:**
+- Клік мишею по вкладці — перемикання Main / Stats / Memory / RL
+- `Fn+Home` (ScrollLock) — зупинка бота
+- `Fn+PgUp` (Pause/Break) — пауза / відновлення
+
 ## Результати (v1.5)
 
 | Сесія | Kills | Deaths | Kill/хв |
