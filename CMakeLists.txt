@@ -11,8 +11,14 @@ find_package(Threads REQUIRED)
 set(SOURCES
     src/main.cpp
     src/Brain.cpp
-    src/BotBehaviorTree.cpp
     src/BehaviorTree.cpp
+    src/BotBehaviorTree.cpp
+    src/BotBT_Dead.cpp
+    src/BotBT_Buff.cpp
+    src/BotBT_Attack.cpp
+    src/BotBT_Target.cpp
+    src/BotBT_Nav.cpp
+    src/BotBT_RL.cpp
     src/Config.cpp
     src/Stats.cpp
     src/Notify.cpp
@@ -35,9 +41,31 @@ set(SOURCES
     src/MemoryValidator.cpp
 )
 
+# ── Recast/Detour (optional NavMesh) ─────────────────────────────────────────
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/recast/Detour/Source/DetourNavMesh.cpp")
+    file(GLOB DETOUR_SRCS src/recast/Detour/Source/*.cpp)
+    file(GLOB RECAST_SRCS src/recast/Recast/Source/*.cpp)
+    list(APPEND SOURCES ${DETOUR_SRCS} ${RECAST_SRCS})
+    set(RDGA1BOT_NAVMESH ON)
+else()
+    set(RDGA1BOT_NAVMESH OFF)
+    message(STATUS "Recast/Detour not found — NavMesh disabled")
+endif()
+
 add_executable(rdga1bot ${SOURCES})
 
-target_include_directories(rdga1bot PRIVATE src ${OpenCV_INCLUDE_DIRS})
+target_include_directories(rdga1bot PRIVATE
+    src
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen
+)
+
+if(RDGA1BOT_NAVMESH)
+    target_include_directories(rdga1bot PRIVATE
+        src/recast/Detour/Include
+        src/recast/Recast/Include)
+    target_compile_definitions(rdga1bot PRIVATE RDGA1BOT_NAVMESH)
+endif()
 
 # ── Platform-specific sources and libraries ───────────────────────────────────
 if(WIN32)
@@ -79,6 +107,11 @@ else()
         src/Intercept_Linux.cpp
         src/Capture_Linux.cpp
         src/Window_Linux.cpp
+        src/tools/diag_helpers.cpp
+        src/tools/diag_findpos.cpp
+        src/tools/diag_map.cpp
+        src/tools/diag_calibrate.cpp
+        src/tools/diag_dump.cpp
     )
 
     target_link_libraries(rdga1bot PRIVATE X11 Xtst Xext ncursesw)
