@@ -362,40 +362,26 @@ void Dashboard::DrawTabBar() {
     werase(m_win_tabbar);
 
     struct Tab { const char* key; const char* name; };
-    static const Tab tabs[4] = {
-        {"F1", "Main  "},
-        {"F2", "Stats "},
-        {"F3", "Memory"},
-        {"F4", "RL    "},
-    };
+    static const char* names[4] = { " Main ", " Stats ", " Memory ", " RL " };
 
-    int x = 1;
+    int x = 0;
     for (int i = 0; i < 4 && x < m_cols - 2; i++) {
         bool active = (i == m_tab);
-        m_tab_x[i] = x; // зберігаємо для mouse click detection
+        m_tab_x[i] = x;
 
         if (active) {
             wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
         } else {
-            wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT) | A_DIM);
+            wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT));
         }
 
-        char buf[24];
-        snprintf(buf, sizeof(buf), "[%s]%s", tabs[i].key, tabs[i].name);
-        mvwprintw(m_win_tabbar, 0, x, "%s", buf);
-        x += (int)strlen(buf);
+        mvwprintw(m_win_tabbar, 0, x, "%s", names[i]);
+        x += (int)strlen(names[i]);
 
         if (active) {
             wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
         } else {
-            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT) | A_DIM);
-        }
-
-        if (i < 3) {
-            wattron(m_win_tabbar, COLOR_PAIR(COLOR_DIM));
-            mvwaddch(m_win_tabbar, 0, x, ACS_VLINE);
-            x++;
-            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_DIM));
+            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT));
         }
     }
 }
