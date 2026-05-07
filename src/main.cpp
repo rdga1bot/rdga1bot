@@ -381,6 +381,13 @@ int main(int argc, char* argv[]) {
                 else         std::cout << msg << "\n";
                 goto bot_exit;
             }
+            // PgUp (PageUp) — пауза/відновлення без клавіатури TUI
+            if (hands.KeyboardKeyPressed(Input::KeyboardKey::PageUp)) {
+                brain.TogglePause();
+                std::string msg = brain.IsPaused() ? "[PAUSE] PgUp → пауза" : "[PAUSE] PgUp → продовження";
+                if (use_tui) dashboard.AddLog(msg);
+                else         std::cout << msg << "\n";
+            }
             if (hands.IsReady() &&
                 std::chrono::steady_clock::now() - loop_start_time >= ESC_GRACE &&
                 hands.KeyboardKeyPressed(Input::KeyboardKey::Escape)) {

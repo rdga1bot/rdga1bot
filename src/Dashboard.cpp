@@ -143,9 +143,9 @@ void Dashboard::Update(const Brain& brain, double fps) {
         clearok(stdscr, TRUE); // примусова перемальовка після resize
     }
 
-    // erase() — очищає буфер stdscr (фон + сепаратори), але НЕ примушує
-    // повний repaint термінала (на відміну від clear()). ncurses шле тільки diff.
-    erase();
+    // clear() потрібен для коректного першого кадру (встановлює clean baseline).
+    // Мерехтіння усувається через wnoutrefresh+doupdate нижче, а не через erase().
+    clear();
 
     Eyes::Me    me_def{};
     Eyes::Target tgt_def{};
