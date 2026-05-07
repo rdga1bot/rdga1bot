@@ -355,6 +355,7 @@ int main(int argc, char* argv[]) {
         bool kl_cache_tried   = false; // спробували playerBaseCache з offsets.json
         bool        mem_calib_done = false;
         HpAutoCalib hp_auto_calib;     // MR80: диференційне авто-калібрування HP offset
+        bool        pgup_prev = false; // edge detection для PageUp паузи
         auto kl_last_attempt  =
             std::chrono::steady_clock::now() - std::chrono::seconds(10);
         auto kl_validity_check =
@@ -381,12 +382,16 @@ int main(int argc, char* argv[]) {
                 else         std::cout << msg << "\n";
                 goto bot_exit;
             }
-            // PgUp (PageUp) — пауза/відновлення без клавіатури TUI
-            if (hands.KeyboardKeyPressed(Input::KeyboardKey::PageUp)) {
-                brain.TogglePause();
-                std::string msg = brain.IsPaused() ? "[PAUSE] PgUp → пауза" : "[PAUSE] PgUp → продовження";
-                if (use_tui) dashboard.AddLog(msg);
-                else         std::cout << msg << "\n";
+            // PgUp — пауза/відновлення (edge detection: тільки на відпусканні клавіші)
+            {
+                bool pgup_now = hands.KeyboardKeyPressed(Input::KeyboardKey::PageUp);
+                if (!pgup_now && pgup_prev) { // відпустили → toggle
+                    brain.TogglePause();
+                    std::string msg = brain.IsPaused() ? "[PAUSE] PgUp → пауза" : "[PAUSE] PgUp → продовження";
+                    if (use_tui) dashboard.AddLog(msg);
+                    else         std::cout << msg << "\n";
+                }
+                pgup_prev = pgup_now;
             }
             if (hands.IsReady() &&
                 std::chrono::steady_clock::now() - loop_start_time >= ESC_GRACE &&

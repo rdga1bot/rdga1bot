@@ -27,8 +27,13 @@ void Dashboard::Init() {
     curs_set(0);
     keypad(stdscr, TRUE);
     timeout(1);
-    mousemask(BUTTON1_RELEASED, nullptr); // htop: тільки release, без press/clicked
+    mousemask(BUTTON1_RELEASED, nullptr);
     mouseinterval(0);
+    // Явно вмикаємо SGR extended mouse mode (\033[?1006h).
+    // xterm-256color надсилає події в SGR форматі, а не X10 —
+    // без цього ncurses отримує нерозпізнані bytes що течуть в stdout.
+    putp("\033[?1006h");
+    fflush(stdout);
 
     if (!has_colors()) { endwin(); return; }
 
@@ -105,6 +110,9 @@ void Dashboard::RecreateWindows() {
 
 void Dashboard::Shutdown() {
     if (!m_active) return;
+    putp("\033[?1006l"); // вимикаємо SGR mouse mode
+    fflush(stdout);
+    mousemask(0, nullptr);
     auto del = [](WINDOW*& w) { if (w) { delwin(w); w = nullptr; } };
     del(m_win_header);
     del(m_win_status);
