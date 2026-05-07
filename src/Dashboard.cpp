@@ -27,6 +27,7 @@ void Dashboard::Init() {
     curs_set(0);
     keypad(stdscr, TRUE);
     timeout(1);
+    mousemask(BUTTON1_CLICKED | BUTTON1_PRESSED, nullptr);
 
     if (!has_colors()) { endwin(); return; }
 
@@ -371,6 +372,7 @@ void Dashboard::DrawTabBar() {
     int x = 1;
     for (int i = 0; i < 4 && x < m_cols - 2; i++) {
         bool active = (i == m_tab);
+        m_tab_x[i] = x; // зберігаємо для mouse click detection
 
         if (active) {
             wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
@@ -682,12 +684,27 @@ int Dashboard::HandleInput() {
         case 'p': case 'P':   return 'p';
         case 's': case 'S':   return 's';
         case 'r': case 'R':   return 'r';
-        case KEY_F(1):        m_tab = 0; return 0;
-        case KEY_F(2):        m_tab = 1; return 0;
-        case KEY_F(3):        m_tab = 2; return 0;
-        case KEY_F(4):        m_tab = 3; return 0;
-        case '\t':            m_tab = (m_tab + 1) % 4; return 0;
-        case KEY_RESIZE:      RecreateWindows(); return 0;
+        case KEY_F(1):  m_tab = 0; return 0;
+        case KEY_F(2):  m_tab = 1; return 0;
+        case KEY_F(3):  m_tab = 2; return 0;
+        case KEY_F(4):  m_tab = 3; return 0;
+        case '\t':      m_tab = (m_tab + 1) % 4; return 0;
+        case KEY_MOUSE: {
+            MEVENT ev;
+            if (getmouse(&ev) == OK && m_win_tabbar) {
+                int tab_row = getbegy(m_win_tabbar);
+                if (ev.y == tab_row &&
+                    (ev.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED))) {
+                    // Визначаємо вкладку за x-позицією кліку
+                    // m_tab_x[i] = початок і-ї вкладки; наступна вкладка або сепаратор
+                    for (int i = 3; i >= 0; i--) {
+                        if (ev.x >= m_tab_x[i]) { m_tab = i; break; }
+                    }
+                }
+            }
+            return 0;
+        }
+        case KEY_RESIZE: RecreateWindows(); return 0;
         default:              return ch;
     }
 }
