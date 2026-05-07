@@ -12,6 +12,7 @@ rdga1bot.ini
 *.png
 *.bmp
 !template/*.png
+!docs/*.png
 
 # Logs
 logs/
