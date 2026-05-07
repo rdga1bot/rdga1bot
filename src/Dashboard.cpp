@@ -1,14 +1,12 @@
 // Dashboard.h включається ПЕРШИМ (тягне Eyes.h → opencv).
-// Це гарантує що OpenCV заголовки парсяться БЕЗ ncurses макросів.
 #include "Dashboard.h"
 
 #include <algorithm>
 #include <clocale>
 #include <cstring>
 #include <ctime>
+#include <cstdio>
 
-// ncurses включається ПІСЛЯ всіх OpenCV заголовків, щоб його макроси
-// (clear, refresh, move, timeout, PANORAMA, тощо) не конфліктували з opencv.
 #include <ncurses.h>
 
 // ─── Конструктор / деструктор ──────────────────────────────────────────────
@@ -19,84 +17,98 @@ Dashboard::~Dashboard() {
     if (m_active) Shutdown();
 }
 
-// ─── Ініціалізація ─────────────────────────────────────────────────────────
+// ─── Init ──────────────────────────────────────────────────────────────────
 
 void Dashboard::Init() {
-    setlocale(LC_ALL, ""); // підтримка UTF-8
-
+    setlocale(LC_ALL, "");
     initscr();
     cbreak();
     noecho();
-    curs_set(0);     // прихований курсор
+    curs_set(0);
     keypad(stdscr, TRUE);
-    timeout(1);      // HandleInput не блокує (1мс)
+    timeout(1);
 
-    if (!has_colors()) {
-        endwin();
-        return; // термінал без кольорів — залишаємось без TUI
-    }
+    if (!has_colors()) { endwin(); return; }
 
     start_color();
     use_default_colors();
 
-    // Ініціалізація кольорових пар
-    init_pair(COLOR_NORMAL,  COLOR_WHITE,   -1);
-    init_pair(COLOR_TITLE,   COLOR_CYAN,    -1);
-    init_pair(COLOR_IDLE,    COLOR_WHITE,   -1);
-    init_pair(COLOR_TARGET,  COLOR_YELLOW,  -1);
-    init_pair(COLOR_ATTACK,  COLOR_GREEN,   -1);
-    init_pair(COLOR_LOOT,    COLOR_CYAN,    -1);
-    init_pair(COLOR_DEAD,    COLOR_RED,     -1);
-    init_pair(COLOR_BUFF,    COLOR_MAGENTA, -1);
-    init_pair(COLOR_HP_BAR,  COLOR_RED,     -1);
-    init_pair(COLOR_MP_BAR,  COLOR_BLUE,    -1);
-    init_pair(COLOR_CP_BAR,  COLOR_YELLOW,  -1);
-    init_pair(COLOR_LOG_SEP, COLOR_YELLOW,  -1);
-    init_pair(COLOR_DIM,     COLOR_WHITE,   -1);
+    init_pair(COLOR_NORMAL,     COLOR_WHITE,   -1);
+    init_pair(COLOR_TITLE,      COLOR_CYAN,    -1);
+    init_pair(COLOR_IDLE,       COLOR_WHITE,   -1);
+    init_pair(COLOR_TARGET,     COLOR_YELLOW,  -1);
+    init_pair(COLOR_ATTACK,     COLOR_GREEN,   -1);
+    init_pair(COLOR_LOOT,       COLOR_CYAN,    -1);
+    init_pair(COLOR_DEAD,       COLOR_RED,     -1);
+    init_pair(COLOR_BUFF,       COLOR_MAGENTA, -1);
+    init_pair(COLOR_HP_BAR,     COLOR_RED,     -1);
+    init_pair(COLOR_MP_BAR,     COLOR_BLUE,    -1);
+    init_pair(COLOR_CP_BAR,     COLOR_YELLOW,  -1);
+    init_pair(COLOR_LOG_SEP,    COLOR_YELLOW,  -1);
+    init_pair(COLOR_DIM,        COLOR_WHITE,   -1);
+    init_pair(COLOR_TAB_ACTIVE, COLOR_BLACK,   COLOR_CYAN);
+    init_pair(COLOR_TAB_INACT,  COLOR_WHITE,   -1);
+    init_pair(COLOR_METER_GOOD, COLOR_GREEN,   -1);
+    init_pair(COLOR_METER_WARN, COLOR_YELLOW,  -1);
+    init_pair(COLOR_METER_BAD,  COLOR_RED,     -1);
 
+    m_t_start = time(nullptr);
     getmaxyx(stdscr, m_rows, m_cols);
     RecreateWindows();
-
     m_active = true;
 }
 
+// ─── RecreateWindows ───────────────────────────────────────────────────────
+//
+// Рядки (приклад 24-рядковий термінал):
+//  0   header
+//  1   ── sep ──
+//  2   status row 0
+//  3   status row 1
+//  4   status row 2
+//  5   ── sep ──
+//  6   tabbar
+//  7   ── sep ──
+//  8   content start
+//  ...
+//  22  content end
+//  23  ── sep ──   ← якщо термінал < 14 рядків пропускаємо
+//  24  footer
+//
 void Dashboard::RecreateWindows() {
-    // Видаляємо старі вікна
-    if (m_win_header)  { delwin(m_win_header);  m_win_header  = nullptr; }
-    if (m_win_status)  { delwin(m_win_status);  m_win_status  = nullptr; }
-    if (m_win_log)     { delwin(m_win_log);     m_win_log     = nullptr; }
-    if (m_win_footer)  { delwin(m_win_footer);  m_win_footer  = nullptr; }
+    auto del = [](WINDOW*& w) { if (w) { delwin(w); w = nullptr; } };
+    del(m_win_header);
+    del(m_win_status);
+    del(m_win_tabbar);
+    del(m_win_content);
+    del(m_win_footer);
 
     getmaxyx(stdscr, m_rows, m_cols);
 
-    // Розміщення: header(1) + border(1) + status(3) + border(1) + log(N) + border(1) + footer(1)
-    int header_h  = 1;
-    int status_h  = 3;
-    int footer_h  = 1;
-    int fixed_h   = header_h + 2 + status_h + 2 + footer_h + 1; // рядки рамки
-    int log_h     = std::max(3, m_rows - fixed_h);
+    // Фіксовані висоти + 4 sep-рядки
+    const int kFixed = 1 + 1 + 3 + 1 + 1 + 1 + 1 + 1; // = 10
+    const int content_h = std::max(3, m_rows - kFixed);
 
-    int row = 0;
-    m_win_header = newwin(header_h, m_cols, row, 0); row += header_h;
-    // separator row — малюємо в stdscr
-    row++; // border
-    m_win_status = newwin(status_h, m_cols, row, 0); row += status_h;
-    row++; // border
-    m_win_log    = newwin(log_h,    m_cols, row, 0); row += log_h;
-    row++; // border
-    m_win_footer = newwin(footer_h, m_cols, row, 0);
+    int r = 0;
+    m_win_header  = newwin(1,         m_cols, r, 0); r += 2; // +1 sep
+    m_win_status  = newwin(3,         m_cols, r, 0); r += 4; // +1 sep
+    m_win_tabbar  = newwin(1,         m_cols, r, 0); r += 2; // +1 sep
+    m_win_content = newwin(content_h, m_cols, r, 0); r += content_h + 1;
+    m_win_footer  = newwin(1,         m_cols, r, 0);
 
-    scrollok(m_win_log, FALSE); // малюємо вручну
+    scrollok(m_win_content, FALSE);
 }
 
 // ─── Shutdown ──────────────────────────────────────────────────────────────
 
 void Dashboard::Shutdown() {
     if (!m_active) return;
-    if (m_win_header)  delwin(m_win_header);
-    if (m_win_status)  delwin(m_win_status);
-    if (m_win_log)     delwin(m_win_log);
-    if (m_win_footer)  delwin(m_win_footer);
+    auto del = [](WINDOW*& w) { if (w) { delwin(w); w = nullptr; } };
+    del(m_win_header);
+    del(m_win_status);
+    del(m_win_tabbar);
+    del(m_win_content);
+    del(m_win_footer);
     endwin();
     m_active = false;
 }
@@ -104,16 +116,13 @@ void Dashboard::Shutdown() {
 // ─── AddLog ────────────────────────────────────────────────────────────────
 
 void Dashboard::AddLog(const std::string& msg) {
-    // Поточний час
     time_t now = time(nullptr);
     struct tm* t = localtime(&now);
     char ts[16];
     strftime(ts, sizeof(ts), "%H:%M:%S", t);
 
-    std::string line = std::string(ts) + " " + msg;
-
     std::lock_guard<std::mutex> lock(m_log_mutex);
-    m_log.push_back(line);
+    m_log.push_back(std::string(ts) + " " + msg);
     while ((int)m_log.size() > MAX_LOG) m_log.pop_front();
 }
 
@@ -122,51 +131,56 @@ void Dashboard::AddLog(const std::string& msg) {
 void Dashboard::Update(const Brain& brain, double fps) {
     if (!m_active) return;
 
-    // Перевірка зміни розміру термінала (SIGWINCH)
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
     if (rows != m_rows || cols != m_cols) {
-        endwin();
-        refresh();
+        endwin(); refresh();
         getmaxyx(stdscr, m_rows, m_cols);
         RecreateWindows();
     }
 
     clear();
 
-    Eyes::Me  me_def{};
+    Eyes::Me    me_def{};
     Eyes::Target tgt_def{};
     const auto& me  = brain.Me().value_or(me_def);
     const auto& tgt = brain.Target().value_or(tgt_def);
 
     DrawHeader(brain.GetState(), fps, brain.IsPaused());
 
-    // Горизонтальний роздільник після header
-    attron(COLOR_PAIR(COLOR_DIM));
-    mvhline(1, 0, ACS_HLINE, m_cols);
-    attroff(COLOR_PAIR(COLOR_DIM));
+    // Розділювачі (позиції прив'язані до вікон через getbegy)
+    auto sep = [&](WINDOW* win, int offset) {
+        if (!win) return;
+        int row = getbegy(win) + offset;
+        if (row > 0 && row < m_rows) {
+            attron(COLOR_PAIR(COLOR_DIM));
+            mvhline(row, 0, ACS_HLINE, m_cols);
+            attroff(COLOR_PAIR(COLOR_DIM));
+        }
+    };
 
+    sep(m_win_status,  -1); // перед status
     DrawStatus(brain, me, tgt, brain.GetStats());
 
-    // Роздільник після status
-    attron(COLOR_PAIR(COLOR_DIM));
-    mvhline(1 + 1 + 3, 0, ACS_HLINE, m_cols);
-    attroff(COLOR_PAIR(COLOR_DIM));
+    sep(m_win_tabbar,  -1); // перед tabbar
+    DrawTabBar();
 
-    DrawLog();
+    sep(m_win_content, -1); // перед content
+    switch (m_tab) {
+        case 0: DrawMainTab();                           break;
+        case 1: DrawStatsTab(brain, brain.GetStats());  break;
+        case 2: DrawMemoryTab(brain);                   break;
+        case 3: DrawRLTab(brain);                       break;
+    }
 
-    // Роздільник перед footer
-    int log_end_row = 1 + 1 + 3 + 1 + std::max(3, m_rows - (1 + 2 + 3 + 2 + 1 + 1));
-    attron(COLOR_PAIR(COLOR_DIM));
-    mvhline(log_end_row, 0, ACS_HLINE, m_cols);
-    attroff(COLOR_PAIR(COLOR_DIM));
-
+    sep(m_win_footer,  -1); // перед footer
     DrawFooter();
 
     refresh();
     if (m_win_header)  wrefresh(m_win_header);
     if (m_win_status)  wrefresh(m_win_status);
-    if (m_win_log)     wrefresh(m_win_log);
+    if (m_win_tabbar)  wrefresh(m_win_tabbar);
+    if (m_win_content) wrefresh(m_win_content);
     if (m_win_footer)  wrefresh(m_win_footer);
 }
 
@@ -176,38 +190,32 @@ void Dashboard::DrawHeader(const std::string& state, double fps, bool paused) {
     if (!m_win_header) return;
     werase(m_win_header);
 
-    // Ліва частина: назва + версія
     wattron(m_win_header, COLOR_PAIR(COLOR_TITLE) | A_BOLD);
     mvwprintw(m_win_header, 0, 0, " rdga1bot");
     wattroff(m_win_header, COLOR_PAIR(COLOR_TITLE) | A_BOLD);
 
-    // Індикатор паузи
     if (paused) {
         wattron(m_win_header, COLOR_PAIR(COLOR_DEAD) | A_BOLD | A_BLINK);
         mvwprintw(m_win_header, 0, 11, " ПАУЗА ");
         wattroff(m_win_header, COLOR_PAIR(COLOR_DEAD) | A_BOLD | A_BLINK);
     }
 
-    // Права частина: FPS + стан
-    int state_color = StateColor(state);
-    const char* state_emoji = StateEmoji(state);
-
     char right[64];
-    snprintf(right, sizeof(right), "FPS:%-3d  %s ", (int)fps, state_emoji);
+    snprintf(right, sizeof(right), "FPS:%-3d  %s ", (int)fps, StateEmoji(state));
     int rx = m_cols - (int)strlen(right);
     if (rx > 0) {
-        wattron(m_win_header, COLOR_PAIR(state_color) | A_BOLD);
+        wattron(m_win_header, COLOR_PAIR(StateColor(state)) | A_BOLD);
         mvwprintw(m_win_header, 0, rx, "%s", right);
-        wattroff(m_win_header, COLOR_PAIR(state_color) | A_BOLD);
+        wattroff(m_win_header, COLOR_PAIR(StateColor(state)) | A_BOLD);
     }
 }
 
 // ─── DrawBar ───────────────────────────────────────────────────────────────
 
-void Dashboard::DrawBar(WINDOW* win, int y, int x, int bar_width,
-                        int percent, int color_pair, const char* label) {
-    percent = std::max(0, std::min(100, percent));
-    int filled = bar_width * percent / 100;
+void Dashboard::DrawBar(WINDOW* win, int y, int x, int bar_w,
+                        int pct, int color, const char* label) {
+    pct = std::max(0, std::min(100, pct));
+    int filled = bar_w * pct / 100;
 
     wattron(win, COLOR_PAIR(COLOR_DIM));
     mvwprintw(win, y, x, "%s ", label);
@@ -215,24 +223,51 @@ void Dashboard::DrawBar(WINDOW* win, int y, int x, int bar_width,
 
     int bx = x + (int)strlen(label) + 1;
 
-    // Заповнені блоки
-    wattron(win, COLOR_PAIR(color_pair) | A_BOLD);
-    for (int i = 0; i < filled && i < bar_width; i++) {
-        mvwaddstr(win, y, bx + i, "\u2588"); // █
-    }
-    wattroff(win, COLOR_PAIR(color_pair) | A_BOLD);
+    wattron(win, COLOR_PAIR(color) | A_BOLD);
+    for (int i = 0; i < filled && i < bar_w; i++)
+        mvwaddstr(win, y, bx + i, "█");
+    wattroff(win, COLOR_PAIR(color) | A_BOLD);
 
-    // Порожні блоки
     wattron(win, COLOR_PAIR(COLOR_DIM));
-    for (int i = filled; i < bar_width; i++) {
-        mvwaddstr(win, y, bx + i, "\u2591"); // ░
-    }
+    for (int i = filled; i < bar_w; i++)
+        mvwaddstr(win, y, bx + i, "░");
     wattroff(win, COLOR_PAIR(COLOR_DIM));
 
-    // Число після бару
-    wattron(win, COLOR_PAIR(color_pair));
-    mvwprintw(win, y, bx + bar_width + 1, "%3d%%", percent);
-    wattroff(win, COLOR_PAIR(color_pair));
+    wattron(win, COLOR_PAIR(color));
+    mvwprintw(win, y, bx + bar_w + 1, "%3d%%", pct);
+    wattroff(win, COLOR_PAIR(color));
+}
+
+// ─── DrawMeter (htop-style) ────────────────────────────────────────────────
+// Label[████░░░  260]
+
+void Dashboard::DrawMeter(WINDOW* win, int y, int x, int label_w, int bar_w,
+                           double val, double max_val, int color,
+                           const char* label, const char* val_fmt) {
+    wattron(win, COLOR_PAIR(COLOR_NORMAL));
+    mvwprintw(win, y, x, "%-*s[", label_w, label);
+    wattroff(win, COLOR_PAIR(COLOR_NORMAL));
+
+    int bx = x + label_w + 1;
+    int filled = (max_val > 0.0)
+        ? std::max(0, std::min(bar_w, (int)(bar_w * val / max_val)))
+        : 0;
+
+    wattron(win, COLOR_PAIR(color) | A_BOLD);
+    for (int i = 0; i < filled; i++)
+        mvwaddstr(win, y, bx + i, "█");
+    wattroff(win, COLOR_PAIR(color) | A_BOLD);
+
+    wattron(win, COLOR_PAIR(COLOR_DIM));
+    for (int i = filled; i < bar_w; i++)
+        mvwaddstr(win, y, bx + i, "░");
+    wattroff(win, COLOR_PAIR(COLOR_DIM));
+
+    char val_str[32];
+    snprintf(val_str, sizeof(val_str), val_fmt, val);
+    wattron(win, COLOR_PAIR(color));
+    mvwprintw(win, y, bx + bar_w, " %s]", val_str);
+    wattroff(win, COLOR_PAIR(color));
 }
 
 // ─── DrawStatus ────────────────────────────────────────────────────────────
@@ -242,16 +277,15 @@ void Dashboard::DrawStatus(const Brain& brain, const Eyes::Me& me,
     if (!m_win_status) return;
     werase(m_win_status);
 
-    // Ширина бару: ~1/3 екрану мінус мітки та числа
     int bar_w = std::max(10, m_cols / 3 - 14);
 
     DrawBar(m_win_status, 0, 1, bar_w, me.cp, COLOR_CP_BAR, "CP");
     DrawBar(m_win_status, 1, 1, bar_w, me.hp, COLOR_HP_BAR, "HP");
     DrawBar(m_win_status, 2, 1, bar_w, me.mp, COLOR_MP_BAR, "MP");
 
-    // Центральна колонка: Target HP + K/D
-    int mid = m_cols / 3 + 4;
+    int mid  = m_cols / 3 + 4;
     int bar_w2 = std::max(8, m_cols / 3 - 14);
+
     if (tgt.hp > 0) {
         DrawBar(m_win_status, 0, mid, bar_w2, tgt.hp, COLOR_HP_BAR, "Mob");
     } else {
@@ -271,34 +305,24 @@ void Dashboard::DrawStatus(const Brain& brain, const Eyes::Me& me,
               kd_buf, stats.hp_potions + stats.mp_potions);
     wattroff(m_win_status, COLOR_PAIR(COLOR_NORMAL));
 
-    // Права колонка: memory дані (координати, мобів, режим)
     int rx = m_cols * 2 / 3 + 2;
     if (rx + 20 < m_cols) {
         const auto& mp = brain.GetMemPlayerState();
         WorldState* ws = brain.GetWorldState();
 
-        // Режим роботи: MEM / OPENCV / HYBRID
         const char* mode_str;
         int mode_color;
-        if (mp.valid && ws) {
-            mode_str  = "[HYBRID]";
-            mode_color = COLOR_ATTACK;  // зелений
-        } else if (mp.valid) {
-            mode_str  = "[MEM]";
-            mode_color = COLOR_TARGET;  // жовтий
-        } else {
-            mode_str  = "[OPENCV]";
-            mode_color = COLOR_DIM;
-        }
+        if (mp.valid && ws)   { mode_str = "[HYBRID]"; mode_color = COLOR_ATTACK; }
+        else if (mp.valid)    { mode_str = "[MEM]";    mode_color = COLOR_TARGET; }
+        else                  { mode_str = "[OPENCV]"; mode_color = COLOR_DIM;    }
+
         wattron(m_win_status, COLOR_PAIR(mode_color) | A_BOLD);
         mvwprintw(m_win_status, 0, rx, "%s", mode_str);
         wattroff(m_win_status, COLOR_PAIR(mode_color) | A_BOLD);
 
-        // Координати гравця
         if (mp.valid) {
             wattron(m_win_status, COLOR_PAIR(COLOR_NORMAL));
-            mvwprintw(m_win_status, 1, rx, "X:%-7d Y:%-7d",
-                      (int)mp.x, (int)mp.y);
+            mvwprintw(m_win_status, 1, rx, "X:%-7d Y:%-7d", (int)mp.x, (int)mp.y);
             wattroff(m_win_status, COLOR_PAIR(COLOR_NORMAL));
         } else {
             wattron(m_win_status, COLOR_PAIR(COLOR_DIM));
@@ -306,22 +330,18 @@ void Dashboard::DrawStatus(const Brain& brain, const Eyes::Me& me,
             wattroff(m_win_status, COLOR_PAIR(COLOR_DIM));
         }
 
-        // Кількість мобів в пам'яті + дистанція до цілі
         if (ws) {
             int alive = ws->aliveCount();
             wattron(m_win_status, COLOR_PAIR(alive > 0 ? COLOR_NORMAL : COLOR_DIM));
             if (mp.valid && alive > 0) {
-                // Дистанція до найближчого
                 auto mobs = ws->mobs();
                 float min_dist = 9999.f;
-                for (const auto& mob : mobs) {
+                for (const auto& mob : mobs)
                     if (!mob.isDead) {
                         float d = mob.distanceTo(mp.x, mp.y);
                         if (d < min_dist) min_dist = d;
                     }
-                }
-                mvwprintw(m_win_status, 2, rx, "Mobs:%-2d Dist:%-5d",
-                          alive, (int)min_dist);
+                mvwprintw(m_win_status, 2, rx, "Mobs:%-2d Dist:%-5d", alive, (int)min_dist);
             } else {
                 mvwprintw(m_win_status, 2, rx, "Mobs:%-2d", alive);
             }
@@ -332,73 +352,48 @@ void Dashboard::DrawStatus(const Brain& brain, const Eyes::Me& me,
             wattroff(m_win_status, COLOR_PAIR(COLOR_DIM));
         }
     }
-
-    // RL статус (тільки якщо увімкнено)
-    if (brain.GetBotBT().isLearningEnabled()) {
-        wattron(m_win_status, COLOR_PAIR(COLOR_BUFF) | A_BOLD);
-        char rl_buf[64];
-        snprintf(rl_buf, sizeof(rl_buf),
-                 "[RL] eps=%.2f loss=%.3f upd=%d",
-                 brain.GetBotBT().getRLEpsilon(),
-                 brain.GetBotBT().getRLLastLoss(),
-                 brain.GetBotBT().getRLUpdateCount());
-        mvwprintw(m_win_status, 3, rx, "%s", rl_buf);
-        wattroff(m_win_status, COLOR_PAIR(COLOR_BUFF) | A_BOLD);
-    }
-
-    // Shadow Mode статус (MR26)
-    if (brain.isShadowModeActive() && rx + 30 < m_cols) {
-        int shadow_row = brain.GetBotBT().isLearningEnabled() ? 4 : 3;
-        int color = brain.isMemReaderValid() ? COLOR_ATTACK : COLOR_DEAD;
-        wattron(m_win_status, COLOR_PAIR(color));
-        mvwprintw(m_win_status, shadow_row, rx,
-                  "Shadow:%lu cmp %lu diff",
-                  brain.getShadowComparisons(),
-                  brain.getShadowDiscrepancies());
-        wattroff(m_win_status, COLOR_PAIR(color));
-    }
 }
 
-// ─── DrawLog ───────────────────────────────────────────────────────────────
+// ─── DrawTabBar ────────────────────────────────────────────────────────────
 
-void Dashboard::DrawLog() {
-    if (!m_win_log) return;
-    werase(m_win_log);
+void Dashboard::DrawTabBar() {
+    if (!m_win_tabbar) return;
+    werase(m_win_tabbar);
 
-    int rows, cols;
-    getmaxyx(m_win_log, rows, cols);
+    struct Tab { const char* key; const char* name; };
+    static const Tab tabs[4] = {
+        {"F1", "Main  "},
+        {"F2", "Stats "},
+        {"F3", "Memory"},
+        {"F4", "RL    "},
+    };
 
-    std::lock_guard<std::mutex> lock(m_log_mutex);
+    int x = 1;
+    for (int i = 0; i < 4 && x < m_cols - 2; i++) {
+        bool active = (i == m_tab);
 
-    // Показуємо останні `rows` рядків
-    int start = std::max(0, (int)m_log.size() - rows);
-    int row = 0;
-    for (int i = start; i < (int)m_log.size() && row < rows; i++, row++) {
-        const std::string& line = m_log[i];
-
-        // Виявляємо рядки переходу стану (OBJ Enter/Exit або STATE переходи)
-        bool is_separator = (line.find("[OBJ]") != std::string::npos &&
-                             (line.find("Enter:") != std::string::npos ||
-                              line.find("Exit:") != std::string::npos ||
-                              line.find("Preempt:") != std::string::npos));
-
-        if (is_separator) {
-            wattron(m_win_log, COLOR_PAIR(COLOR_LOG_SEP) | A_BOLD);
+        if (active) {
+            wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
         } else {
-            wattron(m_win_log, COLOR_PAIR(COLOR_NORMAL));
+            wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT) | A_DIM);
         }
 
-        // Обрізаємо якщо довше за ширину
-        std::string display = line;
-        if ((int)display.size() > cols - 1) {
-            display = display.substr(0, cols - 1);
-        }
-        mvwprintw(m_win_log, row, 0, "%s", display.c_str());
+        char buf[24];
+        snprintf(buf, sizeof(buf), "[%s]%s", tabs[i].key, tabs[i].name);
+        mvwprintw(m_win_tabbar, 0, x, "%s", buf);
+        x += (int)strlen(buf);
 
-        if (is_separator) {
-            wattroff(m_win_log, COLOR_PAIR(COLOR_LOG_SEP) | A_BOLD);
+        if (active) {
+            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
         } else {
-            wattroff(m_win_log, COLOR_PAIR(COLOR_NORMAL));
+            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT) | A_DIM);
+        }
+
+        if (i < 3) {
+            wattron(m_win_tabbar, COLOR_PAIR(COLOR_DIM));
+            mvwaddch(m_win_tabbar, 0, x, ACS_VLINE);
+            x++;
+            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_DIM));
         }
     }
 }
@@ -411,27 +406,289 @@ void Dashboard::DrawFooter() {
 
     wattron(m_win_footer, COLOR_PAIR(COLOR_DIM));
     mvwprintw(m_win_footer, 0, 0,
-        " Q=стоп  ScrLk=стоп  P=пауза  S=налаштування  R=скинути бари  F12=calibrate");
+        " Q=стоп  ScrLk=стоп  P=пауза  S=налаштування  R=скинути бари"
+        "  Tab=вкладка  F12=calibrate");
     wattroff(m_win_footer, COLOR_PAIR(COLOR_DIM));
+}
+
+// ─── DrawMainTab ───────────────────────────────────────────────────────────
+
+void Dashboard::DrawMainTab() {
+    if (!m_win_content) return;
+    werase(m_win_content);
+
+    int rows, cols;
+    getmaxyx(m_win_content, rows, cols);
+
+    std::lock_guard<std::mutex> lock(m_log_mutex);
+    int start = std::max(0, (int)m_log.size() - rows);
+    int row = 0;
+    for (int i = start; i < (int)m_log.size() && row < rows; i++, row++) {
+        const std::string& line = m_log[i];
+        bool is_sep = (line.find("[OBJ]") != std::string::npos &&
+                      (line.find("Enter:")   != std::string::npos ||
+                       line.find("Exit:")    != std::string::npos ||
+                       line.find("Preempt:") != std::string::npos));
+
+        if (is_sep) wattron(m_win_content, COLOR_PAIR(COLOR_LOG_SEP) | A_BOLD);
+        else         wattron(m_win_content, COLOR_PAIR(COLOR_NORMAL));
+
+        std::string display = line;
+        if ((int)display.size() > cols - 1)
+            display = display.substr(0, cols - 1);
+        mvwprintw(m_win_content, row, 0, "%s", display.c_str());
+
+        if (is_sep) wattroff(m_win_content, COLOR_PAIR(COLOR_LOG_SEP) | A_BOLD);
+        else         wattroff(m_win_content, COLOR_PAIR(COLOR_NORMAL));
+    }
+}
+
+// ─── DrawStatsTab ──────────────────────────────────────────────────────────
+
+void Dashboard::DrawStatsTab(const Brain& brain, const Stats& stats) {
+    if (!m_win_content) return;
+    werase(m_win_content);
+
+    int rows, cols;
+    getmaxyx(m_win_content, rows, cols);
+
+    // Uptime та K/год
+    time_t now = time(nullptr);
+    double uptime_s = (m_t_start > 0) ? difftime(now, m_t_start) : 1.0;
+    double kph      = uptime_s > 0 ? stats.kills / (uptime_s / 3600.0) : 0.0;
+    int h = (int)(uptime_s / 3600);
+    int m = ((int)uptime_s % 3600) / 60;
+    int s = (int)uptime_s % 60;
+
+    // Рядок заголовка
+    wattron(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+    mvwprintw(m_win_content, 0, 1,
+              "Kills:%-6d  Deaths:%-4d  Uptime:%02d:%02d:%02d  K/год:%.0f",
+              stats.kills, stats.deaths, h, m, s, kph);
+    wattroff(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+
+    if (rows < 3) return;
+
+    // Метри (htop-style)
+    const int lw = 8;
+    const int bw = std::max(10, cols - lw - 14);
+    int row = 2;
+
+    // K/год
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              kph, std::max(kph * 1.5, 300.0),
+              COLOR_METER_GOOD, "K/год", "%.0f");
+
+    // K/D
+    double kd = stats.deaths > 0
+        ? (double)stats.kills / stats.deaths
+        : (double)stats.kills;
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              kd, std::max(kd * 1.5, 50.0),
+              COLOR_METER_GOOD, "K/D", "%.1f");
+
+    // Deaths
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              (double)stats.deaths, std::max((double)stats.deaths * 1.5, 10.0),
+              stats.deaths > 0 ? COLOR_METER_BAD : COLOR_METER_GOOD,
+              "Deaths", "%.0f");
+
+    // Potions
+    int pots = stats.hp_potions + stats.mp_potions;
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              (double)pots, std::max((double)pots * 1.5, 20.0),
+              COLOR_METER_WARN, "Potions", "%.0f");
+
+    // Attacks
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              (double)stats.attacks, std::max((double)stats.attacks * 1.5, 1000.0),
+              COLOR_METER_GOOD, "Attacks", "%.0f");
+
+    // RL статус (якщо увімкнено)
+    if (row < rows - 1 && brain.GetBotBT().isLearningEnabled()) {
+        row++;
+        wattron(m_win_content, COLOR_PAIR(COLOR_BUFF));
+        mvwprintw(m_win_content, row, 1,
+                  "[RL] eps=%.3f  loss=%.5f  upd=%d",
+                  brain.GetBotBT().getRLEpsilon(),
+                  brain.GetBotBT().getRLLastLoss(),
+                  brain.GetBotBT().getRLUpdateCount());
+        wattroff(m_win_content, COLOR_PAIR(COLOR_BUFF));
+    }
+}
+
+// ─── DrawMemoryTab ─────────────────────────────────────────────────────────
+
+void Dashboard::DrawMemoryTab(const Brain& brain) {
+    if (!m_win_content) return;
+    werase(m_win_content);
+
+    const auto& mp = brain.GetMemPlayerState();
+    WorldState* ws = brain.GetWorldState();
+    uintptr_t   pb = brain.GetPlayerBase();
+    int row = 0;
+
+    // PlayerBase
+    wattron(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+    mvwprintw(m_win_content, row, 1, "PlayerBase:");
+    wattroff(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+    if (pb) {
+        wattron(m_win_content, COLOR_PAIR(COLOR_ATTACK));
+        mvwprintw(m_win_content, row++, 13, "0x%08lX", (unsigned long)pb);
+        wattroff(m_win_content, COLOR_PAIR(COLOR_ATTACK));
+    } else {
+        wattron(m_win_content, COLOR_PAIR(COLOR_DEAD));
+        mvwprintw(m_win_content, row++, 13, "SEARCHING...");
+        wattroff(m_win_content, COLOR_PAIR(COLOR_DEAD));
+    }
+
+    // XYZ
+    if (mp.valid) {
+        wattron(m_win_content, COLOR_PAIR(COLOR_NORMAL));
+        mvwprintw(m_win_content, row++, 1, "XYZ:         %d  %d  %d",
+                  (int)mp.x, (int)mp.y, (int)mp.z);
+        wattroff(m_win_content, COLOR_PAIR(COLOR_NORMAL));
+    } else {
+        wattron(m_win_content, COLOR_PAIR(COLOR_DIM));
+        mvwprintw(m_win_content, row++, 1, "XYZ:         N/A");
+        wattroff(m_win_content, COLOR_PAIR(COLOR_DIM));
+    }
+
+    // HP Offset calibration
+    bool hp_ok = (mp.hp > 0 && mp.max_hp > 0);
+    wattron(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+    mvwprintw(m_win_content, row, 1, "HP Offset:");
+    wattroff(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+    if (hp_ok) {
+        wattron(m_win_content, COLOR_PAIR(COLOR_ATTACK) | A_BOLD);
+        mvwprintw(m_win_content, row++, 12, "CONFIRMED  hp=%d/%d", mp.hp, mp.max_hp);
+        wattroff(m_win_content, COLOR_PAIR(COLOR_ATTACK) | A_BOLD);
+    } else {
+        wattron(m_win_content, COLOR_PAIR(COLOR_DEAD));
+        mvwprintw(m_win_content, row++, 12, "PENDING  (AutoCalib active...)");
+        wattroff(m_win_content, COLOR_PAIR(COLOR_DEAD));
+    }
+
+    row++; // порожній рядок
+
+    // ShadowMode
+    wattron(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+    mvwprintw(m_win_content, row++, 1, "ShadowMode:");
+    wattroff(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+
+    if (brain.isShadowModeActive()) {
+        size_t cmp  = brain.getShadowComparisons();
+        size_t diff = brain.getShadowDiscrepancies();
+        double pct  = cmp > 0 ? (double)diff / (double)cmp * 100.0 : 0.0;
+        int sc = (pct < 5.0) ? COLOR_ATTACK : COLOR_METER_WARN;
+        wattron(m_win_content, COLOR_PAIR(sc));
+        mvwprintw(m_win_content, row++, 3,
+                  "cmp:%-8zu  diff:%-8zu  avg diff:%.3f%%", cmp, diff, pct);
+        wattroff(m_win_content, COLOR_PAIR(sc));
+    } else {
+        wattron(m_win_content, COLOR_PAIR(COLOR_DIM));
+        mvwprintw(m_win_content, row++, 3, "inactive");
+        wattroff(m_win_content, COLOR_PAIR(COLOR_DIM));
+    }
+
+    row++; // порожній рядок
+
+    // KnownList
+    wattron(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+    mvwprintw(m_win_content, row++, 1, "KnownList:");
+    wattroff(m_win_content, COLOR_PAIR(COLOR_NORMAL) | A_BOLD);
+
+    if (ws) {
+        int alive = ws->aliveCount();
+        int color = alive > 0 ? COLOR_ATTACK : COLOR_DIM;
+        wattron(m_win_content, COLOR_PAIR(color));
+        mvwprintw(m_win_content, row++, 3, "alive=%d", alive);
+        wattroff(m_win_content, COLOR_PAIR(color));
+    } else {
+        wattron(m_win_content, COLOR_PAIR(COLOR_DIM));
+        mvwprintw(m_win_content, row++, 3, "not initialized");
+        wattroff(m_win_content, COLOR_PAIR(COLOR_DIM));
+    }
+}
+
+// ─── DrawRLTab ─────────────────────────────────────────────────────────────
+
+void Dashboard::DrawRLTab(const Brain& brain) {
+    if (!m_win_content) return;
+    werase(m_win_content);
+
+    int rows, cols;
+    getmaxyx(m_win_content, rows, cols);
+
+    if (!brain.GetBotBT().isLearningEnabled()) {
+        wattron(m_win_content, COLOR_PAIR(COLOR_DIM));
+        mvwprintw(m_win_content, 1, 1, "RL вимкнено — [Learning] Enabled=false");
+        wattroff(m_win_content, COLOR_PAIR(COLOR_DIM));
+        return;
+    }
+
+    double eps  = brain.GetBotBT().getRLEpsilon();
+    double loss = brain.GetBotBT().getRLLastLoss();
+    int    upd  = brain.GetBotBT().getRLUpdateCount();
+
+    int row = 0;
+    int lw  = 8;
+    int bw  = std::max(10, cols - lw - 14);
+
+    // Заголовок
+    wattron(m_win_content, COLOR_PAIR(COLOR_BUFF) | A_BOLD);
+    mvwprintw(m_win_content, row++, 1,
+              "ε=%.3f  loss=%.6f  updates=%d", eps, loss, upd);
+    wattroff(m_win_content, COLOR_PAIR(COLOR_BUFF) | A_BOLD);
+
+    row++;
+
+    // Epsilon (0=жадібний, 1=випадковий)
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              eps, 1.0,
+              eps < 0.1 ? COLOR_METER_GOOD : COLOR_METER_WARN,
+              "Epsilon", "%.3f");
+
+    // Loss (менше = краще)
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              std::min(loss, 1.0), 1.0,
+              loss < 0.01 ? COLOR_METER_GOOD : COLOR_METER_WARN,
+              "Loss", "%.5f");
+
+    // Updates
+    double upd_max = std::max((double)upd * 1.5, 1000.0);
+    DrawMeter(m_win_content, row++, 1, lw, bw,
+              (double)upd, upd_max,
+              COLOR_METER_GOOD, "Updates", "%.0f");
+
+    if (row < rows - 1) {
+        row++;
+        wattron(m_win_content, COLOR_PAIR(COLOR_DIM));
+        mvwprintw(m_win_content, row, 1,
+                  "Дії: Rest | Attack | Target | Patrol | Rotate | Loot");
+        wattroff(m_win_content, COLOR_PAIR(COLOR_DIM));
+    }
 }
 
 // ─── HandleInput ───────────────────────────────────────────────────────────
 
 int Dashboard::HandleInput() {
     if (!m_active) return 0;
-    int ch = getch(); // не блокує (timeout=1)
+    int ch = getch();
     if (ch == ERR) return 0;
 
     switch (ch) {
-        case 'q': case 'Q': return 'q';
-        case 'p': case 'P': return 'p';
-        case 's': case 'S': return 's';
-        case 'r': case 'R': return 'r';
-        case KEY_RESIZE:
-            RecreateWindows();
-            return 0;
-        default:
-            return ch;
+        case 'q': case 'Q':   return 'q';
+        case 'p': case 'P':   return 'p';
+        case 's': case 'S':   return 's';
+        case 'r': case 'R':   return 'r';
+        case KEY_F(1):        m_tab = 0; return 0;
+        case KEY_F(2):        m_tab = 1; return 0;
+        case KEY_F(3):        m_tab = 2; return 0;
+        case KEY_F(4):        m_tab = 3; return 0;
+        case '\t':            m_tab = (m_tab + 1) % 4; return 0;
+        case KEY_RESIZE:      RecreateWindows(); return 0;
+        default:              return ch;
     }
 }
 
@@ -455,7 +712,7 @@ const char* Dashboard::StateEmoji(const std::string& s) {
     return "[IDLE]  ";
 }
 
-// ─── EditTextField (мінімальний inline редактор) ───────────────────────────
+// ─── EditTextField ─────────────────────────────────────────────────────────
 
 bool Dashboard::EditTextField(WINDOW* win, int y, int x, int w, std::string& value) {
     echo();
@@ -465,17 +722,13 @@ bool Dashboard::EditTextField(WINDOW* win, int y, int x, int w, std::string& val
     mvwgetnstr(win, y, x, buf, std::min(w, (int)sizeof(buf) - 1));
     noecho();
     curs_set(0);
-    if (buf[0] != '\0') {
-        value = buf;
-        return true;
-    }
+    if (buf[0] != '\0') { value = buf; return true; }
     return false;
 }
 
 // ─── ShowSettings ──────────────────────────────────────────────────────────
 
 void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
-    // Overlay вікно поверх всього
     int ow = std::min(m_cols - 4, 66);
     int oh = 18;
     int oy = (m_rows - oh) / 2;
@@ -483,10 +736,9 @@ void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
 
     WINDOW* overlay = newwin(oh, ow, oy, ox);
     keypad(overlay, TRUE);
-    timeout(0); // без блокування для overlay (власний getch)
-    wtimeout(overlay, -1); // overlay — блокуючий
+    timeout(0);
+    wtimeout(overlay, -1);
 
-    // Поля: label, pointer to string/int, type
     struct Field {
         const char* label;
         enum Type { STR, INT, DOUBLE, BOOL } type;
@@ -494,16 +746,13 @@ void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
         int*    int_val;
         double* dbl_val;
         bool*   bool_val;
-        int     step;     // крок для ←→
+        int     step;
     };
 
-    // Серіалізуємо векторні поля у рядки для редагування
     auto keys_to_str = [&](const std::vector<Input::KeyboardKey>& keys) -> std::string {
         std::string r;
         for (size_t i = 0; i < keys.size(); i++) {
             if (i) r += ",";
-            // Знаходимо ім'я через StringToKeyboardKey у зворотньому напрямку
-            // Простий fallback: беремо номер скан-коду
             switch (keys[i]) {
                 case Input::KeyboardKey::F1: r += "F1"; break;
                 case Input::KeyboardKey::F2: r += "F2"; break;
@@ -525,23 +774,22 @@ void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
         return r;
     };
 
-    // Тимчасові рядки для редагування векторів
-    std::string s_macros  = keys_to_str(cfg.target_macro_keys);
-    std::string s_attack  = keys_to_str(cfg.attack_keys);
-    std::string s_buffs   = keys_to_str(cfg.buff_keys);
+    std::string s_macros = keys_to_str(cfg.target_macro_keys);
+    std::string s_attack = keys_to_str(cfg.attack_keys);
+    std::string s_buffs  = keys_to_str(cfg.buff_keys);
 
     std::vector<Field> fields = {
-        {"Клас [Mage/Archer/Spoiler]", Field::STR, &cfg.char_class,   nullptr, nullptr, nullptr, 0},
-        {"Макроси /target (слоти)",    Field::STR, &s_macros,         nullptr, nullptr, nullptr, 0},
-        {"Клавіші атаки",              Field::STR, &s_attack,         nullptr, nullptr, nullptr, 0},
-        {"Attack wait (с)",            Field::DOUBLE, nullptr,        nullptr, &cfg.attack_wait, nullptr, 1},
-        {"HP поріг %",                 Field::INT, nullptr,           &cfg.hp_threshold, nullptr, nullptr, 5},
-        {"MP поріг %",                 Field::INT, nullptr,           &cfg.mp_threshold, nullptr, nullptr, 5},
-        {"CP поріг %",                 Field::INT, nullptr,           &cfg.cp_threshold, nullptr, nullptr, 5},
-        {"Лут кількість",              Field::INT, nullptr,           &cfg.loot_count, nullptr, nullptr, 1},
-        {"Buff клавіші",               Field::STR, &s_buffs,          nullptr, nullptr, nullptr, 0},
-        {"Buff інтервал (с)",          Field::INT, nullptr,           &cfg.buff_interval, nullptr, nullptr, 30},
-        {"Debug overlay",              Field::BOOL, nullptr,          nullptr, nullptr, &cfg.debug, 0},
+        {"Клас [Mage/Archer/Spoiler]", Field::STR,    &cfg.char_class,    nullptr,          nullptr,           nullptr,       0},
+        {"Макроси /target (слоти)",    Field::STR,    &s_macros,          nullptr,          nullptr,           nullptr,       0},
+        {"Клавіші атаки",              Field::STR,    &s_attack,          nullptr,          nullptr,           nullptr,       0},
+        {"Attack wait (с)",            Field::DOUBLE, nullptr,            nullptr,          &cfg.attack_wait,  nullptr,       1},
+        {"HP поріг %",                 Field::INT,    nullptr,            &cfg.hp_threshold,nullptr,           nullptr,       5},
+        {"MP поріг %",                 Field::INT,    nullptr,            &cfg.mp_threshold,nullptr,           nullptr,       5},
+        {"CP поріг %",                 Field::INT,    nullptr,            &cfg.cp_threshold,nullptr,           nullptr,       5},
+        {"Лут кількість",              Field::INT,    nullptr,            &cfg.loot_count,  nullptr,           nullptr,       1},
+        {"Buff клавіші",               Field::STR,    &s_buffs,           nullptr,          nullptr,           nullptr,       0},
+        {"Buff інтервал (с)",          Field::INT,    nullptr,            &cfg.buff_interval,nullptr,          nullptr,      30},
+        {"Debug overlay",              Field::BOOL,   nullptr,            nullptr,          nullptr,           &cfg.debug,    0},
     };
 
     int sel = 0;
@@ -551,7 +799,6 @@ void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
         werase(overlay);
         box(overlay, 0, 0);
 
-        // Заголовок
         wattron(overlay, COLOR_PAIR(COLOR_TITLE) | A_BOLD);
         mvwprintw(overlay, 0, 2, " Налаштування ");
         wattroff(overlay, COLOR_PAIR(COLOR_TITLE) | A_BOLD);
@@ -560,39 +807,25 @@ void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
         mvwprintw(overlay, 1, 2, "↑↓=навігація  ←→=змінити  Enter=редагувати  S=зберегти  ESC=вийти");
         wattroff(overlay, COLOR_PAIR(COLOR_DIM));
 
-        // Поля
         for (int i = 0; i < (int)fields.size(); i++) {
             auto& f = fields[i];
             bool active = (i == sel);
-
-            // Виділення активного поля
             if (active) wattron(overlay, A_REVERSE);
 
-            // Мітка
             mvwprintw(overlay, i + 3, 2, "%-28s", f.label);
 
-            // Значення
             char val[64] = {};
             switch (f.type) {
-                case Field::STR:
-                    snprintf(val, sizeof(val), "%s", f.str_val->c_str());
-                    break;
-                case Field::INT:
-                    snprintf(val, sizeof(val), "%d", *f.int_val);
-                    break;
-                case Field::DOUBLE:
-                    snprintf(val, sizeof(val), "%.1f", *f.dbl_val);
-                    break;
-                case Field::BOOL:
-                    snprintf(val, sizeof(val), "%s", *f.bool_val ? "true" : "false");
-                    break;
+                case Field::STR:    snprintf(val, sizeof(val), "%s",    f.str_val->c_str()); break;
+                case Field::INT:    snprintf(val, sizeof(val), "%d",    *f.int_val);         break;
+                case Field::DOUBLE: snprintf(val, sizeof(val), "%.1f",  *f.dbl_val);         break;
+                case Field::BOOL:   snprintf(val, sizeof(val), "%s",    *f.bool_val ? "true" : "false"); break;
             }
             mvwprintw(overlay, i + 3, 32, "%-28s", val);
 
             if (active) wattroff(overlay, A_REVERSE);
         }
 
-        // Підказка внизу
         wattron(overlay, COLOR_PAIR(COLOR_ATTACK) | A_BOLD);
         mvwprintw(overlay, oh - 2, 2, " S=Зберегти в %s  ESC=Скасувати ", config_path.c_str());
         wattroff(overlay, COLOR_PAIR(COLOR_ATTACK) | A_BOLD);
@@ -603,44 +836,24 @@ void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
         auto& f = fields[sel];
 
         switch (ch) {
-            case KEY_UP:
-                sel = (sel - 1 + (int)fields.size()) % (int)fields.size();
-                break;
-            case KEY_DOWN:
-                sel = (sel + 1) % (int)fields.size();
-                break;
-
+            case KEY_UP:   sel = (sel - 1 + (int)fields.size()) % (int)fields.size(); break;
+            case KEY_DOWN: sel = (sel + 1) % (int)fields.size(); break;
             case KEY_LEFT:
-                // Зменшити числове значення
-                if (f.type == Field::INT && f.int_val)
-                    *f.int_val = std::max(0, *f.int_val - f.step);
-                else if (f.type == Field::DOUBLE && f.dbl_val)
-                    *f.dbl_val = std::max(0.1, *f.dbl_val - 0.1);
-                else if (f.type == Field::BOOL && f.bool_val)
-                    *f.bool_val = !(*f.bool_val);
+                if (f.type == Field::INT    && f.int_val)  *f.int_val  = std::max(0, *f.int_val - f.step);
+                if (f.type == Field::DOUBLE && f.dbl_val)  *f.dbl_val  = std::max(0.1, *f.dbl_val - 0.1);
+                if (f.type == Field::BOOL   && f.bool_val) *f.bool_val = !(*f.bool_val);
                 break;
-
             case KEY_RIGHT:
-                // Збільшити числове значення
-                if (f.type == Field::INT && f.int_val)
-                    *f.int_val += f.step;
-                else if (f.type == Field::DOUBLE && f.dbl_val)
-                    *f.dbl_val += 0.1;
-                else if (f.type == Field::BOOL && f.bool_val)
-                    *f.bool_val = !(*f.bool_val);
+                if (f.type == Field::INT    && f.int_val)  *f.int_val  += f.step;
+                if (f.type == Field::DOUBLE && f.dbl_val)  *f.dbl_val  += 0.1;
+                if (f.type == Field::BOOL   && f.bool_val) *f.bool_val = !(*f.bool_val);
                 break;
-
             case '\n': case KEY_ENTER:
-                // Редагування текстового поля
-                if (f.type == Field::STR && f.str_val) {
+                if (f.type == Field::STR && f.str_val)
                     EditTextField(overlay, sel + 3, 32, 27, *f.str_val);
-                }
                 break;
-
             case 's': case 'S':
-                // Застосувати рядки макросів назад до конфіга і зберегти
                 cfg.Save(config_path);
-                // Показати підтвердження
                 wattron(overlay, COLOR_PAIR(COLOR_ATTACK) | A_BOLD);
                 mvwprintw(overlay, oh - 2, 2, " Збережено! Натисни будь-яку клавішу...     ");
                 wattroff(overlay, COLOR_PAIR(COLOR_ATTACK) | A_BOLD);
@@ -648,14 +861,13 @@ void Dashboard::ShowSettings(Config& cfg, const std::string& config_path) {
                 wgetch(overlay);
                 running = false;
                 break;
-
-            case 27: // ESC
+            case 27:
                 running = false;
                 break;
         }
     }
 
     delwin(overlay);
-    timeout(1); // відновлюємо non-blocking для головного циклу
-    RecreateWindows(); // оновлюємо після overlay
+    timeout(1);
+    RecreateWindows();
 }
