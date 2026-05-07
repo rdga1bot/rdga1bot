@@ -60,7 +60,10 @@ private:
     bool   m_paused  = false;
     int    m_tab     = 0;      // 0=Main 1=Stats 2=Memory 3=RL
     time_t m_t_start = 0;
-    int    m_tab_x[4] = {1,12,23,34}; // x-позиції вкладок у tabbar (для mouse click)
+
+    // Межі вкладок у tabbar (оновлюються DrawTabBar, читаються HandleInput)
+    int m_tab_start[4] = {0, 6, 13, 21};
+    int m_tab_end[4]   = {5, 12, 20, 24};
 
     std::deque<std::string> m_log;
     std::mutex m_log_mutex;

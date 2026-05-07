@@ -27,7 +27,8 @@ void Dashboard::Init() {
     curs_set(0);
     keypad(stdscr, TRUE);
     timeout(1);
-    mousemask(BUTTON1_CLICKED | BUTTON1_PRESSED, nullptr);
+    mousemask(BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED, nullptr);
+    mouseinterval(0); // без затримки — тільки press/release, як у htop
 
     if (!has_colors()) { endwin(); return; }
 
@@ -104,7 +105,6 @@ void Dashboard::RecreateWindows() {
 
 void Dashboard::Shutdown() {
     if (!m_active) return;
-    mousemask(0, nullptr); // вимикаємо mouse reporting перед endwin()
     auto del = [](WINDOW*& w) { if (w) { delwin(w); w = nullptr; } };
     del(m_win_header);
     del(m_win_status);
@@ -362,28 +362,23 @@ void Dashboard::DrawTabBar() {
     if (!m_win_tabbar) return;
     werase(m_win_tabbar);
 
-    struct Tab { const char* key; const char* name; };
     static const char* names[4] = { " Main ", " Stats ", " Memory ", " RL " };
 
+    // Зберігаємо межі вкладок для mouse click detection в HandleInput
     int x = 0;
     for (int i = 0; i < 4 && x < m_cols - 2; i++) {
+        m_tab_start[i] = x;
+        m_tab_end[i]   = x + (int)strlen(names[i]) - 1;
         bool active = (i == m_tab);
-        m_tab_x[i] = x;
 
-        if (active) {
-            wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
-        } else {
-            wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT));
-        }
+        if (active) wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
+        else         wattron(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT));
 
         mvwprintw(m_win_tabbar, 0, x, "%s", names[i]);
         x += (int)strlen(names[i]);
 
-        if (active) {
-            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
-        } else {
-            wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT));
-        }
+        if (active) wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_ACTIVE) | A_BOLD);
+        else         wattroff(m_win_tabbar, COLOR_PAIR(COLOR_TAB_INACT));
     }
 }
 
@@ -680,12 +675,13 @@ int Dashboard::HandleInput() {
             MEVENT ev;
             if (getmouse(&ev) == OK && m_win_tabbar) {
                 int tab_row = getbegy(m_win_tabbar);
-                if (ev.y == tab_row &&
-                    (ev.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED))) {
-                    // Визначаємо вкладку за x-позицією кліку
-                    // m_tab_x[i] = початок і-ї вкладки; наступна вкладка або сепаратор
-                    for (int i = 3; i >= 0; i--) {
-                        if (ev.x >= m_tab_x[i]) { m_tab = i; break; }
+                bool is_click = (ev.bstate & (BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED));
+                if (ev.y == tab_row && is_click) {
+                    for (int i = 0; i < 4; i++) {
+                        if (ev.x >= m_tab_start[i] && ev.x <= m_tab_end[i]) {
+                            m_tab = i;
+                            break;
+                        }
                     }
                 }
             }
