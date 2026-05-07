@@ -143,8 +143,9 @@ void Dashboard::Update(const Brain& brain, double fps) {
         clearok(stdscr, TRUE); // примусова перемальовка після resize
     }
 
-    // Без clear() — htop ніколи не чистить весь екран у головному циклі.
-    // Кожне субвікно робить werase() всередині своєї Draw-функції.
+    // erase() — очищає буфер stdscr (фон + сепаратори), але НЕ примушує
+    // повний repaint термінала (на відміну від clear()). ncurses шле тільки diff.
+    erase();
 
     Eyes::Me    me_def{};
     Eyes::Target tgt_def{};
