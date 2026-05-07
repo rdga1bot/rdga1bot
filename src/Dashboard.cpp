@@ -65,7 +65,8 @@ void Dashboard::Init() {
 
     m_t_start = time(nullptr);
     getmaxyx(stdscr, m_rows, m_cols);
-    clear(); // один раз при старті — встановлює clean baseline
+    clear();    // очищуємо буфер
+    refresh();  // НАДСИЛАЄМО в термінал негайно — без цього каша видна до першого doupdate()
     RecreateWindows();
     m_active = true;
 }
