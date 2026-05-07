@@ -27,8 +27,8 @@ void Dashboard::Init() {
     curs_set(0);
     keypad(stdscr, TRUE);
     timeout(1);
-    mousemask(BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED, nullptr);
-    mouseinterval(0); // без затримки — тільки press/release, як у htop
+    mousemask(BUTTON1_RELEASED, nullptr); // htop: тільки release, без press/clicked
+    mouseinterval(0);
 
     if (!has_colors()) { endwin(); return; }
 
@@ -136,12 +136,15 @@ void Dashboard::Update(const Brain& brain, double fps) {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
     if (rows != m_rows || cols != m_cols) {
-        endwin(); refresh();
+        endwin();
+        refresh(); // один раз після endwin для reset — як у htop
         getmaxyx(stdscr, m_rows, m_cols);
         RecreateWindows();
+        clearok(stdscr, TRUE); // примусова перемальовка після resize
     }
 
-    clear();
+    // Без clear() — htop ніколи не чистить весь екран у головному циклі.
+    // Кожне субвікно робить werase() всередині своєї Draw-функції.
 
     Eyes::Me    me_def{};
     Eyes::Target tgt_def{};
@@ -178,12 +181,15 @@ void Dashboard::Update(const Brain& brain, double fps) {
     sep(m_win_footer,  -1); // перед footer
     DrawFooter();
 
-    refresh();
-    if (m_win_header)  wrefresh(m_win_header);
-    if (m_win_status)  wrefresh(m_win_status);
-    if (m_win_tabbar)  wrefresh(m_win_tabbar);
-    if (m_win_content) wrefresh(m_win_content);
-    if (m_win_footer)  wrefresh(m_win_footer);
+    // htop-style: накопичуємо всі зміни через wnoutrefresh,
+    // потім один doupdate() відправляє в термінал — без мерехтіння.
+    wnoutrefresh(stdscr);
+    if (m_win_header)  wnoutrefresh(m_win_header);
+    if (m_win_status)  wnoutrefresh(m_win_status);
+    if (m_win_tabbar)  wnoutrefresh(m_win_tabbar);
+    if (m_win_content) wnoutrefresh(m_win_content);
+    if (m_win_footer)  wnoutrefresh(m_win_footer);
+    doupdate();
 }
 
 // ─── DrawHeader ────────────────────────────────────────────────────────────
@@ -675,7 +681,7 @@ int Dashboard::HandleInput() {
             MEVENT ev;
             if (getmouse(&ev) == OK && m_win_tabbar) {
                 int tab_row = getbegy(m_win_tabbar);
-                bool is_click = (ev.bstate & (BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED));
+                bool is_click = (ev.bstate & BUTTON1_RELEASED);
                 if (ev.y == tab_row && is_click) {
                     for (int i = 0; i < 4; i++) {
                         if (ev.x >= m_tab_start[i] && ev.x <= m_tab_end[i]) {
