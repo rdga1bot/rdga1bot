@@ -156,8 +156,10 @@ void Dashboard::Update(const Brain& brain, double fps) {
         clearok(stdscr, TRUE); // примусова перемальовка після resize
     }
 
-    // БЕЗ clear() — htop не чистить stdscr кожен кадр.
-    // Baseline встановлено в Init() один раз. Сепаратори малюємо через mvhline.
+    // erase() — soft clear: заповнює буфер пробілами БЕЗ clearok().
+    // ncurses шле тільки diff → без мерехтіння. Потрібен щоб старий вміст
+    // термінала не лізе через фон (проблема без нього з newterm+/dev/tty).
+    erase();
 
     Eyes::Me    me_def{};
     Eyes::Target tgt_def{};
