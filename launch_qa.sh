@@ -56,7 +56,9 @@ trap 'cleanup; exit 0' INT TERM HUP
 
 # ── Запуск бота ───────────────────────────────────────────────────────────────
 SESSION_LOG="logs/session_$(date +%Y%m%d_%H%M%S).log"
-echo "[QA] Запуск бота → $SESSION_LOG"
+# stdout до старту ncurses → у лог, не в термінал (щоб не забруднювати TUI)
+LAUNCH_LOG="logs/launch_$(date +%Y%m%d).log"
+echo "[QA] Запуск бота → $SESSION_LOG" >> "$LAUNCH_LOG"
 if [ -f rdga1bot.ini ]; then
     ./rdga1bot --quick 2>> "logs/stderr_$(date +%Y%m%d).log" | tee "$SESSION_LOG" &
 else
@@ -64,42 +66,40 @@ else
 fi
 BOT_PID=$!
 PIDS+=("$BOT_PID")
-echo "[QA] Бот PID=$BOT_PID"
+echo "[QA] Бот PID=$BOT_PID" >> "$LAUNCH_LOG"
 
 # Чекаємо поки session_*.log з'явиться і стане непорожнім
-echo "[QA] Чекаємо на $SESSION_LOG..."
 for i in $(seq 1 30); do
     [ -s "$SESSION_LOG" ] && break
     sleep 1
 done
 
 if [ ! -s "$SESSION_LOG" ]; then
-    echo "[QA] ПОМИЛКА: лог порожній за 30с — бот не стартував?"
+    echo "[QA] ПОМИЛКА: лог порожній за 30с — бот не стартував?" >> "$LAUNCH_LOG"
     exit 1
 fi
 LOG="$SESSION_LOG"
-echo "[QA] Лог: $LOG"
+echo "[QA] Лог: $LOG" >> "$LAUNCH_LOG"
 
 # ── Frame capture ─────────────────────────────────────────────────────────────
 if [ "$FRAME_CAPTURE" = true ]; then
-    $PYTHON qa/frame_capture.py --log "$LOG" --max-per-min 6 &
+    $PYTHON qa/frame_capture.py --log "$LOG" --max-per-min 6 \
+        >> "logs/frame_capture_$(date +%Y%m%d).log" 2>&1 &
     FC_PID=$!
     PIDS+=("$FC_PID")
-    echo "[QA] frame_capture PID=$FC_PID"
+    echo "[QA] frame_capture PID=$FC_PID" >> "$LAUNCH_LOG"
 fi
 
 # ── Video record ──────────────────────────────────────────────────────────────
 if [ "$RECORD_VIDEO" = true ]; then
-    $PYTHON qa/video_record.py record --auto &
+    $PYTHON qa/video_record.py record --auto \
+        >> "logs/video_record_$(date +%Y%m%d).log" 2>&1 &
     VR_PID=$!
     PIDS+=("$VR_PID")
-    echo "[QA] video_record PID=$VR_PID"
+    echo "[QA] video_record PID=$VR_PID" >> "$LAUNCH_LOG"
 fi
 
-echo ""
-echo "[QA] Всі процеси запущені. Ctrl+C для зупинки."
-echo ""
+echo "[QA] Запущено. PIDs → $LAUNCH_LOG" >> "$LAUNCH_LOG"
 
 # Чекаємо поки бот завершиться (ScrollLock або crash)
 wait "$BOT_PID" || true
-echo "[QA] Бот завершився."
