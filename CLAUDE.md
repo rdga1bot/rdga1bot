@@ -7,8 +7,14 @@
 - Папка: /home/rdga1/rdga1prj/l2net/
 - Build: bash build.sh && ./launch.sh
 
-## Поточний стан (2026-04-18)
+## Поточний стан (2026-05-07)
 - **BotBehaviorTree** — єдиний планувальник. RL: `[Learning] Enabled=true` за замовчуванням.
+- **MR80** — `HpAutoCalib`: диференційне авто-калібрування HP offset (замінює MR54 AutoCalibratePlayer)
+  - Фаза 1 (Searching): збирає кандидати (cur_off, max_off) де cur/max ≈ OCR HP% при HP < 95%
+  - Фаза 2 (Validating): відкидає кандидатів що не відстежують зміну OCR HP диференційно (±5%+2)
+  - Фаза 3 (Confirmed): 3 підтвердження → зберігає у mem_calib.json → ShadowMode стає корисним
+  - Захист від false positives: max_hp ∈ [50,20000] + диф.перевірка + max 20 спроб
+  - Лог: `[AutoCalib] Фаза 1: N кандидатів` → `[AutoCalib] Спроба K/20` → `[AutoCalib] ПІДТВЕРДЖЕНО`
 - **MR26** — MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B JSONL, ShadowMode=false)
 - **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
 - **MR28** — Target Selector піддерево з 7 BT вузлів (~22 вузли загалом)

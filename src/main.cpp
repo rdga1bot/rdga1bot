@@ -353,9 +353,8 @@ int main(int argc, char* argv[]) {
         std::thread            kl_scan_thread;  // MR74: join при shutdown (не detach)
         int  kl_scan_attempts = 0;
         bool kl_cache_tried   = false; // спробували playerBaseCache з offsets.json
-        bool mem_calib_done   = false; // авто-калібрування HP/MP/CP вже запускалось
-        int  mem_calib_stable = 0;     // лічильник стабільних тіків для калібрування
-        int  mem_calib_prev_hp = -1;   // HP з попереднього тіку
+        bool        mem_calib_done = false;
+        HpAutoCalib hp_auto_calib;     // MR80: диференційне авто-калібрування HP offset
         auto kl_last_attempt  =
             std::chrono::steady_clock::now() - std::chrono::seconds(10);
         auto kl_validity_check =
@@ -489,40 +488,19 @@ int main(int argc, char* argv[]) {
             if (cfg.mem_enabled && mem_reader.IsOpen()) {
                 // Авто-калібрування HP/MP/CP offsets (один раз на сесію).
                 // Умова: playerBase відомий + OCR HP стабільний 3 тіки + хоча б 1 стат < 98%.
+                // MR80: диференційне авто-калібрування HP offset
                 if (!mem_calib_done && cfg.mem_use_kl_base && brain.HasPlayerBase()) {
-                    const auto& ocr_me = brain.Me();
-                    if (ocr_me.has_value() && ocr_me->hp > 0) {
-                        const int hp = ocr_me->hp, mp = ocr_me->mp, cp = ocr_me->cp;
-                        const bool not_full = (hp < 98 || mp < 98 || cp < 98);
-                        if (hp == mem_calib_prev_hp && (not_full || mem_calib_stable > 30)) {
-                            ++mem_calib_stable;
-                        } else {
-                            mem_calib_stable = 0;
-                        }
-                        mem_calib_prev_hp = hp;
-
-                        if (mem_calib_stable >= 3 || (!not_full && mem_calib_stable >= 60)) {
-                            auto result = MemReader::AutoCalibratePlayer(
-                                kl_pid, brain.GetPlayerBase(), hp, mp, cp);
-                            if (result.found_hp || result.found_mp) {
-                                auto off = mem_reader.GetOffsets();
-                                if (result.found_hp) {
-                                    off.hp_off     = result.hp_off;
-                                    off.max_hp_off = result.max_hp_off;
-                                }
-                                if (result.found_mp) {
-                                    off.mp_off     = result.mp_off;
-                                    off.max_mp_off = result.max_mp_off;
-                                }
-                                if (result.found_cp) {
-                                    off.cp_off     = result.cp_off;
-                                    off.max_cp_off = result.max_cp_off;
-                                }
-                                mem_reader.SetOffsets(off);
-                                mem_reader.SaveCalib(result, "mem_calib.json");
-                            }
-                            mem_calib_done = true; // незалежно від результату — не повторювати
-                        }
+                    int ocr_hp = brain.Me() ? brain.Me()->hp : -1;
+                    if (auto res = hp_auto_calib.tick(kl_pid, brain.GetPlayerBase(), ocr_hp)) {
+                        auto off       = mem_reader.GetOffsets();
+                        off.hp_off     = res->hp_off;
+                        off.max_hp_off = res->max_hp_off;
+                        mem_reader.SetOffsets(off);
+                        MemReader::AutoCalibResult save{};
+                        save.hp_off = res->hp_off; save.max_hp_off = res->max_hp_off;
+                        save.found_hp = true;
+                        mem_reader.SaveCalib(save, "mem_calib.json");
+                        mem_calib_done = true;
                     }
                 }
                 brain.SetMemPlayerState(mem_reader.ReadPlayer());

@@ -251,6 +251,113 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
     return state;
 }
 
+// ── HpAutoCalib ───────────────────────────────────────────────────────────────
+bool HpAutoCalib::matchPct(uint32_t cur, uint32_t mx, int pct, int tol) {
+    if (mx < 50u || mx > 20000u) return false;
+    if (cur == 0u || cur > mx)   return false;
+    int ratio = (int)((uint64_t)cur * 100u / mx);
+    return std::abs(ratio - pct) <= tol;
+}
+
+std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
+        pid_t pid, uintptr_t playerBase, int ocr_hp)
+{
+    if (m_state == State::Confirmed)  return std::nullopt;
+    if (!pid || !playerBase)          return std::nullopt;
+    if (ocr_hp < 1 || ocr_hp > 100)  return std::nullopt;
+
+    constexpr size_t kN      = 0x300 / 4; // 192 uint32 = 0x300 байт
+    constexpr size_t kWindow = 16;        // пара (cur,max) в межах 64 байт
+    constexpr int    kTol    = 5;         // допуск ±5% при match
+    constexpr int    kDelta  = 3;         // мінімальна зміна OCR% для диф.валідації
+    constexpr int    kNeed   = 3;         // підтверджень для перемоги
+    constexpr int    kMaxTry = 20;        // максимум диф.спроб
+
+    std::vector<uint32_t> buf(kN, 0);
+    ProcessMemory::Read(pid, playerBase, buf.data(), kN * 4);
+
+    // ── Фаза 1: Searching ────────────────────────────────────────────────────
+    if (m_state == State::Idle || m_state == State::Searching) {
+        if (ocr_hp >= 95) return std::nullopt; // зачекати поки HP < 95%
+
+        m_cands.clear();
+        for (size_t i = 0; i < kN; ++i) {
+            size_t jend = std::min(i + kWindow, kN);
+            for (size_t j = i + 1; j < jend; ++j)
+                if (matchPct(buf[i], buf[j], ocr_hp, kTol))
+                    m_cands.push_back({i * 4u, j * 4u, 0});
+        }
+        m_snap     = buf;
+        m_prev_ocr = ocr_hp;
+        m_attempts = 0;
+
+        if (!m_cands.empty()) {
+            m_state = State::Validating;
+            std::cerr << "[AutoCalib] Фаза 1: " << m_cands.size()
+                      << " кандидатів (HP=" << ocr_hp << "%). Валідуємо...\n";
+        }
+        return std::nullopt;
+    }
+
+    // ── Фаза 2: Validating ───────────────────────────────────────────────────
+    int delta = std::abs(ocr_hp - m_prev_ocr);
+    if (delta < kDelta) return std::nullopt; // OCR не змінився достатньо
+
+    ++m_attempts;
+    std::vector<Candidate> survivors;
+
+    for (auto& c : m_cands) {
+        size_t ci = c.cur_off / 4, mi = c.max_off / 4;
+        if (ci >= kN || mi >= kN || mi >= m_snap.size()) continue;
+
+        uint32_t old_cur = m_snap[ci], old_max = m_snap[mi];
+        uint32_t new_cur = buf[ci],    new_max  = buf[mi];
+
+        // Перевірка 1: нові значення відповідають новому OCR%
+        if (!matchPct(new_cur, new_max, ocr_hp, kTol)) continue;
+
+        // Перевірка 2: диференціал — зміна в пам'яті ≈ зміна OCR
+        if (old_max > 0u && new_max > 0u) {
+            int old_pct = (int)((uint64_t)old_cur * 100u / old_max);
+            int new_pct = (int)((uint64_t)new_cur * 100u / new_max);
+            int d_mem   = std::abs(new_pct - old_pct);
+            if (std::abs(d_mem - delta) > kTol + 2) continue; // диф.розбіжність
+        }
+
+        ++c.hits;
+        survivors.push_back(c);
+    }
+
+    m_cands    = survivors;
+    m_snap     = buf;
+    m_prev_ocr = ocr_hp;
+
+    if (m_cands.empty()) {
+        std::cerr << "[AutoCalib] Всі кандидати відхилені. Перезапуск пошуку.\n";
+        m_state = State::Searching;
+        return std::nullopt;
+    }
+
+    auto best = std::max_element(m_cands.begin(), m_cands.end(),
+        [](const Candidate& a, const Candidate& b){ return a.hits < b.hits; });
+
+    std::cerr << "[AutoCalib] Спроба " << m_attempts
+              << "/" << kMaxTry << ": " << m_cands.size() << " кандидатів"
+              << ", best hits=" << best->hits
+              << " cur=+0x" << std::hex << best->cur_off
+              << " max=+0x" << best->max_off << std::dec << "\n";
+
+    if (best->hits >= kNeed || m_attempts >= kMaxTry) {
+        m_state = State::Confirmed;
+        std::cerr << "[AutoCalib] ПІДТВЕРДЖЕНО: HP cur=+0x"
+                  << std::hex << best->cur_off
+                  << " max=+0x" << best->max_off << std::dec
+                  << " (hits=" << best->hits << ")\n";
+        return HpOffsets{best->cur_off, best->max_off};
+    }
+    return std::nullopt;
+}
+
 // ── AutoCalibratePlayer ───────────────────────────────────────────────────────
 MemReader::AutoCalibResult MemReader::AutoCalibratePlayer(
         pid_t pid, uintptr_t playerBase,

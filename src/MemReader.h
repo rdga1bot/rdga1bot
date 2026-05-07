@@ -5,6 +5,38 @@
 #include <optional>
 #include "platform.h"
 
+// ── HpAutoCalib ───────────────────────────────────────────────────────────────
+// Диференційне авто-калібрування HP offset з пам'яті гравця.
+//
+// Алгоритм (3 фази):
+//   Searching  — знаходить кандидатів (cur_off, max_off) де cur/max ≈ OCR HP%
+//   Validating — відкидає кандидатів що не відстежують зміну OCR HP диференційно
+//   Confirmed  — переможець знайдено
+//
+// Використання: викликати tick() кожен тік. Повертає HpOffsets рівно один раз.
+struct HpAutoCalib {
+    enum class State { Idle, Searching, Validating, Confirmed };
+
+    struct HpOffsets { uintptr_t hp_off = 0, max_hp_off = 0; };
+
+    std::optional<HpOffsets> tick(pid_t pid, uintptr_t playerBase, int ocr_hp);
+
+    State state()      const { return m_state; }
+    int   candidates() const { return (int)m_cands.size(); }
+    void  reset()            { *this = {}; }
+
+private:
+    struct Candidate { uintptr_t cur_off = 0, max_off = 0; int hits = 0; };
+
+    State                  m_state    = State::Idle;
+    std::vector<Candidate> m_cands;
+    std::vector<uint32_t>  m_snap;    // знімок пам'яті при попередньому delta-тіку
+    int                    m_prev_ocr = -1;
+    int                    m_attempts = 0;
+
+    static bool matchPct(uint32_t cur, uint32_t mx, int pct, int tol);
+};
+
 // ── MemReader ────────────────────────────────────────────────────────────────
 // Читає пам'ять процесу L2 (Wine) через process_vm_readv (Linux).
 // Не потребує root — достатньо того самого UID що і L2 процес.
