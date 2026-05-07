@@ -65,6 +65,7 @@ void Dashboard::Init() {
 
     m_t_start = time(nullptr);
     getmaxyx(stdscr, m_rows, m_cols);
+    clear(); // один раз при старті — встановлює clean baseline
     RecreateWindows();
     m_active = true;
 }
@@ -154,9 +155,8 @@ void Dashboard::Update(const Brain& brain, double fps) {
         clearok(stdscr, TRUE); // примусова перемальовка після resize
     }
 
-    // clear() потрібен для коректного першого кадру (встановлює clean baseline).
-    // Мерехтіння усувається через wnoutrefresh+doupdate нижче, а не через erase().
-    clear();
+    // БЕЗ clear() — htop не чистить stdscr кожен кадр.
+    // Baseline встановлено в Init() один раз. Сепаратори малюємо через mvhline.
 
     Eyes::Me    me_def{};
     Eyes::Target tgt_def{};
@@ -408,8 +408,7 @@ void Dashboard::DrawFooter() {
 
     wattron(m_win_footer, COLOR_PAIR(COLOR_DIM));
     mvwprintw(m_win_footer, 0, 0,
-        " Q=стоп  ScrLk=стоп  P=пауза  S=налаштування  R=скинути бари"
-        "  Tab=вкладка  F12=calibrate");
+        " Fn+Home=стоп  Fn+PgUp=пауза  S=налашт  Tab=вкладка  F12=calib");
     wattroff(m_win_footer, COLOR_PAIR(COLOR_DIM));
 }
 
