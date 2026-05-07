@@ -55,7 +55,25 @@ tools/build_navmesh
 *.pts
 *.bin
 
-# MemPalace
+# MemPalace (видалено, екосистема прибрана)
 memory/palace/
 memory/venv/
 *.mempalaceignore
+mempalace.*
+memory/shadow_logs/
+memory/snapshots.log
+
+# Runtime / калібрація (генеруються автоматично)
+mem_calib.json
+entities.json
+weights.json
+stderr_tmp.log
+tmp.txt
+src_perplexity/
+
+# Prompt/refactor робочі файли
+CLAUDE_CODE_REFACTOR*.md
+
+# Test binaries
+tests/bt_test
+tests/memory_test
