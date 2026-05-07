@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cerrno>
 #include <iostream>
+#include <iomanip>
 #ifndef _WIN32
 #include <dirent.h>
 #include <sys/types.h>
@@ -253,8 +254,8 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
 
 // ── HpAutoCalib ───────────────────────────────────────────────────────────────
 bool HpAutoCalib::matchPct(uint32_t cur, uint32_t mx, int pct, int tol) {
-    if (mx < 50u || mx > 20000u) return false;
-    if (cur == 0u || cur > mx)   return false;
+    if (mx < 50u || mx > 500000u) return false;
+    if (cur == 0u || cur > mx)    return false;
     int ratio = (int)((uint64_t)cur * 100u / mx);
     return std::abs(ratio - pct) <= tol;
 }
@@ -266,8 +267,8 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
     if (!pid || !playerBase)          return std::nullopt;
     if (ocr_hp < 1 || ocr_hp > 100)  return std::nullopt;
 
-    constexpr size_t kN      = 0x300 / 4; // 192 uint32 = 0x300 байт
-    constexpr size_t kWindow = 16;        // пара (cur,max) в межах 64 байт
+    constexpr size_t kN      = 0x500 / 4; // 320 uint32 = 0x500 байт
+    constexpr size_t kWindow = 64;        // пара (cur,max) в межах 256 байт
     constexpr int    kTol    = 5;         // допуск ±5% при match
     constexpr int    kDelta  = 3;         // мінімальна зміна OCR% для диф.валідації
     constexpr int    kNeed   = 3;         // підтверджень для перемоги
@@ -295,6 +296,33 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
             m_state = State::Validating;
             std::cerr << "[AutoCalib] Фаза 1: " << m_cands.size()
                       << " кандидатів (HP=" << ocr_hp << "%). Валідуємо...\n";
+        } else {
+            // Повний діагностичний дамп 0x00..0x500
+            // Показуємо тільки значення в діапазоні [1..50000] (потенційний HP)
+            // і пари де cur/max ≈ OCR HP%
+            std::cerr << "[AutoCalib] 0 кандидатів (HP=" << ocr_hp
+                      << "%). Повний дамп значень [1..50000] у 0x00..0x" << std::hex << kN*4 << ":\n" << std::dec;
+            for (size_t i = 0; i < kN; ++i) {
+                uint32_t v = buf[i];
+                if (v >= 1 && v <= 50000)
+                    std::cerr << "  +0x" << std::hex << std::setw(3) << std::setfill('0') << i*4
+                              << " = " << std::dec << v << "\n";
+            }
+            // Пари що відповідають HP% ±10% (розширений допуск для діагностики)
+            std::cerr << "[AutoCalib] Пошук пар cur/max ≈ " << ocr_hp << "% (±10%, max до 500000):\n";
+            for (size_t i = 0; i < kN; ++i) {
+                uint32_t cur = buf[i];
+                if (cur < 1 || cur > 500000) continue;
+                for (size_t j = i+1; j < std::min(kN, i+64); ++j) {
+                    uint32_t mx = buf[j];
+                    if (mx < cur || mx > 500000) continue;
+                    int ratio = (int)((uint64_t)cur * 100u / mx);
+                    if (std::abs(ratio - ocr_hp) <= 10)
+                        std::cerr << "  cur=+0x" << std::hex << i*4 << "(" << std::dec << cur
+                                  << ") max=+0x" << std::hex << j*4 << "(" << std::dec << mx
+                                  << ") ratio=" << ratio << "%\n";
+                }
+            }
         }
         return std::nullopt;
     }
