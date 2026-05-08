@@ -441,10 +441,74 @@ void runScanPos(const std::string& config_path) {
     std::cerr << "[SCAN] Знайдений offset → задай OFF_PLAYER_X в offsets_config.h і --map\n";
 }
 
+// ─── --scan-hp ────────────────────────────────────────────────────────────────
+// Повний скан пам'яті процесу для uint32==target та float≈target.
+// Репортує всі адреси + offset відносно playerBase (якщо поруч).
+// Використання: ./rdga1bot --scan-hp 15202
+void runScanHp(const std::string& config_path, uint32_t target) {
+    Config cfg; cfg.Load(config_path);
+    pid_t pid = findL2Pid();
+    if (!pid) { std::cerr << "[scan-hp] L2 процес не знайдено\n"; return; }
+
+    uintptr_t pb = 0;
+    OffsetScanner scanner(pid);
+    if (scanner.loadOffsets(cfg.knownlist_offsets_file))
+        pb = scanner.playerBaseCache;
+    std::cerr << "[scan-hp] pid=" << pid << " target=" << target
+              << " playerBase=0x" << std::hex << pb << std::dec << "\n";
+
+    float ftarget = (float)target;
+    uint32_t fu; memcpy(&fu, &ftarget, 4);
+
+    // Читаємо регіони з /proc/PID/maps
+    char path[64]; snprintf(path, sizeof(path), "/proc/%d/maps", (int)pid);
+    FILE* f = fopen(path, "r");
+    if (!f) { std::cerr << "[scan-hp] cannot open maps\n"; return; }
+
+    int found = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        uintptr_t lo, hi; char perms[8];
+        if (sscanf(line, "%lx-%lx %4s", &lo, &hi, perms) != 3) continue;
+        if (perms[0] != 'r') continue;              // тільки readable
+        size_t sz = hi - lo;
+        if (sz > 256 * 1024 * 1024) continue;      // пропускаємо >256MB
+        if (sz < 4) continue;
+
+        std::vector<uint8_t> buf(sz);
+        if (!ProcessMemory::Read(pid, lo, buf.data(), sz)) continue;
+
+        for (size_t i = 0; i + 4 <= sz; i += 4) {
+            uint32_t v; memcpy(&v, buf.data() + i, 4);
+            bool is_u32   = (v == target);
+            bool is_float = (v == fu);
+            if (!is_u32 && !is_float) continue;
+
+            uintptr_t addr = lo + i;
+            std::cerr << (is_float ? "f32" : "u32")
+                      << " @ 0x" << std::hex << addr;
+            if (pb) {
+                intptr_t delta = (intptr_t)addr - (intptr_t)pb;
+                if (delta >= 0 && delta < 0x100000)
+                    std::cerr << "  [pb+" << std::hex << delta << "]";
+                else if (delta < 0 && delta > -0x100000)
+                    std::cerr << "  [pb-" << std::hex << -delta << "]";
+            }
+            std::cerr << std::dec << "\n";
+            ++found;
+            if (found > 200) { std::cerr << "...(>200 результатів, зупиняємось)\n"; goto done; }
+        }
+    }
+done:
+    fclose(f);
+    std::cerr << "[scan-hp] Знайдено: " << found << " адрес\n";
+    if (pb && found)
+        std::cerr << "[scan-hp] Адреси з [pb+OFF] — перевір OFF як hp_off у mem_calib.json\n";
+}
+
 // ─── --dump-gobj ──────────────────────────────────────────────────────────────
-// Знаходить game_obj через playerBase+0x58 і виводить всі uint32 > 1000
-// в діапазоні +0x0000..+0x4000. Допомагає знайти реальний HP offset вручну.
-// Використання: запусти під час бою, подивись які значення змінюються.
+// Знаходить game_obj через playerBase+0x58 і виводить всі uint32/float в [1000..100000]
+// в діапазоні playerBase та game_obj. Допомагає знайти реальний HP offset вручну.
 void runDumpGobj(const std::string& config_path) {
     Config cfg; cfg.Load(config_path);
     pid_t pid = findL2Pid();

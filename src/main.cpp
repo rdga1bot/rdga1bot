@@ -159,6 +159,8 @@ int main(int argc, char* argv[]) {
     bool discover_klist = false;
     bool diff_scan = false;
     bool dump_gobj = false;
+    bool scan_hp   = false;
+    uint32_t scan_hp_val = 0;
     uintptr_t override_pb = 0;  // --pb 0xADDR — переназначити PlayerBase для watch-pos/map
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -175,6 +177,10 @@ int main(int argc, char* argv[]) {
         if (a == "--discover-klist")  discover_klist = true;
         if (a == "--diff-scan")       diff_scan      = true;
         if (a == "--dump-gobj")       dump_gobj      = true;
+        if (a == "--scan-hp" && i + 1 < argc) {
+            scan_hp = true;
+            scan_hp_val = (uint32_t)std::stoul(argv[++i]);
+        }
         if (a == "--pb" && i + 1 < argc) {
             override_pb = (uintptr_t)std::stoull(argv[++i], nullptr, 16);
         }
@@ -191,6 +197,7 @@ int main(int argc, char* argv[]) {
     if (watch_pos) { runWatchPos(config_path, override_pb);    return 0; }
     if (diff_scan) { runDiffScan(config_path);                 return 0; }
     if (dump_gobj) { runDumpGobj(config_path);                 return 0; }
+    if (scan_hp)   { runScanHp(config_path, scan_hp_val);     return 0; }
 
     if (map_mode) { runMapMode(config_path, override_pb); return 0; }
     if (scan_pos) { runScanPos(config_path); return 0; }
