@@ -467,34 +467,48 @@ void runDumpGobj(const std::string& config_path) {
         return;
     }
     std::cerr << "[dump-gobj] game_obj=0x" << std::hex << gobj << std::dec << "\n";
-    std::cerr << "[dump-gobj] Сканую +0x0000..+0x4000, виводжу значення > 1000:\n\n";
+    std::cerr << "[dump-gobj] Сканую +0x0000..+0x4000 як uint32 ТА float [1000..100000]:\n\n";
 
     constexpr size_t kSlots = 0x4000 / 4;
-    std::vector<uint32_t> buf(kSlots, 0);
+    std::vector<uint32_t> buf(kSlots, 0), buf2(kSlots, 0);
     ProcessMemory::Read(pid, gobj, buf.data(), kSlots * 4);
-
-    // Два snapshot з паузою — показуємо які значення ЗМІНИЛИСЬ (потенційний cur HP)
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    std::vector<uint32_t> buf2(kSlots, 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
     ProcessMemory::Read(pid, gobj, buf2.data(), kSlots * 4);
 
     std::cerr << std::left
-              << std::setw(8)  << "Offset"
-              << std::setw(10) << "Val1"
-              << std::setw(10) << "Val2"
-              << "Delta\n"
-              << std::string(35, '-') << "\n";
+              << std::setw(8) << "Offset"
+              << std::setw(6) << "Type"
+              << std::setw(12) << "Val1"
+              << std::setw(12) << "Val2"
+              << "Note\n"
+              << std::string(46, '-') << "\n";
 
     for (size_t i = 0; i < kSlots; i++) {
-        uint32_t v1 = buf[i], v2 = buf2[i];
-        if (v1 < 1000u && v2 < 1000u) continue;
-        if (v1 > 500000u && v2 > 500000u) continue;
-        int delta = (int)v2 - (int)v1;
-        std::cerr << "+0x" << std::hex << std::setw(5) << std::setfill('0') << i*4 << std::dec
-                  << std::setfill(' ')
-                  << std::setw(10) << v1
-                  << std::setw(10) << v2
-                  << (delta ? "  <-- ЗМІНА" : "") << "\n";
+        uint32_t u1 = buf[i], u2 = buf2[i];
+
+        // uint32 [1000..500000]
+        if ((u1 >= 1000u && u1 <= 500000u) || (u2 >= 1000u && u2 <= 500000u)) {
+            int delta = (int)u2 - (int)u1;
+            std::cerr << "+0x" << std::hex << std::setw(5) << std::setfill('0') << i*4
+                      << std::dec << std::setfill(' ')
+                      << std::setw(6) << "u32"
+                      << std::setw(12) << u1 << std::setw(12) << u2
+                      << (delta ? " <ЗМІНА" : "") << "\n";
+        }
+
+        // float [1000..100000]
+        float f1, f2;
+        memcpy(&f1, &u1, 4); memcpy(&f2, &u2, 4);
+        bool f1ok = std::isfinite(f1) && f1 >= 1000.f && f1 <= 100000.f;
+        bool f2ok = std::isfinite(f2) && f2 >= 1000.f && f2 <= 100000.f;
+        if (f1ok || f2ok) {
+            float delta = f2 - f1;
+            std::cerr << "+0x" << std::hex << std::setw(5) << std::setfill('0') << i*4
+                      << std::dec << std::setfill(' ')
+                      << std::setw(6) << "f32"
+                      << std::setw(12) << (int)f1 << std::setw(12) << (int)f2
+                      << (std::abs(delta) > 0.5f ? " <ЗМІНА" : "") << "\n";
+        }
     }
-    std::cerr << "\n[dump-gobj] Готово. Шукай max_hp (наприклад 15202) та cur_hp поруч.\n";
+    std::cerr << "\n[dump-gobj] Шукай рядки f32 де Val ≈ max_hp (15202) або cur_hp.\n";
 }
