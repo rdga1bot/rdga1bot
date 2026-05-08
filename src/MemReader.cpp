@@ -262,8 +262,8 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
 
 // ── HpAutoCalib ───────────────────────────────────────────────────────────────
 bool HpAutoCalib::matchPct(uint32_t cur, uint32_t mx, int pct, int tol) {
-    if (mx < 50u || mx > 500000u) return false;
-    if (cur == 0u || cur > mx)    return false;
+    if (mx < 5000u || mx > 500000u) return false; // player HP завжди > 5000
+    if (cur == 0u || cur > mx)      return false;
     int ratio = (int)((uint64_t)cur * 100u / mx);
     return std::abs(ratio - pct) <= tol;
 }
@@ -284,12 +284,15 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
     uintptr_t gameObj = (uintptr_t)gobj_raw;
     if (gameObj < 0x10000u || gameObj > 0x7FFFFFFFu) return std::nullopt;
 
-    constexpr size_t kN      = 0x200 / 4; // 128 uint32 = 0x200 байт від game_obj
-    constexpr size_t kWindow = 32;        // пара (cur,max) в межах 128 байт
-    constexpr int    kTol    = 5;         // допуск ±5% при match
-    constexpr int    kDelta  = 3;         // мінімальна зміна OCR% для диф.валідації
-    constexpr int    kNeed   = 3;         // підтверджень для перемоги
-    constexpr int    kMaxTry = 20;        // максимум диф.спроб
+    // HP гравця TH ~15000 → значно більше ніж false-positive range (1000-2000).
+    // Скануємо до 0x1000 від game_obj; приймаємо лише max > kMinHp.
+    constexpr size_t kN      = 0x1000 / 4; // 1024 uint32 = 0x1000 байт від game_obj
+    constexpr size_t kWindow = 64;          // пара (cur,max) в межах 256 байт
+    constexpr int    kTol    = 4;           // допуск ±4% (менше false positives)
+    constexpr int    kDelta  = 3;           // мінімальна зміна OCR% для диф.валідації
+    constexpr int    kNeed   = 3;           // підтверджень для перемоги
+    constexpr int    kMaxTry = 20;          // максимум диф.спроб
+    constexpr uint32_t kMinHp = 5000u;      // player HP завжди > 5000 на цьому рівні
 
     std::vector<uint32_t> buf(kN, 0);
     ProcessMemory::Read(pid, gameObj, buf.data(), kN * 4);

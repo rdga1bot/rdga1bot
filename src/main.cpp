@@ -353,7 +353,8 @@ int main(int argc, char* argv[]) {
         std::thread            kl_scan_thread;  // MR74: join при shutdown (не detach)
         int  kl_scan_attempts = 0;
         bool kl_cache_tried   = false; // спробували playerBaseCache з offsets.json
-        bool        mem_calib_done = false;
+        // Якщо mem_calib.json завантажено — не перекалібровувати (щоб не затерти валідний результат)
+        bool        mem_calib_done = mem_reader.GetOffsets().hp_off > 0;
         HpAutoCalib hp_auto_calib;     // MR80: диференційне авто-калібрування HP offset
         bool        pgup_prev = false; // edge detection для PageUp паузи
         auto kl_last_attempt  =
