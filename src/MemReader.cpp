@@ -240,8 +240,14 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
         ReadBytes(obj_addr + off, &out, sizeof(out));
     };
 
-    if (m_off.hp_off)     ri(hp_base,  m_off.hp_off,     state.hp);
-    if (m_off.max_hp_off) ri(hp_base,  m_off.max_hp_off, state.max_hp);
+    if (m_off.hp_anchor_addr) {
+        // Anchor mode: читаємо обидва поля безумовно (max_hp_off може бути 0)
+        ri(hp_base, m_off.hp_off,     state.hp);
+        ri(hp_base, m_off.max_hp_off, state.max_hp);
+    } else {
+        if (m_off.hp_off)     ri(hp_base, m_off.hp_off,     state.hp);
+        if (m_off.max_hp_off) ri(hp_base, m_off.max_hp_off, state.max_hp);
+    }
     if (m_off.mp_off)     ri(obj_addr, m_off.mp_off,     state.mp);
     if (m_off.max_mp_off) ri(obj_addr, m_off.max_mp_off, state.max_mp);
     if (m_off.cp_off)     ri(obj_addr, m_off.cp_off,     state.cp);
