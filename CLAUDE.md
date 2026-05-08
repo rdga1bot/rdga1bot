@@ -7,14 +7,17 @@
 - Папка: /home/rdga1/rdga1prj/l2net/
 - Build: bash build.sh && ./launch.sh
 
-## Поточний стан (2026-05-07)
+## Поточний стан (2026-05-08)
 - **BotBehaviorTree** — єдиний планувальник. RL: `[Learning] Enabled=true` за замовчуванням.
-- **MR80** — `HpAutoCalib`: диференційне авто-калібрування HP offset (замінює MR54 AutoCalibratePlayer)
-  - Фаза 1 (Searching): збирає кандидати (cur_off, max_off) де cur/max ≈ OCR HP% при HP < 95%
-  - Фаза 2 (Validating): відкидає кандидатів що не відстежують зміну OCR HP диференційно (±5%+2)
-  - Фаза 3 (Confirmed): 3 підтвердження → зберігає у mem_calib.json → ShadowMode стає корисним
-  - Захист від false positives: max_hp ∈ [50,20000] + диф.перевірка + max 20 спроб
-  - Лог: `[AutoCalib] Фаза 1: N кандидатів` → `[AutoCalib] Спроба K/20` → `[AutoCalib] ПІДТВЕРДЖЕНО`
+- **MR80** — HP читання з пам'яті ПІДТВЕРДЖЕНО. Два механізми (пріоритет: hp_abs > anchor > game_obj):
+  - **Якір DSETUP.dll**: `*(0x1003F27C) - 0x3DC8 = struct_base` → `+0=max_hp`, `+8=cur_hp`
+    - Адреса `0x1003F27C` (268694140 dec) стабільна впродовж сесії (ptr=0x248c8b00 не змінюється)
+    - mem_calib.json: `hp_anchor_addr=268694140`, `hp_anchor_sub=15816`, `hp_off=8`, `max_hp_off=0`
+    - Root cause попереднього PENDING: збережено `16793212` (0x1003E7C, 7 цифр) замість `268694140` (0x1003F27C, 8 цифр)
+  - **Full-process scan fallback** (HpAutoCalib): якщо mem_calib.json відсутній — сканує всі r-w регіони
+    /proc/pid/maps, шукає пари (cur,max) де cur/max ≈ OCR HP%; зберігає абсолютні адреси (hp_abs/max_hp_abs)
+  - ShadowMode avg diff 50% = артефакт: logMobComparison (kl_alive=370 vs minimap~5) завжди discrepancy;
+    HP discrepancies = 0 (|mem_pct - ocr_pct| = ~1.3% < threshold 5%)
 - **MR26** — MemoryValidator + blindScan(timeoutMs) + ShadowLogger (A/B JSONL, ShadowMode=false)
 - **MR27** — actTarget → 6 приватних `tgtHandle*` instance methods
 - **MR28** — Target Selector піддерево з 7 BT вузлів (~22 вузли загалом)
