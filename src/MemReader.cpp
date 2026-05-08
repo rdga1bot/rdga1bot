@@ -267,15 +267,24 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
     if (!pid || !playerBase)          return std::nullopt;
     if (ocr_hp < 1 || ocr_hp > 100)  return std::nullopt;
 
-    constexpr size_t kN      = 0x500 / 4; // 320 uint32 = 0x500 байт
-    constexpr size_t kWindow = 64;        // пара (cur,max) в межах 256 байт
+    // playerBase = render_node (те саме що мобів).
+    // HP гравця: render_node+0x58 → game_obj → +0x14 (MR43).
+    // Сканувати треба game_obj, а не playerBase напряму.
+    constexpr uintptr_t kGObjOff = 0x58; // render_node → game_obj ptr
+    uint32_t gobj_raw = 0;
+    ProcessMemory::Read(pid, playerBase + kGObjOff, &gobj_raw, 4);
+    uintptr_t gameObj = (uintptr_t)gobj_raw;
+    if (gameObj < 0x10000u || gameObj > 0x7FFFFFFFu) return std::nullopt;
+
+    constexpr size_t kN      = 0x200 / 4; // 128 uint32 = 0x200 байт від game_obj
+    constexpr size_t kWindow = 32;        // пара (cur,max) в межах 128 байт
     constexpr int    kTol    = 5;         // допуск ±5% при match
     constexpr int    kDelta  = 3;         // мінімальна зміна OCR% для диф.валідації
     constexpr int    kNeed   = 3;         // підтверджень для перемоги
     constexpr int    kMaxTry = 20;        // максимум диф.спроб
 
     std::vector<uint32_t> buf(kN, 0);
-    ProcessMemory::Read(pid, playerBase, buf.data(), kN * 4);
+    ProcessMemory::Read(pid, gameObj, buf.data(), kN * 4);
 
     // ── Фаза 1: Searching ────────────────────────────────────────────────────
     if (m_state == State::Idle || m_state == State::Searching) {
@@ -297,9 +306,10 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
             std::cerr << "[AutoCalib] Фаза 1: " << m_cands.size()
                       << " кандидатів (HP=" << ocr_hp << "%). Валідуємо...\n";
         } else {
-            // Повний діагностичний дамп — ВСІ значення 0x00..kN*4
+            // Повний діагностичний дамп — ВСІ значення game_obj+0x00..kN*4
             std::cerr << "[AutoCalib] 0 кандидатів (HP=" << ocr_hp
-                      << "%). Дамп 0x00..0x" << std::hex << kN*4 << " (значення [1..500000]):\n" << std::dec;
+                      << "%). game_obj=0x" << std::hex << gameObj
+                      << " Дамп +0x00..+0x" << kN*4 << " (значення [1..500000]):\n" << std::dec;
             for (size_t i = 0; i < kN; ++i) {
                 uint32_t v = buf[i];
                 if (v >= 1 && v <= 500000)
