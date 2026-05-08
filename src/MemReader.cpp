@@ -297,14 +297,12 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
             std::cerr << "[AutoCalib] Фаза 1: " << m_cands.size()
                       << " кандидатів (HP=" << ocr_hp << "%). Валідуємо...\n";
         } else {
-            // Повний діагностичний дамп 0x00..0x500
-            // Показуємо тільки значення в діапазоні [1..50000] (потенційний HP)
-            // і пари де cur/max ≈ OCR HP%
+            // Повний діагностичний дамп — ВСІ значення 0x00..kN*4
             std::cerr << "[AutoCalib] 0 кандидатів (HP=" << ocr_hp
-                      << "%). Повний дамп значень [1..50000] у 0x00..0x" << std::hex << kN*4 << ":\n" << std::dec;
+                      << "%). Дамп 0x00..0x" << std::hex << kN*4 << " (значення [1..500000]):\n" << std::dec;
             for (size_t i = 0; i < kN; ++i) {
                 uint32_t v = buf[i];
-                if (v >= 1 && v <= 50000)
+                if (v >= 1 && v <= 500000)
                     std::cerr << "  +0x" << std::hex << std::setw(3) << std::setfill('0') << i*4
                               << " = " << std::dec << v << "\n";
             }

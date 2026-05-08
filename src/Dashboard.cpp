@@ -26,9 +26,15 @@ void Dashboard::Init() {
     // Відкриваємо /dev/tty напряму як htop і передаємо в newterm().
     m_tty = fopen("/dev/tty", "r+");
     if (m_tty) {
-        newterm(getenv("TERM"), m_tty, m_tty);
+        const char* term = getenv("TERM");
+        if (!term) term = "xterm-256color"; // fallback якщо TERM не встановлено
+        m_screen = newterm(term, m_tty, m_tty); // зберігаємо SCREEN* для delscreen()
+        if (!m_screen) {
+            fclose(m_tty); m_tty = nullptr;
+            initscr(); // newterm провалився — fallback
+        }
     } else {
-        initscr(); // fallback якщо /dev/tty недоступний
+        initscr();
     }
 
     cbreak();
@@ -124,7 +130,8 @@ void Dashboard::Shutdown() {
     del(m_win_content);
     del(m_win_footer);
     endwin();
-    if (m_tty) { fclose(m_tty); m_tty = nullptr; }
+    if (m_screen) { delscreen((SCREEN*)m_screen); m_screen = nullptr; }
+    if (m_tty)   { fclose(m_tty);       m_tty    = nullptr; }
     m_active = false;
 }
 
