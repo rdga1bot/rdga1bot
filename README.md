@@ -77,6 +77,11 @@ C++ бот для автоматизації фарму в Lineage II.
 - **MR77**: KL-HP фільтр dist>5000 → виключаємо garbage coords (false positive dist=112456 з region scan)
 - **MR78**: `--diff-scan` — двофазне калібрування HP/MP/CP без Cheat Engine (snapshot 1 → урон → snapshot 2 → diff → `mem_calib.json`)
 - **MR79**: `RecordDeath()` перенесено в `actDead` Фаза 0 (виконується рівно 1 раз/смерть); fix хибного D-лічильника при HP=1% (TH Vampiric Rage → multiple false triggers)
+- **MR80**: HP гравця з пам'яті **підтверджено в бойових умовах** без Cheat Engine:
+  - Якір DSETUP.dll: `*(0x1003F27C) - 0x3DC8 = struct_base` → `+0x00=max_hp`, `+0x08=cur_hp`
+  - Pointer стабільний впродовж всієї сесії фарму; TUI: `CONFIRMED hp=12874/15202`
+  - `HpAutoCalib` full-process scan fallback: сканує всі r-w регіони `/proc/pid/maps`, знаходить HP пари диференційно (без Cheat Engine), зберігає абсолютні адреси → `mem_calib.json`
+  - ReadPlayer пріоритет: `hp_abs` (scan result) > `hp_anchor_addr` (DLL anchor) > `hp_off` (game_obj)
 - **Windows**: `ReadProcessMemory` (ProcessMemory.h), Toolhelp32 (FindPid), `EnumProcessModules` (FindModuleBase), `VirtualQueryEx` (region scan) — MR67
 
 ### BehaviorTree планувальник
