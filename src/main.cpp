@@ -160,9 +160,11 @@ int main(int argc, char* argv[]) {
     bool diff_scan = false;
     bool dump_gobj = false;
     bool scan_hp   = false;
-    bool scan_ptr  = false;
-    uint32_t  scan_hp_val  = 0;
-    uintptr_t scan_ptr_val = 0;
+    bool scan_ptr   = false;
+    bool find_chain = false;
+    uint32_t  scan_hp_val   = 0;
+    uintptr_t scan_ptr_val  = 0;
+    uintptr_t chain_tgt_val = 0;
     uintptr_t override_pb = 0;  // --pb 0xADDR — переназначити PlayerBase для watch-pos/map
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -187,6 +189,10 @@ int main(int argc, char* argv[]) {
             scan_ptr = true;
             scan_ptr_val = (uintptr_t)std::stoull(argv[++i], nullptr, 16);
         }
+        if (a == "--find-chain" && i + 1 < argc) {
+            find_chain = true;
+            chain_tgt_val = (uintptr_t)std::stoull(argv[++i], nullptr, 16);
+        }
         if (a == "--pb" && i + 1 < argc) {
             override_pb = (uintptr_t)std::stoull(argv[++i], nullptr, 16);
         }
@@ -204,7 +210,8 @@ int main(int argc, char* argv[]) {
     if (diff_scan) { runDiffScan(config_path);                 return 0; }
     if (dump_gobj) { runDumpGobj(config_path);                 return 0; }
     if (scan_hp)   { runScanHp(config_path, scan_hp_val);     return 0; }
-    if (scan_ptr)  { runScanPtr(config_path, scan_ptr_val);   return 0; }
+    if (scan_ptr)  { runScanPtr  (config_path, scan_ptr_val);   return 0; }
+    if (find_chain){ runFindChain(config_path, chain_tgt_val); return 0; }
 
     if (map_mode) { runMapMode(config_path, override_pb); return 0; }
     if (scan_pos) { runScanPos(config_path); return 0; }

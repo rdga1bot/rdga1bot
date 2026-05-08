@@ -27,6 +27,7 @@ void runScanPos  (const std::string& config_path);
 void runDumpGobj (const std::string& config_path); // dump game_obj для пошуку HP offset
 void runScanHp   (const std::string& config_path, uint32_t target);    // full memory scan for HP value
 void runScanPtr  (const std::string& config_path, uintptr_t target);  // find pointers to an address
+void runFindChain(const std::string& config_path, uintptr_t target);  // BFS pointer chain from playerBase
 
 // diag_map.cpp
 void runMapMode(const std::string& config_path, uintptr_t override_pb);

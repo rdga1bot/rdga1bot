@@ -576,6 +576,82 @@ done:
         std::cerr << "[scan-ptr] [pb+OFF] або [gobj+OFF] = ptr_chain кандидат\n";
 }
 
+// ─── --find-chain ─────────────────────────────────────────────────────────────
+// BFS від playerBase, слідує pointer chain (глибина 1..3) поки не знайде TARGET.
+// Виводить повний ланцюжок: playerBase+OFF1 → P1+OFF2 → P2+OFF3 ≈ TARGET
+// Використання: ./rdga1bot --find-chain 0x248c4d40
+void runFindChain(const std::string& config_path, uintptr_t target) {
+    Config cfg; cfg.Load(config_path);
+    pid_t pid = findL2Pid();
+    if (!pid) { std::cerr << "[find-chain] L2 процес не знайдено\n"; return; }
+
+    uintptr_t pb = 0;
+    { OffsetScanner sc(pid); if (sc.loadOffsets(cfg.knownlist_offsets_file)) pb = sc.playerBaseCache; }
+    if (!pb) { std::cerr << "[find-chain] playerBase не знайдено\n"; return; }
+    std::cerr << "[find-chain] pb=0x" << std::hex << pb << " target=0x" << target << std::dec << "\n";
+
+    auto readU32 = [&](uintptr_t addr) -> uint32_t {
+        uint32_t v = 0; ProcessMemory::Read(pid, addr, &v, 4); return v;
+    };
+    auto isValidPtr = [](uintptr_t v) -> bool {
+        return v >= 0x10000u && v <= 0x7FFFFFFEu && (v & 3) == 0;
+    };
+
+    // Limit: scan up to kScanBytes from each base, step 4
+    constexpr size_t kScanBytes = 0x500;
+    constexpr uintptr_t kHitRange = 0x1000;  // target ∈ [P, P+kHitRange] → hit
+    int chains = 0;
+
+    // Depth-1: scan pb + off0 → P1; if P1 ≈ target → report
+    for (size_t o0 = 0; o0 < kScanBytes; o0 += 4) {
+        uint32_t raw1 = readU32(pb + o0);
+        uintptr_t p1 = (uintptr_t)raw1;
+        if (!isValidPtr(p1)) continue;
+
+        if (p1 <= target && target - p1 < kHitRange) {
+            std::cerr << "CHAIN-1: pb+0x" << std::hex << o0
+                      << " → 0x" << p1 << " +0x" << (target - p1)
+                      << " = TARGET\n" << std::dec;
+            ++chains;
+        }
+
+        // Depth-2: P1 + off1 → P2; if P2 ≈ target → report
+        for (size_t o1 = 0; o1 < kScanBytes; o1 += 4) {
+            uint32_t raw2 = readU32(p1 + o1);
+            uintptr_t p2 = (uintptr_t)raw2;
+            if (!isValidPtr(p2)) continue;
+
+            if (p2 <= target && target - p2 < kHitRange) {
+                std::cerr << "CHAIN-2: pb+0x" << std::hex << o0
+                          << " → 0x" << p1 << "+0x" << o1
+                          << " → 0x" << p2 << " +0x" << (target - p2)
+                          << " = TARGET\n" << std::dec;
+                ++chains;
+                if (chains > 50) goto done;
+                continue;
+            }
+
+            // Depth-3: P2 + off2 → P3; if P3 ≈ target → report
+            for (size_t o2 = 0; o2 < kScanBytes; o2 += 4) {
+                uint32_t raw3 = readU32(p2 + o2);
+                uintptr_t p3 = (uintptr_t)raw3;
+                if (!isValidPtr(p3)) continue;
+                if (p3 <= target && target - p3 < kHitRange) {
+                    std::cerr << "CHAIN-3: pb+0x" << std::hex << o0
+                              << " → 0x" << p1 << "+0x" << o1
+                              << " → 0x" << p2 << "+0x" << o2
+                              << " → 0x" << p3 << " +0x" << (target - p3)
+                              << " = TARGET\n" << std::dec;
+                    ++chains;
+                    if (chains > 50) goto done;
+                }
+            }
+        }
+    }
+done:
+    std::cerr << "[find-chain] Знайдено ланцюжків: " << chains << "\n";
+}
+
 // ─── --dump-gobj ──────────────────────────────────────────────────────────────
 // Знаходить game_obj через playerBase+0x58 і виводить всі uint32/float в [1000..100000]
 // в діапазоні playerBase та game_obj. Допомагає знайти реальний HP offset вручну.
