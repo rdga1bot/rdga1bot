@@ -20,10 +20,11 @@ void runHeadingMonitor(const std::string& config_path);
 void runHpCalibrate   (const std::string& config_path);
 
 // diag_findpos.cpp
-void runFindPos (const std::string& config_path);
-void runWatchPos(const std::string& config_path, uintptr_t override_pb);
-void runDiffScan(const std::string& config_path);
-void runScanPos (const std::string& config_path);
+void runFindPos  (const std::string& config_path);
+void runWatchPos (const std::string& config_path, uintptr_t override_pb);
+void runDiffScan (const std::string& config_path);
+void runScanPos  (const std::string& config_path);
+void runDumpGobj (const std::string& config_path); // dump game_obj для пошуку HP offset
 
 // diag_map.cpp
 void runMapMode(const std::string& config_path, uintptr_t override_pb);

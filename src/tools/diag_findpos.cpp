@@ -440,3 +440,61 @@ void runScanPos(const std::string& config_path) {
               << " Y=" << (int)mob_cy << "\n";
     std::cerr << "[SCAN] Знайдений offset → задай OFF_PLAYER_X в offsets_config.h і --map\n";
 }
+
+// ─── --dump-gobj ──────────────────────────────────────────────────────────────
+// Знаходить game_obj через playerBase+0x58 і виводить всі uint32 > 1000
+// в діапазоні +0x0000..+0x4000. Допомагає знайти реальний HP offset вручну.
+// Використання: запусти під час бою, подивись які значення змінюються.
+void runDumpGobj(const std::string& config_path) {
+    Config cfg; cfg.Load(config_path);
+    pid_t pid = findL2Pid();
+    if (!pid) { std::cerr << "[dump-gobj] L2 процес не знайдено\n"; return; }
+
+    OffsetScanner scanner(pid);
+    if (!scanner.loadOffsets(cfg.knownlist_offsets_file)) {
+        std::cerr << "[dump-gobj] offsets.json не знайдено — запусти --find-pos спочатку\n";
+        return;
+    }
+    uintptr_t pb = scanner.playerBaseCache;
+    if (!pb) { std::cerr << "[dump-gobj] playerBase не знайдено в offsets.json\n"; return; }
+    std::cerr << "[dump-gobj] PlayerBase=0x" << std::hex << pb << std::dec << "\n";
+
+    uint32_t gobj_raw = 0;
+    ProcessMemory::Read(pid, pb + 0x58, &gobj_raw, 4);
+    uintptr_t gobj = (uintptr_t)gobj_raw;
+    if (gobj < 0x10000u || gobj > 0x7FFFFFFFu) {
+        std::cerr << "[dump-gobj] game_obj pointer невалідний: 0x" << std::hex << gobj << "\n";
+        return;
+    }
+    std::cerr << "[dump-gobj] game_obj=0x" << std::hex << gobj << std::dec << "\n";
+    std::cerr << "[dump-gobj] Сканую +0x0000..+0x4000, виводжу значення > 1000:\n\n";
+
+    constexpr size_t kSlots = 0x4000 / 4;
+    std::vector<uint32_t> buf(kSlots, 0);
+    ProcessMemory::Read(pid, gobj, buf.data(), kSlots * 4);
+
+    // Два snapshot з паузою — показуємо які значення ЗМІНИЛИСЬ (потенційний cur HP)
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::vector<uint32_t> buf2(kSlots, 0);
+    ProcessMemory::Read(pid, gobj, buf2.data(), kSlots * 4);
+
+    std::cerr << std::left
+              << std::setw(8)  << "Offset"
+              << std::setw(10) << "Val1"
+              << std::setw(10) << "Val2"
+              << "Delta\n"
+              << std::string(35, '-') << "\n";
+
+    for (size_t i = 0; i < kSlots; i++) {
+        uint32_t v1 = buf[i], v2 = buf2[i];
+        if (v1 < 1000u && v2 < 1000u) continue;
+        if (v1 > 500000u && v2 > 500000u) continue;
+        int delta = (int)v2 - (int)v1;
+        std::cerr << "+0x" << std::hex << std::setw(5) << std::setfill('0') << i*4 << std::dec
+                  << std::setfill(' ')
+                  << std::setw(10) << v1
+                  << std::setw(10) << v2
+                  << (delta ? "  <-- ЗМІНА" : "") << "\n";
+    }
+    std::cerr << "\n[dump-gobj] Готово. Шукай max_hp (наприклад 15202) та cur_hp поруч.\n";
+}
