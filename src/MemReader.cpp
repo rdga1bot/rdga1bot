@@ -217,21 +217,29 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
     }
     if (!obj_addr) return state;
 
-    // Читаємо поля (int32 для HP/MP/CP, float для позиції)
-    auto ri = [&](uintptr_t off, int& out) {
+    // HP/MaxHP: через game_obj pointer chain (render_node+0x58 → game_obj → offset).
+    // Координати (+0x24/28/2C) та інші поля — напряму з obj_addr (playerBase).
+    uintptr_t hp_base = obj_addr;
+    if (m_off.hp_off || m_off.max_hp_off) {
+        uint32_t gobj_raw = 0;
+        if (ReadBytes(obj_addr + 0x58, &gobj_raw, 4) && gobj_raw > 0x10000u)
+            hp_base = (uintptr_t)gobj_raw;
+    }
+
+    auto ri = [&](uintptr_t base, uintptr_t off, int& out) {
         int32_t v = 0;
-        if (ReadBytes(obj_addr + off, &v, sizeof(v))) out = v;
+        if (ReadBytes(base + off, &v, sizeof(v))) out = v;
     };
     auto rf = [&](uintptr_t off, float& out) {
         ReadBytes(obj_addr + off, &out, sizeof(out));
     };
 
-    if (m_off.hp_off)     ri(m_off.hp_off,     state.hp);
-    if (m_off.max_hp_off) ri(m_off.max_hp_off, state.max_hp);
-    if (m_off.mp_off)     ri(m_off.mp_off,     state.mp);
-    if (m_off.max_mp_off) ri(m_off.max_mp_off, state.max_mp);
-    if (m_off.cp_off)     ri(m_off.cp_off,     state.cp);
-    if (m_off.max_cp_off) ri(m_off.max_cp_off, state.max_cp);
+    if (m_off.hp_off)     ri(hp_base,  m_off.hp_off,     state.hp);
+    if (m_off.max_hp_off) ri(hp_base,  m_off.max_hp_off, state.max_hp);
+    if (m_off.mp_off)     ri(obj_addr, m_off.mp_off,     state.mp);
+    if (m_off.max_mp_off) ri(obj_addr, m_off.max_mp_off, state.max_mp);
+    if (m_off.cp_off)     ri(obj_addr, m_off.cp_off,     state.cp);
+    if (m_off.max_cp_off) ri(obj_addr, m_off.max_cp_off, state.max_cp);
     if (m_off.pos_x_off)  rf(m_off.pos_x_off,  state.x);
     if (m_off.pos_y_off)  rf(m_off.pos_y_off,  state.y);
     if (m_off.pos_z_off)  rf(m_off.pos_z_off,  state.z);
