@@ -378,8 +378,9 @@ int main(int argc, char* argv[]) {
         int  kl_scan_attempts = 0;
         bool kl_cache_tried   = false; // спробували playerBaseCache з offsets.json
         // Якщо mem_calib.json завантажено — не перекалібровувати (щоб не затерти валідний результат)
-        bool        mem_calib_done = mem_reader.GetOffsets().hp_off > 0
-                                   || mem_reader.GetOffsets().hp_anchor_addr > 0;
+        bool        mem_calib_done = mem_reader.GetOffsets().hp_abs > 0
+                                   || mem_reader.GetOffsets().hp_anchor_addr > 0
+                                   || mem_reader.GetOffsets().hp_off > 0;
         HpAutoCalib hp_auto_calib;     // MR80: диференційне авто-калібрування HP offset
         bool        pgup_prev = false; // edge detection для PageUp паузи
         auto kl_last_attempt  =
@@ -531,13 +532,14 @@ int main(int argc, char* argv[]) {
                 if (!mem_calib_done && cfg.mem_use_kl_base && brain.HasPlayerBase()) {
                     int ocr_hp = brain.Me() ? brain.Me()->hp : -1;
                     if (auto res = hp_auto_calib.tick(kl_pid, brain.GetPlayerBase(), ocr_hp)) {
-                        auto off       = mem_reader.GetOffsets();
-                        off.hp_off     = res->hp_off;
-                        off.max_hp_off = res->max_hp_off;
+                        auto off         = mem_reader.GetOffsets();
+                        off.hp_abs       = res->hp_abs;
+                        off.max_hp_abs   = res->max_hp_abs;
                         mem_reader.SetOffsets(off);
                         MemReader::AutoCalibResult save{};
-                        save.hp_off = res->hp_off; save.max_hp_off = res->max_hp_off;
-                        save.found_hp = true;
+                        save.hp_abs      = res->hp_abs;
+                        save.max_hp_abs  = res->max_hp_abs;
+                        save.found_hp    = true;
                         mem_reader.SaveCalib(save, "mem_calib.json");
                         mem_calib_done = true;
                     }

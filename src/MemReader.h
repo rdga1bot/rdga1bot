@@ -17,7 +17,8 @@
 struct HpAutoCalib {
     enum class State { Idle, Searching, Validating, Confirmed };
 
-    struct HpOffsets { uintptr_t hp_off = 0, max_hp_off = 0; };
+    // Абсолютні адреси cur_hp/max_hp в адресному просторі процесу (session-specific).
+    struct HpOffsets { uintptr_t hp_abs = 0, max_hp_abs = 0; };
 
     std::optional<HpOffsets> tick(pid_t pid, uintptr_t playerBase, int ocr_hp);
 
@@ -26,11 +27,12 @@ struct HpAutoCalib {
     void  reset()            { *this = {}; }
 
 private:
-    struct Candidate { uintptr_t cur_off = 0, max_off = 0; int hits = 0; };
+    // cur_off/max_off тепер абсолютні адреси (не offsets від game_obj)
+    struct Candidate { uintptr_t cur_off = 0, max_off = 0; int hits = 0;
+                       uint32_t prev_cur = 0, prev_max = 0; };
 
     State                  m_state    = State::Idle;
     std::vector<Candidate> m_cands;
-    std::vector<uint32_t>  m_snap;    // знімок пам'яті при попередньому delta-тіку
     int                    m_prev_ocr = -1;
     int                    m_attempts = 0;
 
@@ -81,9 +83,11 @@ public:
         bool      use_kl_base  = false; // true = приймати playerBase від KnownList напряму
         uintptr_t player_ptr   = 0;  // static addr (відносно base l2.exe)
         std::vector<uintptr_t> ptr_chain; // pointer chain offsets
-        uintptr_t hp_anchor_addr = 0; // abs addr глобального ptr (в модулі DLL)
-        uintptr_t hp_anchor_sub  = 0; // struct_base = *hp_anchor_addr - hp_anchor_sub
-        uintptr_t hp_off       = 0;
+        uintptr_t hp_anchor_addr = 0; // (legacy) abs addr глобального ptr в DLL
+        uintptr_t hp_anchor_sub  = 0; // (legacy) struct_base = *hp_anchor_addr - hp_anchor_sub
+        uintptr_t hp_abs       = 0;  // абсолютна адреса cur_hp  (full-scan, пріоритет)
+        uintptr_t max_hp_abs   = 0;  // абсолютна адреса max_hp
+        uintptr_t hp_off       = 0;  // offset від game_obj (legacy game_obj mode)
         uintptr_t max_hp_off   = 0;
         uintptr_t mp_off       = 0;
         uintptr_t max_mp_off   = 0;
@@ -107,7 +111,8 @@ public:
     // hp/mp/cp_pct — поточні відсотки з OCR (0..100).
     // Повертає true якщо знайдено хоча б HP offset.
     struct AutoCalibResult {
-        uintptr_t hp_anchor_addr = 0, hp_anchor_sub = 0; // global ptr chain
+        uintptr_t hp_anchor_addr = 0, hp_anchor_sub = 0; // (legacy)
+        uintptr_t hp_abs     = 0, max_hp_abs = 0;  // absolute addresses (full-scan)
         uintptr_t hp_off = 0,  max_hp_off = 0;
         uintptr_t mp_off = 0,  max_mp_off = 0;
         uintptr_t cp_off = 0,  max_cp_off = 0;

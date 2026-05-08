@@ -219,19 +219,6 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
 
     // HP/MaxHP: через global anchor pointer chain (DLL global → struct_base + offset).
     // Координати (+0x24/28/2C) та інші поля — напряму з obj_addr (playerBase).
-    uintptr_t hp_base = obj_addr;
-    if (m_off.hp_anchor_addr) {
-        // struct_base = *(hp_anchor_addr) - hp_anchor_sub
-        uint32_t anchor_raw = 0;
-        if (ReadBytes(m_off.hp_anchor_addr, &anchor_raw, 4) && anchor_raw > 0x10000u)
-            hp_base = (uintptr_t)anchor_raw - m_off.hp_anchor_sub;
-    } else if (m_off.hp_off || m_off.max_hp_off) {
-        // Fallback: game_obj через render_node+0x58
-        uint32_t gobj_raw = 0;
-        if (ReadBytes(obj_addr + 0x58, &gobj_raw, 4) && gobj_raw > 0x10000u)
-            hp_base = (uintptr_t)gobj_raw;
-    }
-
     auto ri = [&](uintptr_t base, uintptr_t off, int& out) {
         int32_t v = 0;
         if (ReadBytes(base + off, &v, sizeof(v))) out = v;
@@ -240,11 +227,28 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
         ReadBytes(obj_addr + off, &out, sizeof(out));
     };
 
-    if (m_off.hp_anchor_addr) {
-        // Anchor mode: читаємо обидва поля безумовно (max_hp_off може бути 0)
+    // HP/MaxHP: пріоритет — абсолютні адреси з full-scan AutoCalib.
+    // Fallback — legacy DLL-anchor (нестабільний, залишено для сумісності).
+    if (m_off.hp_abs) {
+        // Абсолютні адреси — session-specific, знайдені full-process scan'ом.
+        int32_t v = 0;
+        if (ReadBytes(m_off.hp_abs,     &v, 4)) state.hp     = v;
+        v = 0;
+        if (ReadBytes(m_off.max_hp_abs, &v, 4)) state.max_hp = v;
+    } else if (m_off.hp_anchor_addr) {
+        // Legacy: struct_base = *(hp_anchor_addr) - hp_anchor_sub
+        uintptr_t hp_base = obj_addr;
+        uint32_t anchor_raw = 0;
+        if (ReadBytes(m_off.hp_anchor_addr, &anchor_raw, 4) && anchor_raw > 0x10000u)
+            hp_base = (uintptr_t)anchor_raw - m_off.hp_anchor_sub;
         ri(hp_base, m_off.hp_off,     state.hp);
         ri(hp_base, m_off.max_hp_off, state.max_hp);
-    } else {
+    } else if (m_off.hp_off || m_off.max_hp_off) {
+        // Legacy: game_obj через render_node+0x58
+        uintptr_t hp_base = obj_addr;
+        uint32_t gobj_raw = 0;
+        if (ReadBytes(obj_addr + 0x58, &gobj_raw, 4) && gobj_raw > 0x10000u)
+            hp_base = (uintptr_t)gobj_raw;
         if (m_off.hp_off)     ri(hp_base, m_off.hp_off,     state.hp);
         if (m_off.max_hp_off) ri(hp_base, m_off.max_hp_off, state.max_hp);
     }
@@ -281,46 +285,61 @@ bool HpAutoCalib::matchPct(uint32_t cur, uint32_t mx, int pct, int tol) {
 }
 
 std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
-        pid_t pid, uintptr_t playerBase, int ocr_hp)
+        pid_t pid, uintptr_t /*playerBase*/, int ocr_hp)
 {
     if (m_state == State::Confirmed)  return std::nullopt;
-    if (!pid || !playerBase)          return std::nullopt;
+    if (!pid)                         return std::nullopt;
     if (ocr_hp < 1 || ocr_hp > 100)  return std::nullopt;
 
-    // playerBase = render_node (те саме що мобів).
-    // HP гравця: render_node+0x58 → game_obj → +0x14 (MR43).
-    // Сканувати треба game_obj, а не playerBase напряму.
-    constexpr uintptr_t kGObjOff = 0x58; // render_node → game_obj ptr
-    uint32_t gobj_raw = 0;
-    ProcessMemory::Read(pid, playerBase + kGObjOff, &gobj_raw, 4);
-    uintptr_t gameObj = (uintptr_t)gobj_raw;
-    if (gameObj < 0x10000u || gameObj > 0x7FFFFFFFu) return std::nullopt;
+    constexpr int    kTol    = 4;   // ±4% OCR допуск
+    constexpr int    kDelta  = 3;   // мінімальна зміна OCR% для диф.валідації
+    constexpr int    kNeed   = 3;   // підтверджень для перемоги
+    constexpr int    kMaxTry = 20;  // максимум диф.спроб
+    // kWindow: пара (cur,max) в межах 32 байт (реальний layout: max=+0, cur=+8)
+    constexpr size_t kWindow = 8;
 
-    // HP гравця TH ~15000 → значно більше ніж false-positive range (1000-2000).
-    // Скануємо до 0x1000 від game_obj; приймаємо лише max > kMinHp.
-    constexpr size_t kN      = 0x1000 / 4; // 1024 uint32 = 0x1000 байт від game_obj
-    constexpr size_t kWindow = 64;          // пара (cur,max) в межах 256 байт
-    constexpr int    kTol    = 4;           // допуск ±4% (менше false positives)
-    constexpr int    kDelta  = 3;           // мінімальна зміна OCR% для диф.валідації
-    constexpr int    kNeed   = 3;           // підтверджень для перемоги
-    constexpr int    kMaxTry = 20;          // максимум диф.спроб
-    constexpr uint32_t kMinHp = 5000u;      // player HP завжди > 5000 на цьому рівні
-
-    std::vector<uint32_t> buf(kN, 0);
-    ProcessMemory::Read(pid, gameObj, buf.data(), kN * 4);
-
-    // ── Фаза 1: Searching ────────────────────────────────────────────────────
+    // ── Фаза 1: повне сканування процесу (full-process scan) ─────────────────
+    // Аналог --scan-hp: читаємо всі r-w регіони і шукаємо пари (cur,max)
+    // де matchPct(cur, max, ocr_hp).
     if (m_state == State::Idle || m_state == State::Searching) {
         if (ocr_hp >= 95) return std::nullopt; // зачекати поки HP < 95%
 
         m_cands.clear();
-        for (size_t i = 0; i < kN; ++i) {
-            size_t jend = std::min(i + kWindow, kN);
-            for (size_t j = i + 1; j < jend; ++j)
-                if (matchPct(buf[i], buf[j], ocr_hp, kTol))
-                    m_cands.push_back({i * 4u, j * 4u, 0});
+
+        std::ifstream maps("/proc/" + std::to_string(pid) + "/maps");
+        if (!maps) return std::nullopt;
+
+        std::string line;
+        size_t total_cands = 0;
+        while (std::getline(maps, line)) {
+            // Тільки r-w регіони (heap, data) — не r-x (code) і не r-- (read-only)
+            if (line.size() < 5) continue;
+            char perms[5] = {};
+            uintptr_t rstart = 0, rend = 0;
+            std::sscanf(line.c_str(), "%lx-%lx %4s", &rstart, &rend, perms);
+            if (perms[0] != 'r' || perms[1] != 'w') continue;
+            if (rend <= rstart) continue;
+            size_t rlen = rend - rstart;
+            if (rlen > 64u * 1024u * 1024u) continue; // пропускаємо регіони > 64MB
+
+            size_t n = rlen / 4;
+            std::vector<uint32_t> buf(n, 0);
+            if (!ProcessMemory::Read(pid, rstart, buf.data(), rlen)) continue;
+
+            for (size_t i = 0; i < n; ++i) {
+                uint32_t cur = buf[i];
+                if (cur < 5000u || cur > 200000u) continue; // filter: player HP range
+                size_t jend = std::min(i + kWindow, n);
+                for (size_t j = i + 1; j < jend; ++j) {
+                    if (matchPct(cur, buf[j], ocr_hp, kTol)) {
+                        m_cands.push_back({rstart + i * 4, rstart + j * 4,
+                                           0, cur, buf[j]});
+                        ++total_cands;
+                    }
+                }
+            }
         }
-        m_snap     = buf;
+
         m_prev_ocr = ocr_hp;
         m_attempts = 0;
 
@@ -329,70 +348,46 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
             std::cerr << "[AutoCalib] Фаза 1: " << m_cands.size()
                       << " кандидатів (HP=" << ocr_hp << "%). Валідуємо...\n";
         } else {
-            // Повний діагностичний дамп — ВСІ значення game_obj+0x00..kN*4
             std::cerr << "[AutoCalib] 0 кандидатів (HP=" << ocr_hp
-                      << "%). game_obj=0x" << std::hex << gameObj
-                      << " Дамп +0x00..+0x" << kN*4 << " (значення [1..500000]):\n" << std::dec;
-            for (size_t i = 0; i < kN; ++i) {
-                uint32_t v = buf[i];
-                if (v >= 1 && v <= 500000)
-                    std::cerr << "  +0x" << std::hex << std::setw(3) << std::setfill('0') << i*4
-                              << " = " << std::dec << v << "\n";
-            }
-            // Пари що відповідають HP% ±10% (розширений допуск для діагностики)
-            std::cerr << "[AutoCalib] Пошук пар cur/max ≈ " << ocr_hp << "% (±10%, max до 500000):\n";
-            for (size_t i = 0; i < kN; ++i) {
-                uint32_t cur = buf[i];
-                if (cur < 1 || cur > 500000) continue;
-                for (size_t j = i+1; j < std::min(kN, i+64); ++j) {
-                    uint32_t mx = buf[j];
-                    if (mx < cur || mx > 500000) continue;
-                    int ratio = (int)((uint64_t)cur * 100u / mx);
-                    if (std::abs(ratio - ocr_hp) <= 10)
-                        std::cerr << "  cur=+0x" << std::hex << i*4 << "(" << std::dec << cur
-                                  << ") max=+0x" << std::hex << j*4 << "(" << std::dec << mx
-                                  << ") ratio=" << ratio << "%\n";
-                }
-            }
+                      << "%). Чекаємо зміни HP або HP<95%...\n";
+            m_state = State::Searching;
         }
         return std::nullopt;
     }
 
     // ── Фаза 2: Validating ───────────────────────────────────────────────────
     int delta = std::abs(ocr_hp - m_prev_ocr);
-    if (delta < kDelta) return std::nullopt; // OCR не змінився достатньо
+    if (delta < kDelta) return std::nullopt;
 
     ++m_attempts;
     std::vector<Candidate> survivors;
 
     for (auto& c : m_cands) {
-        size_t ci = c.cur_off / 4, mi = c.max_off / 4;
-        if (ci >= kN || mi >= kN || mi >= m_snap.size()) continue;
+        uint32_t new_cur = 0, new_max = 0;
+        if (!ProcessMemory::Read(pid, c.cur_off, &new_cur, 4)) continue;
+        if (!ProcessMemory::Read(pid, c.max_off, &new_max, 4)) continue;
 
-        uint32_t old_cur = m_snap[ci], old_max = m_snap[mi];
-        uint32_t new_cur = buf[ci],    new_max  = buf[mi];
-
-        // Перевірка 1: нові значення відповідають новому OCR%
         if (!matchPct(new_cur, new_max, ocr_hp, kTol)) continue;
 
-        // Перевірка 2: диференціал — зміна в пам'яті ≈ зміна OCR
-        if (old_max > 0u && new_max > 0u) {
-            int old_pct = (int)((uint64_t)old_cur * 100u / old_max);
-            int new_pct = (int)((uint64_t)new_cur * 100u / new_max);
+        // Диференціальна перевірка: зміна в пам'яті ≈ зміна OCR
+        if (c.prev_max > 0u && new_max > 0u) {
+            int old_pct = (int)((uint64_t)c.prev_cur * 100u / c.prev_max);
+            int new_pct = (int)((uint64_t)new_cur    * 100u / new_max);
             int d_mem   = std::abs(new_pct - old_pct);
-            if (std::abs(d_mem - delta) > kTol + 2) continue; // диф.розбіжність
+            if (std::abs(d_mem - delta) > kTol + 2) continue;
         }
 
-        ++c.hits;
+        c.hits++;
+        c.prev_cur = new_cur;
+        c.prev_max = new_max;
         survivors.push_back(c);
     }
 
     m_cands    = survivors;
-    m_snap     = buf;
     m_prev_ocr = ocr_hp;
 
     if (m_cands.empty()) {
-        std::cerr << "[AutoCalib] Всі кандидати відхилені. Перезапуск пошуку.\n";
+        std::cerr << "[AutoCalib] Всі кандидати відхилені. Перезапуск.\n";
         m_state = State::Searching;
         return std::nullopt;
     }
@@ -403,14 +398,14 @@ std::optional<HpAutoCalib::HpOffsets> HpAutoCalib::tick(
     std::cerr << "[AutoCalib] Спроба " << m_attempts
               << "/" << kMaxTry << ": " << m_cands.size() << " кандидатів"
               << ", best hits=" << best->hits
-              << " cur=+0x" << std::hex << best->cur_off
-              << " max=+0x" << best->max_off << std::dec << "\n";
+              << " cur_abs=0x" << std::hex << best->cur_off
+              << " max_abs=0x" << best->max_off << std::dec << "\n";
 
     if (best->hits >= kNeed || m_attempts >= kMaxTry) {
         m_state = State::Confirmed;
-        std::cerr << "[AutoCalib] ПІДТВЕРДЖЕНО: HP cur=+0x"
+        std::cerr << "[AutoCalib] ПІДТВЕРДЖЕНО: cur_abs=0x"
                   << std::hex << best->cur_off
-                  << " max=+0x" << best->max_off << std::dec
+                  << " max_abs=0x" << best->max_off << std::dec
                   << " (hits=" << best->hits << ")\n";
         return HpOffsets{best->cur_off, best->max_off};
     }
@@ -503,12 +498,12 @@ void MemReader::SaveCalib(const AutoCalibResult& r, const std::string& path) con
     std::ofstream f(path);
     if (!f) return;
     f << "{\n"
-      << "  \"hp_off\":"     << r.hp_off     << ",\n"
-      << "  \"max_hp_off\":" << r.max_hp_off << ",\n"
-      << "  \"mp_off\":"     << r.mp_off     << ",\n"
-      << "  \"max_mp_off\":" << r.max_mp_off << ",\n"
-      << "  \"cp_off\":"     << r.cp_off     << ",\n"
-      << "  \"max_cp_off\":" << r.max_cp_off << "\n"
+      << "  \"hp_abs\":"      << r.hp_abs      << ",\n"
+      << "  \"max_hp_abs\":"  << r.max_hp_abs  << ",\n"
+      << "  \"mp_off\":"      << r.mp_off      << ",\n"
+      << "  \"max_mp_off\":"  << r.max_mp_off  << ",\n"
+      << "  \"cp_off\":"      << r.cp_off      << ",\n"
+      << "  \"max_cp_off\":"  << r.max_cp_off  << "\n"
       << "}\n";
     std::cerr << "[MemCalib] Збережено: " << path << "\n";
 }
@@ -531,28 +526,36 @@ bool MemReader::LoadCalib(const std::string& path) {
     };
 
     AutoCalibResult r;
+    parseUint("hp_abs",        r.hp_abs);
+    parseUint("max_hp_abs",    r.max_hp_abs);
     parseUint("hp_anchor_addr", r.hp_anchor_addr);
     parseUint("hp_anchor_sub",  r.hp_anchor_sub);
-    parseUint("hp_off",     r.hp_off);
-    parseUint("max_hp_off", r.max_hp_off);
-    parseUint("mp_off",     r.mp_off);
-    parseUint("max_mp_off", r.max_mp_off);
-    parseUint("cp_off",     r.cp_off);
-    parseUint("max_cp_off", r.max_cp_off);
+    parseUint("hp_off",        r.hp_off);
+    parseUint("max_hp_off",    r.max_hp_off);
+    parseUint("mp_off",        r.mp_off);
+    parseUint("max_mp_off",    r.max_mp_off);
+    parseUint("cp_off",        r.cp_off);
+    parseUint("max_cp_off",    r.max_cp_off);
 
-    r.found_hp = (r.hp_anchor_addr > 0) || (r.hp_off > 0 && r.max_hp_off > 0);
+    // Пріоритет: abs > anchor > game_obj offset
+    r.found_hp = (r.hp_abs > 0) || (r.hp_anchor_addr > 0)
+                 || (r.hp_off > 0 && r.max_hp_off > 0);
     r.found_mp = (r.mp_off > 0 && r.max_mp_off > 0);
     r.found_cp = (r.cp_off > 0 && r.max_cp_off > 0);
 
     if (!r.found_hp && !r.found_mp) return false;
 
-    if (r.hp_anchor_addr) {
+    if (r.hp_abs) {
+        m_off.hp_abs         = r.hp_abs;
+        m_off.max_hp_abs     = r.max_hp_abs;
+    } else if (r.hp_anchor_addr) {
         m_off.hp_anchor_addr = r.hp_anchor_addr;
         m_off.hp_anchor_sub  = r.hp_anchor_sub;
         m_off.hp_off         = r.hp_off;
         m_off.max_hp_off     = r.max_hp_off;
     } else if (r.found_hp) {
-        m_off.hp_off = r.hp_off; m_off.max_hp_off = r.max_hp_off;
+        m_off.hp_off         = r.hp_off;
+        m_off.max_hp_off     = r.max_hp_off;
     }
     if (r.found_mp) { m_off.mp_off = r.mp_off; m_off.max_mp_off = r.max_mp_off; }
     if (r.found_cp) { m_off.cp_off = r.cp_off; m_off.max_cp_off = r.max_cp_off; }
