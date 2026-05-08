@@ -506,6 +506,76 @@ done:
         std::cerr << "[scan-hp] Адреси з [pb+OFF] — перевір OFF як hp_off у mem_calib.json\n";
 }
 
+// ─── --scan-ptr ───────────────────────────────────────────────────────────────
+// Сканує пам'ять процесу L2 шукаючи 32-bit pointer що вказує в регіон
+// [target-range, target+range]. Допомагає знайти pointer chain до HP адреси.
+// Використання: ./rdga1bot --scan-ptr 0x248c4d40
+void runScanPtr(const std::string& config_path, uintptr_t target) {
+    Config cfg; cfg.Load(config_path);
+    pid_t pid = findL2Pid();
+    if (!pid) { std::cerr << "[scan-ptr] L2 процес не знайдено\n"; return; }
+
+    uintptr_t pb = 0, gobj = 0;
+    {
+        OffsetScanner scanner(pid);
+        if (scanner.loadOffsets(cfg.knownlist_offsets_file))
+            pb = scanner.playerBaseCache;
+    }
+    if (pb) {
+        uint32_t raw = 0;
+        ProcessMemory::Read(pid, pb + 0x58, &raw, 4);
+        gobj = (uintptr_t)raw;
+    }
+    std::cerr << "[scan-ptr] pid=" << pid
+              << " target=0x" << std::hex << target
+              << " pb=0x" << pb << " gobj=0x" << gobj << std::dec << "\n";
+
+    // Шукаємо pointer у ±0x4000 від target
+    constexpr uintptr_t kRange = 0x4000;
+    uintptr_t lo_val = (target > kRange) ? (target - kRange) : 0;
+    uintptr_t hi_val = target + kRange;
+
+    char maps_path[64];
+    snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", (int)pid);
+    FILE* f = fopen(maps_path, "r");
+    if (!f) { std::cerr << "[scan-ptr] cannot open maps\n"; return; }
+
+    int found = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        uintptr_t rlo, rhi; char perms[8];
+        if (sscanf(line, "%lx-%lx %4s", &rlo, &rhi, perms) != 3) continue;
+        if (perms[0] != 'r') continue;
+        size_t sz = rhi - rlo;
+        if (sz > 64 * 1024 * 1024 || sz < 4) continue;
+
+        std::vector<uint8_t> buf(sz);
+        if (!ProcessMemory::Read(pid, rlo, buf.data(), sz)) continue;
+
+        for (size_t i = 0; i + 4 <= sz; i += 4) {
+            uint32_t v; memcpy(&v, buf.data() + i, 4);
+            if ((uintptr_t)v < lo_val || (uintptr_t)v > hi_val) continue;
+
+            uintptr_t ptr_addr = rlo + i;
+            std::cerr << "ptr @ 0x" << std::hex << ptr_addr
+                      << "  →  0x" << v
+                      << "  (delta=" << (intptr_t)((uintptr_t)v - target) << ")";
+            if (pb   && ptr_addr >= pb   && ptr_addr < pb   + 0x10000)
+                std::cerr << "  [pb+"   << (ptr_addr - pb)   << "]";
+            if (gobj && ptr_addr >= gobj && ptr_addr < gobj + 0x10000)
+                std::cerr << "  [gobj+" << (ptr_addr - gobj) << "]";
+            std::cerr << std::dec << "\n";
+            ++found;
+            if (found > 300) { std::cerr << "...(>300 results)\n"; goto done; }
+        }
+    }
+done:
+    fclose(f);
+    std::cerr << "[scan-ptr] Знайдено pointer-ів: " << found << "\n";
+    if (found)
+        std::cerr << "[scan-ptr] [pb+OFF] або [gobj+OFF] = ptr_chain кандидат\n";
+}
+
 // ─── --dump-gobj ──────────────────────────────────────────────────────────────
 // Знаходить game_obj через playerBase+0x58 і виводить всі uint32/float в [1000..100000]
 // в діапазоні playerBase та game_obj. Допомагає знайти реальний HP offset вручну.
