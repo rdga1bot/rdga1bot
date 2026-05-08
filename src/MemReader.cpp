@@ -217,10 +217,16 @@ MemReader::PlayerState MemReader::ReadPlayer() const {
     }
     if (!obj_addr) return state;
 
-    // HP/MaxHP: через game_obj pointer chain (render_node+0x58 → game_obj → offset).
+    // HP/MaxHP: через global anchor pointer chain (DLL global → struct_base + offset).
     // Координати (+0x24/28/2C) та інші поля — напряму з obj_addr (playerBase).
     uintptr_t hp_base = obj_addr;
-    if (m_off.hp_off || m_off.max_hp_off) {
+    if (m_off.hp_anchor_addr) {
+        // struct_base = *(hp_anchor_addr) - hp_anchor_sub
+        uint32_t anchor_raw = 0;
+        if (ReadBytes(m_off.hp_anchor_addr, &anchor_raw, 4) && anchor_raw > 0x10000u)
+            hp_base = (uintptr_t)anchor_raw - m_off.hp_anchor_sub;
+    } else if (m_off.hp_off || m_off.max_hp_off) {
+        // Fallback: game_obj через render_node+0x58
         uint32_t gobj_raw = 0;
         if (ReadBytes(obj_addr + 0x58, &gobj_raw, 4) && gobj_raw > 0x10000u)
             hp_base = (uintptr_t)gobj_raw;
@@ -519,6 +525,8 @@ bool MemReader::LoadCalib(const std::string& path) {
     };
 
     AutoCalibResult r;
+    parseUint("hp_anchor_addr", r.hp_anchor_addr);
+    parseUint("hp_anchor_sub",  r.hp_anchor_sub);
     parseUint("hp_off",     r.hp_off);
     parseUint("max_hp_off", r.max_hp_off);
     parseUint("mp_off",     r.mp_off);
@@ -526,13 +534,20 @@ bool MemReader::LoadCalib(const std::string& path) {
     parseUint("cp_off",     r.cp_off);
     parseUint("max_cp_off", r.max_cp_off);
 
-    r.found_hp = (r.hp_off > 0 && r.max_hp_off > 0);
+    r.found_hp = (r.hp_anchor_addr > 0) || (r.hp_off > 0 && r.max_hp_off > 0);
     r.found_mp = (r.mp_off > 0 && r.max_mp_off > 0);
     r.found_cp = (r.cp_off > 0 && r.max_cp_off > 0);
 
     if (!r.found_hp && !r.found_mp) return false;
 
-    if (r.found_hp) { m_off.hp_off = r.hp_off; m_off.max_hp_off = r.max_hp_off; }
+    if (r.hp_anchor_addr) {
+        m_off.hp_anchor_addr = r.hp_anchor_addr;
+        m_off.hp_anchor_sub  = r.hp_anchor_sub;
+        m_off.hp_off         = r.hp_off;
+        m_off.max_hp_off     = r.max_hp_off;
+    } else if (r.found_hp) {
+        m_off.hp_off = r.hp_off; m_off.max_hp_off = r.max_hp_off;
+    }
     if (r.found_mp) { m_off.mp_off = r.mp_off; m_off.max_mp_off = r.max_mp_off; }
     if (r.found_cp) { m_off.cp_off = r.cp_off; m_off.max_cp_off = r.max_cp_off; }
 

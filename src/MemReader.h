@@ -81,6 +81,8 @@ public:
         bool      use_kl_base  = false; // true = приймати playerBase від KnownList напряму
         uintptr_t player_ptr   = 0;  // static addr (відносно base l2.exe)
         std::vector<uintptr_t> ptr_chain; // pointer chain offsets
+        uintptr_t hp_anchor_addr = 0; // abs addr глобального ptr (в модулі DLL)
+        uintptr_t hp_anchor_sub  = 0; // struct_base = *hp_anchor_addr - hp_anchor_sub
         uintptr_t hp_off       = 0;
         uintptr_t max_hp_off   = 0;
         uintptr_t mp_off       = 0;
@@ -105,6 +107,7 @@ public:
     // hp/mp/cp_pct — поточні відсотки з OCR (0..100).
     // Повертає true якщо знайдено хоча б HP offset.
     struct AutoCalibResult {
+        uintptr_t hp_anchor_addr = 0, hp_anchor_sub = 0; // global ptr chain
         uintptr_t hp_off = 0,  max_hp_off = 0;
         uintptr_t mp_off = 0,  max_mp_off = 0;
         uintptr_t cp_off = 0,  max_cp_off = 0;
