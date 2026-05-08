@@ -577,8 +577,8 @@ done:
 }
 
 // ─── --find-chain ─────────────────────────────────────────────────────────────
-// BFS від playerBase, слідує pointer chain (глибина 1..3) поки не знайде TARGET.
-// Виводить повний ланцюжок: playerBase+OFF1 → P1+OFF2 → P2+OFF3 ≈ TARGET
+// Block-buffered BFS від playerBase (глибина 1..3) поки не знайде TARGET.
+// Рівні: pb+[0..0x2000] → P1+[0..0x800] → P2+[0..0x400]
 // Використання: ./rdga1bot --find-chain 0x248c4d40
 void runFindChain(const std::string& config_path, uintptr_t target) {
     Config cfg; cfg.Load(config_path);
@@ -590,65 +590,65 @@ void runFindChain(const std::string& config_path, uintptr_t target) {
     if (!pb) { std::cerr << "[find-chain] playerBase не знайдено\n"; return; }
     std::cerr << "[find-chain] pb=0x" << std::hex << pb << " target=0x" << target << std::dec << "\n";
 
-    auto readU32 = [&](uintptr_t addr) -> uint32_t {
-        uint32_t v = 0; ProcessMemory::Read(pid, addr, &v, 4); return v;
+    constexpr uintptr_t kHit  = 0x2000;   // target ∈ [P, P+kHit] → hit
+    constexpr size_t    kL0   = 0x2000;   // scan pb   + [0..kL0]
+    constexpr size_t    kL1   = 0x800;    // scan P1   + [0..kL1]
+    constexpr size_t    kL2   = 0x400;    // scan P2   + [0..kL2]
+
+    auto isValidPtr = [](uint32_t v) -> bool {
+        return v >= 0x10000u && v <= 0x7FFFFFFCu && (v & 3) == 0;
     };
-    auto isValidPtr = [](uintptr_t v) -> bool {
-        return v >= 0x10000u && v <= 0x7FFFFFFEu && (v & 3) == 0;
+    auto readBlock = [&](uintptr_t base, size_t sz) -> std::vector<uint8_t> {
+        std::vector<uint8_t> buf(sz, 0);
+        ProcessMemory::Read(pid, base, buf.data(), sz);
+        return buf;
     };
 
-    // Limit: scan up to kScanBytes from each base, step 4
-    constexpr size_t kScanBytes = 0x500;
-    constexpr uintptr_t kHitRange = 0x1000;  // target ∈ [P, P+kHitRange] → hit
     int chains = 0;
+    auto buf0 = readBlock(pb, kL0);
 
-    // Depth-1: scan pb + off0 → P1; if P1 ≈ target → report
-    for (size_t o0 = 0; o0 < kScanBytes; o0 += 4) {
-        uint32_t raw1 = readU32(pb + o0);
-        uintptr_t p1 = (uintptr_t)raw1;
-        if (!isValidPtr(p1)) continue;
+    for (size_t o0 = 0; o0 < kL0; o0 += 4) {
+        uint32_t r1; memcpy(&r1, buf0.data() + o0, 4);
+        if (!isValidPtr(r1)) continue;
+        uintptr_t p1 = r1;
 
-        if (p1 <= target && target - p1 < kHitRange) {
+        // Depth-1 hit
+        if (p1 <= target && target - p1 < kHit) {
             std::cerr << "CHAIN-1: pb+0x" << std::hex << o0
-                      << " → 0x" << p1 << " +0x" << (target - p1)
-                      << " = TARGET\n" << std::dec;
-            ++chains;
+                      << " → 0x" << p1 << " +0x" << (target - p1) << "\n" << std::dec;
+            ++chains; if (chains > 100) return;
         }
 
-        // Depth-2: P1 + off1 → P2; if P2 ≈ target → report
-        for (size_t o1 = 0; o1 < kScanBytes; o1 += 4) {
-            uint32_t raw2 = readU32(p1 + o1);
-            uintptr_t p2 = (uintptr_t)raw2;
-            if (!isValidPtr(p2)) continue;
+        auto buf1 = readBlock(p1, kL1);
+        for (size_t o1 = 0; o1 < kL1; o1 += 4) {
+            uint32_t r2; memcpy(&r2, buf1.data() + o1, 4);
+            if (!isValidPtr(r2)) continue;
+            uintptr_t p2 = r2;
 
-            if (p2 <= target && target - p2 < kHitRange) {
+            // Depth-2 hit
+            if (p2 <= target && target - p2 < kHit) {
                 std::cerr << "CHAIN-2: pb+0x" << std::hex << o0
-                          << " → 0x" << p1 << "+0x" << o1
-                          << " → 0x" << p2 << " +0x" << (target - p2)
-                          << " = TARGET\n" << std::dec;
-                ++chains;
-                if (chains > 50) goto done;
+                          << " → 0x" << p1 << " +0x" << o1
+                          << " → 0x" << p2 << " +0x" << (target - p2) << "\n" << std::dec;
+                ++chains; if (chains > 100) return;
                 continue;
             }
 
-            // Depth-3: P2 + off2 → P3; if P3 ≈ target → report
-            for (size_t o2 = 0; o2 < kScanBytes; o2 += 4) {
-                uint32_t raw3 = readU32(p2 + o2);
-                uintptr_t p3 = (uintptr_t)raw3;
-                if (!isValidPtr(p3)) continue;
-                if (p3 <= target && target - p3 < kHitRange) {
+            auto buf2 = readBlock(p2, kL2);
+            for (size_t o2 = 0; o2 < kL2; o2 += 4) {
+                uint32_t r3; memcpy(&r3, buf2.data() + o2, 4);
+                if (!isValidPtr(r3)) continue;
+                uintptr_t p3 = r3;
+                if (p3 <= target && target - p3 < kHit) {
                     std::cerr << "CHAIN-3: pb+0x" << std::hex << o0
-                              << " → 0x" << p1 << "+0x" << o1
-                              << " → 0x" << p2 << "+0x" << o2
-                              << " → 0x" << p3 << " +0x" << (target - p3)
-                              << " = TARGET\n" << std::dec;
-                    ++chains;
-                    if (chains > 50) goto done;
+                              << " → 0x" << p1 << " +0x" << o1
+                              << " → 0x" << p2 << " +0x" << o2
+                              << " → 0x" << p3 << " +0x" << (target - p3) << "\n" << std::dec;
+                    ++chains; if (chains > 100) return;
                 }
             }
         }
     }
-done:
     std::cerr << "[find-chain] Знайдено ланцюжків: " << chains << "\n";
 }
 
