@@ -218,7 +218,7 @@ static std::vector<std::pair<float,float>> SimplifyPath(
         auto [bx2, by2] = path[i];
         auto [cx2, cy2] = path[i+1];
         float cross = (bx2-ax)*(cy2-ay) - (by2-ay)*(cx2-ax);
-        if (std::fabsf(cross) > 0.01f) out.push_back(path[i]);
+        if (std::fabs(cross) > 0.01f) out.push_back(path[i]);
     }
     out.push_back(path.back());
     return out;

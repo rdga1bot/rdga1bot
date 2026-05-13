@@ -250,9 +250,9 @@ uintptr_t OffsetScanner::performBlindScan() {
             // Поточний фільтр <200 відхиляє тільки нульову Wine .data секцію. (MR32)
             // Y=0 → гравець ніколи не стоїть на осі симетрії (або стала адреса).
             // X=1098,Y=0 — false positive у Wine .data секції.
-            if (std::fabsf(px) < 200.f || std::fabsf(py) < 200.f) continue;
+            if (std::fabs(px) < 200.f || std::fabs(py) < 200.f) continue;
             // Z не може бути точно 0 або степінь двійки (сміттєвий float)
-            if (std::fabsf(pz) < 10.f) continue;
+            if (std::fabs(pz) < 10.f) continue;
             // Координати не мають бути рівними між собою
             if (px == py && py == pz) continue;
 
@@ -276,9 +276,9 @@ uintptr_t OffsetScanner::performBlindScan() {
                     if (!isL2Coord(tx, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
                     if (!isL2Coord(ty, WORLD_XY_MIN, WORLD_XY_MAX)) continue;
                     if (!isL2Coord(tz, WORLD_Z_MIN,  WORLD_Z_MAX))  continue;
-                    if (std::fabsf(tx) < 200.f || std::fabsf(ty) < 200.f) continue;
+                    if (std::fabs(tx) < 200.f || std::fabs(ty) < 200.f) continue;
                     // не рахуємо сам px/py/pz як окремий об'єкт
-                    if (std::fabsf(tx - px) < 1.f && std::fabsf(ty - py) < 1.f) continue;
+                    if (std::fabs(tx - px) < 1.f && std::fabs(ty - py) < 1.f) continue;
                     xyz_count++;
                 }
                 if (xyz_count < 2) continue; // не L2 heap → пропускаємо
@@ -313,9 +313,9 @@ uintptr_t OffsetScanner::findPlayerBase(float x, float y, float z, float toleran
             std::memcpy(&vx, buf.data() + i,     4);
             std::memcpy(&vy, buf.data() + i + 4, 4);
             std::memcpy(&vz, buf.data() + i + 8, 4);
-            if (std::fabsf(vx - x) < tolerance &&
-                std::fabsf(vy - y) < tolerance &&
-                std::fabsf(vz - z) < tolerance) {
+            if (std::fabs(vx - x) < tolerance &&
+                std::fabs(vy - y) < tolerance &&
+                std::fabs(vz - z) < tolerance) {
                 // X знаходиться на OFF_PLAYER_X від PlayerBase
                 uintptr_t candidate = region.base + i - OFF_PLAYER_X;
                 candidates.push_back(candidate);
@@ -361,8 +361,8 @@ uintptr_t OffsetScanner::findKnownListOffset(uintptr_t playerBase,
         float fx = rpm<float>(objPtr + objXOff);
         float fy = rpm<float>(objPtr + objYOff);
 
-        if (std::fabsf(fx - nearbyObjX) < tolerance &&
-            std::fabsf(fy - nearbyObjY) < tolerance) {
+        if (std::fabs(fx - nearbyObjX) < tolerance &&
+            std::fabs(fy - nearbyObjY) < tolerance) {
             std::cerr << "[OffsetScanner] Знайдено: offset=0x" << std::hex << off
                       << " ptr=0x" << ptr << " obj=0x" << objPtr
                       << " X=" << std::dec << fx << " Y=" << fy << "\n";
@@ -468,7 +468,7 @@ uintptr_t OffsetScanner::autoDiscoverKnownList(uintptr_t playerBase,
                 float oy = rpm<float>((uintptr_t)obj + xoff + 4);
                 if (!isL2Coord(ox, WORLD_MIN, WORLD_MAX)) continue;
                 if (!isL2Coord(oy, WORLD_MIN, WORLD_MAX)) continue;
-                if (std::fabsf(ox) < 200.f || std::fabsf(oy) < 200.f) continue;
+                if (std::fabs(ox) < 200.f || std::fabs(oy) < 200.f) continue;
                 found_xy = true; found_ox = ox; found_oy = oy; found_xoff = xoff;
                 float dx = ox - px, dy = oy - py;
                 float d2 = dx*dx + dy*dy;
@@ -532,7 +532,7 @@ uintptr_t OffsetScanner::autoDiscoverKnownList(uintptr_t playerBase,
                             float oy = rpm<float>((uintptr_t)obj_base + xoff + 4);
                             if (!isL2Coord(ox, WORLD_MIN, WORLD_MAX)) continue;
                             if (!isL2Coord(oy, WORLD_MIN, WORLD_MAX)) continue;
-                            if (std::fabsf(ox) < 200.f || std::fabsf(oy) < 200.f) continue;
+                            if (std::fabs(ox) < 200.f || std::fabs(oy) < 200.f) continue;
                             float dx = ox - px, dy = oy - py;
                             if (dx*dx + dy*dy < MAX_DIST2) { nearby_lk++; break; }
                             break;
@@ -674,9 +674,9 @@ void OffsetScanner::calibrateObjectOffsets(uintptr_t objPtr,
         float vx = rpm<float>(objPtr + off);
         float vy = rpm<float>(objPtr + off + 4);
         float vz = rpm<float>(objPtr + off + 8);
-        if (std::fabsf(vx - expectedX) < tolerance &&
-            std::fabsf(vy - expectedY) < tolerance &&
-            std::fabsf(vz - expectedZ) < tolerance) {
+        if (std::fabs(vx - expectedX) < tolerance &&
+            std::fabs(vy - expectedY) < tolerance &&
+            std::fabs(vz - expectedZ) < tolerance) {
             std::cerr << "[OffsetScanner]  XYZ @ offset 0x" << std::hex << off
                       << " (X=0x" << off << " Y=0x" << off+4 << " Z=0x" << off+8
                       << ")\n" << std::dec;
@@ -828,8 +828,8 @@ static void hmon_print_change(const std::string& label, uintptr_t off,
               << "  di="   << std::setw(8)  << di
               << "  df="   << df;
 
-    bool rad_like = std::isfinite(df) && std::fabsf(df) > 0.3f && std::fabsf(df) < 7.f;
-    bool deg_like = std::isfinite(df) && std::fabsf(df) > 10.f && std::fabsf(df) < 360.f;
+    bool rad_like = std::isfinite(df) && std::fabs(df) > 0.3f && std::fabs(df) < 7.f;
+    bool deg_like = std::isfinite(df) && std::fabs(df) > 10.f && std::fabs(df) < 360.f;
     bool int_like = std::abs(di) > 500 && std::abs(di) < 65536;
     if (rad_like) std::cerr << " ← RAD heading?";
     if (deg_like) std::cerr << " ← DEG heading?";

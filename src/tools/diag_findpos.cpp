@@ -48,7 +48,7 @@ void runFindPos(const std::string& config_path) {
     };
 
     auto isPopulatedCoord = [](float v) -> bool {
-        float abs_v = std::fabsf(v);
+        float abs_v = std::fabs(v);
         return std::isfinite(v) && abs_v > 30000.f && abs_v < 327000.f;
     };
     auto isValidZ = [](float v) -> bool {
@@ -81,7 +81,7 @@ void runFindPos(const std::string& config_path) {
                 if (!isPopulatedCoord(fx)) continue;
                 if (!isPopulatedCoord(fy)) continue;
                 if (!isValidZ(fz))         continue;
-                if (std::fabsf(fx - fy) < 1.f) continue;
+                if (std::fabs(fx - fy) < 1.f) continue;
                 hits.push_back({lo + (uintptr_t)i, fx, fy});
             }
         }
@@ -104,7 +104,7 @@ void runFindPos(const std::string& config_path) {
         if (!ProcessMemory::Read(pid, h.addr+4, &new_y, 4)) continue;
         if (!ProcessMemory::Read(pid, h.addr+8, &new_z, 4)) continue;
         float dx = new_x - h.x0;
-        if (std::fabsf(dx) < 150.f) continue;
+        if (std::fabs(dx) < 150.f) continue;
         if (!isPopulatedCoord(new_x)) continue;
         if (!isPopulatedCoord(new_y)) continue;
         std::cerr << "[find-pos] >>> addr=0x" << std::hex << h.addr << std::dec
@@ -176,7 +176,7 @@ void runWatchPos(const std::string& config_path, uintptr_t override_pb) {
         bool any_changed = false;
         for (size_t i = 0; i < cands.size(); i++) {
             ProcessMemory::Read(pid, base + cands[i].off, &vals[i], 4);
-            if (std::fabsf(vals[i] - cands[i].prev) > 10.f) any_changed = true;
+            if (std::fabs(vals[i] - cands[i].prev) > 10.f) any_changed = true;
         }
 
         bool periodic = (sec != last_alive_sec);
@@ -221,7 +221,7 @@ void runDiffScan(const std::string& config_path) {
             float cx = scanner.rpm_pub<float>(cached + OFF_PLAYER_X);
             float cy = scanner.rpm_pub<float>(cached + OFF_PLAYER_Y);
             bool valid = std::isfinite(cx) && std::isfinite(cy)
-                      && std::fabsf(cx) > 200.f && std::fabsf(cy) > 200.f;
+                      && std::fabs(cx) > 200.f && std::fabs(cy) > 200.f;
             if (valid) {
                 pb = cached;
                 std::cerr << "[DIFF] PlayerBase з кешу: 0x" << std::hex << pb << std::dec

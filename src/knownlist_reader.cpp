@@ -130,9 +130,9 @@ std::vector<L2Character> KnownListReader::readAllAsChars(uintptr_t playerBase) c
         float z = rpm<float>(objPtr + m_off.objZOff);
 
         // Фільтр: тільки об'єкти з валідними L2-координатами
-        if (!std::isfinite(x) || std::fabsf(x) < 100.f || std::fabsf(x) > 327000.f) continue;
-        if (!std::isfinite(y) || std::fabsf(y) < 100.f || std::fabsf(y) > 327000.f) continue;
-        if (!std::isfinite(z) || std::fabsf(z) > 16000.f) continue;
+        if (!std::isfinite(x) || std::fabs(x) < 100.f || std::fabs(x) > 327000.f) continue;
+        if (!std::isfinite(y) || std::fabs(y) < 100.f || std::fabs(y) > 327000.f) continue;
+        if (!std::isfinite(z) || std::fabs(z) > 16000.f) continue;
 
         float hp    = rpm<float>(objPtr + m_off.charHpOff);
         float hpMax = rpm<float>(objPtr + m_off.charHpMaxOff);
@@ -280,7 +280,7 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
     float py = rpm<float>(playerBase + OFF_PLAYER_Y);
     if (!std::isfinite(px) || !std::isfinite(py)) return {};
     // Захист від застарілого PlayerBase: гравець ніколи не стоїть на (0,0)
-    if (std::fabsf(px) < 500.f && std::fabsf(py) < 500.f) return {};
+    if (std::fabs(px) < 500.f && std::fabs(py) < 500.f) return {};
 
     refreshScanCache();
 
@@ -316,7 +316,7 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
                 if (!std::isfinite(y) || y < kXYmin || y > kXYmax) continue;
                 if (!std::isfinite(z) || z < kZmin  || z > kZmax)  continue;
                 // Відхиляємо нульову/близьку до нуля пам'ять — не реальні L2 об'єкти
-                if (std::fabsf(x) < kObjMinCoord && std::fabsf(y) < kObjMinCoord) continue;
+                if (std::fabs(x) < kObjMinCoord && std::fabs(y) < kObjMinCoord) continue;
 
                 float dx = x - px, dy = y - py;
                 if (dx*dx + dy*dy > kMaxR2) continue;

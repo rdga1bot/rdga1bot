@@ -519,7 +519,7 @@ void Brain::TryRecordNavPoint() {
         float px = m_world->playerX;
         float py = m_world->playerY;
         float pz = m_world->playerZ;
-        if (std::fabsf(px) > 30000.f || std::fabsf(py) > 30000.f) {
+        if (std::fabs(px) > 30000.f || std::fabs(py) > 30000.f) {
             float dx = px - m_nav_last_x;
             float dy = py - m_nav_last_y;
             if (dx*dx + dy*dy >= dist2) {
@@ -572,8 +572,8 @@ bool Brain::NavigateToMob(const L2Character& mob) {
 
     const float tol = m_cfg.navigation.angle_tolerance;
 
-    if (std::fabsf(m_nav_state.angleDiff) > tol) {
-        int rot_ms = (int)(std::fabsf(m_nav_state.angleDiff) / 0.175f * 100.f);
+    if (std::fabs(m_nav_state.angleDiff) > tol) {
+        int rot_ms = (int)(std::fabs(m_nav_state.angleDiff) / 0.175f * 100.f);
         rot_ms = std::min(rot_ms, 500);
         rot_ms = std::max(rot_ms, 80);
         if (m_nav_state.angleDiff > 0) {

@@ -22,8 +22,8 @@
 static void dumpKnownListObjectsImpl(const std::string& offsets_file) {
     // Wine 32-bit user space goes up to 0xBFFFFFFF (not 0x7FFFFFFF!)
     auto isValidPtr32 = [](uint32_t v) { return v > 0x10000 && v < 0xBFFF0000; };
-    auto isL2XY  = [](float v) { return std::isfinite(v) && v > -330000.f && v < 330000.f && std::fabsf(v) > 200.f; };
-    auto isL2Z   = [](float v) { return std::isfinite(v) && v > -17000.f  && v < 17000.f  && std::fabsf(v) > 5.f; };
+    auto isL2XY  = [](float v) { return std::isfinite(v) && v > -330000.f && v < 330000.f && std::fabs(v) > 200.f; };
+    auto isL2Z   = [](float v) { return std::isfinite(v) && v > -17000.f  && v < 17000.f  && std::fabs(v) > 5.f; };
 
     pid_t pid = findL2Pid();
     if (!pid) { std::cout << "[dump] l2.exe не знайдено у /proc\n"; return; }
@@ -277,10 +277,10 @@ static void dumpKnownListObjectsImpl(const std::string& offsets_file) {
                         std::memcpy(&fy, node_buf + o + 4, 4);
                         std::memcpy(&fz, node_buf + o + 8, 4);
                         if (std::isfinite(fx) && std::isfinite(fy) && std::isfinite(fz)
-                            && std::fabsf(fx - px) < nearby_range
-                            && std::fabsf(fy - py) < nearby_range
-                            && std::fabsf(fz - pz) < nearby_range
-                            && (std::fabsf(fx - px) + std::fabsf(fy - py)) > 10.f) {
+                            && std::fabs(fx - px) < nearby_range
+                            && std::fabs(fy - py) < nearby_range
+                            && std::fabs(fz - pz) < nearby_range
+                            && (std::fabs(fx - px) + std::fabs(fy - py)) > 10.f) {
                             nearby_found.emplace_back(nodePtr, fx, fy, fz, o);
                             ++nodes_with_nearby;
                             found = true;
@@ -300,10 +300,10 @@ static void dumpKnownListObjectsImpl(const std::string& offsets_file) {
                                 std::memcpy(&fy, pbuf + o + 4, 4);
                                 std::memcpy(&fz, pbuf + o + 8, 4);
                                 if (std::isfinite(fx) && std::isfinite(fy) && std::isfinite(fz)
-                                    && std::fabsf(fx - px) < nearby_range
-                                    && std::fabsf(fy - py) < nearby_range
-                                    && std::fabsf(fz - pz) < nearby_range
-                                    && (std::fabsf(fx - px) + std::fabsf(fy - py)) > 10.f) {
+                                    && std::fabs(fx - px) < nearby_range
+                                    && std::fabs(fy - py) < nearby_range
+                                    && std::fabs(fz - pz) < nearby_range
+                                    && (std::fabs(fx - px) + std::fabs(fy - py)) > 10.f) {
                                     std::cout << "  node=0x" << std::hex << nodePtr
                                               << " → ptr@+" << o2 << "=0x" << ptrVal
                                               << " XYZ@+" << o << " (" << std::dec
@@ -361,9 +361,9 @@ static void dumpKnownListObjectsImpl(const std::string& offsets_file) {
                 std::memcpy(&fy, buf + o + 4, 4);
                 std::memcpy(&fz, buf + o + 8, 4);
                 if (std::isfinite(fx) && std::isfinite(fy) && std::isfinite(fz)
-                    && std::fabsf(fx - px) < 3000.f && std::fabsf(fy - py) < 3000.f
-                    && std::fabsf(fz - pz) < 3000.f
-                    && (std::fabsf(fx - px) > 1.f || std::fabsf(fy - py) > 1.f)) {
+                    && std::fabs(fx - px) < 3000.f && std::fabs(fy - py) < 3000.f
+                    && std::fabs(fz - pz) < 3000.f
+                    && (std::fabs(fx - px) > 1.f || std::fabs(fy - py) > 1.f)) {
                     std::cout << " 0x" << std::hex << std::setw(4) << std::setfill('0') << pb_off
                               << " | 0x" << std::setw(8) << ptr
                               << " | L" << depth
@@ -444,7 +444,7 @@ static void dumpKnownListObjectsImpl(const std::string& offsets_file) {
                 && fx >= xlo && fx <= xhi && fy >= ylo && fy <= yhi
                 && fz >= zlo && fz <= zhi
                 // Виключаємо точну позицію гравця (shadow buffer copies)
-                && (std::fabsf(fx-px) > 5.f || std::fabsf(fy-py) > 5.f || std::fabsf(fz-pz) > 5.f)) {
+                && (std::fabs(fx-px) > 5.f || std::fabs(fy-py) > 5.f || std::fabs(fz-pz) > 5.f)) {
                 found.push_back({a0 + i, fx, fy, fz, false});
                 continue;
             }
@@ -554,7 +554,7 @@ void runDiscoverKlist(const std::string& config_path) {
                 float cpy = scanner.rpm_pub<float>(cached + OFF_PLAYER_Y);
                 // Обидві координати мають бути ненульовими (Y=0 → невалідна/стара адреса)
                 bool valid = std::isfinite(cpx) && std::isfinite(cpy)
-                          && std::fabsf(cpx) > 200.f && std::fabsf(cpy) > 200.f;
+                          && std::fabs(cpx) > 200.f && std::fabs(cpy) > 200.f;
                 if (valid) {
                     pb = cached;
                     std::cerr << "[discover-klist] PlayerBase з кешу: 0x" << std::hex << pb
@@ -631,7 +631,7 @@ void runDiscoverKlist(const std::string& config_path) {
                 std::cerr << "  +" << std::setw(3) << std::hex << d*4
                           << " = 0x" << std::setw(8) << std::setfill('0') << v
                           << std::setfill(' ');
-                if (std::isfinite(vf) && std::fabsf(vf) > 100.f && std::fabsf(vf) < 327000.f)
+                if (std::isfinite(vf) && std::fabs(vf) > 100.f && std::fabs(vf) < 327000.f)
                     std::cerr << " (float:" << std::dec << (int)vf << ")";
                 else if (v > 0x10000u && v < 0xBFFF0000u)
                     std::cerr << " (ptr)";
@@ -729,8 +729,8 @@ void runDiscoverKlist(const std::string& config_path) {
                         float fx = scanner.rpm_pub<float>((uintptr_t)llCur + xoff);
                         float fy = scanner.rpm_pub<float>((uintptr_t)llCur + xoff + 4);
                         if (!std::isfinite(fx) || !std::isfinite(fy)) continue;
-                        if (std::fabsf(fx) < 5000.f || std::fabsf(fx) > 330000.f) continue;
-                        if (std::fabsf(fy) < 1000.f || std::fabsf(fy) > 330000.f) continue;
+                        if (std::fabs(fx) < 5000.f || std::fabs(fx) > 330000.f) continue;
+                        if (std::fabs(fy) < 1000.f || std::fabs(fy) > 330000.f) continue;
                         float dx = fx - ppx2, dy = fy - ppy2;
                         std::cerr << "  LL[" << std::dec << li << "] 0x" << std::hex << llCur
                                   << " XY@+0x" << xoff << "=(" << std::dec << (int)fx << "," << (int)fy
@@ -761,10 +761,10 @@ void runDiscoverKlist(const std::string& config_path) {
                         float fx = scanner.rpm_pub<float>((uintptr_t)sub + 0x24);
                         float fy = scanner.rpm_pub<float>((uintptr_t)sub + 0x28);
                         float fz = scanner.rpm_pub<float>((uintptr_t)sub + 0x2c);
-                        bool coord_xy = std::isfinite(fx) && std::fabsf(fx) > 5000.f
-                                     && std::isfinite(fy) && std::fabsf(fy) > 1000.f
-                                     && std::fabsf(fx) < 330000.f
-                                     && std::fabsf(fy) < 330000.f;
+                        bool coord_xy = std::isfinite(fx) && std::fabs(fx) > 5000.f
+                                     && std::isfinite(fy) && std::fabs(fy) > 1000.f
+                                     && std::fabs(fx) < 330000.f
+                                     && std::fabs(fy) < 330000.f;
                         std::cerr << "  firstElem+0x" << std::hex << fo
                                   << " → 0x" << sub
                                   << " XY@+0x24=(" << std::dec << (int)fx << "," << (int)fy
@@ -804,9 +804,9 @@ void runDiscoverKlist(const std::string& config_path) {
                             for (uintptr_t xoff : XY_TRY) {
                                 float fx = scanner.rpm_pub<float>((uintptr_t)charPtr + xoff);
                                 float fy = scanner.rpm_pub<float>((uintptr_t)charPtr + xoff + 4);
-                                if (!std::isfinite(fx) || std::fabsf(fx) < 5000.f
-                                 || !std::isfinite(fy) || std::fabsf(fy) < 1000.f
-                                 || std::fabsf(fx) > 330000.f || std::fabsf(fy) > 330000.f) continue;
+                                if (!std::isfinite(fx) || std::fabs(fx) < 5000.f
+                                 || !std::isfinite(fy) || std::fabs(fy) < 1000.f
+                                 || std::fabs(fx) > 330000.f || std::fabs(fy) > 330000.f) continue;
                                 float dx = fx - ppx, dy = fy - ppy;
                                 float dist = std::sqrtf(dx*dx + dy*dy);
                                 std::cerr << "  bucket[" << std::dec << bi

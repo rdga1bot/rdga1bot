@@ -42,7 +42,7 @@ bool WorldState::refreshPlayerXYZClient() {
     ProcessMemory::Read(m_pid, pb + OFF_PLAYER_Z_CLIENT, &z, 4);
 
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
-    if (std::fabsf(x) < 30000.f || std::fabsf(y) < 30000.f) return false;
+    if (std::fabs(x) < 30000.f || std::fabs(y) < 30000.f) return false;
     if (x < -327680.f || x > 327680.f) return false;
     if (y < -262144.f || y > 262144.f) return false;
 

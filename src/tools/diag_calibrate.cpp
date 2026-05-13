@@ -76,7 +76,7 @@ void runCalibrate(const std::string& config_path, int argc, char* argv[]) {
             float    as_f = 0.f;
             std::memcpy(&as_f, &raw, 4);
             bool coord_like = std::isfinite(as_f)
-                && std::fabsf(as_f) > 500.f && std::fabsf(as_f) < 400000.f;
+                && std::fabs(as_f) > 500.f && std::fabs(as_f) < 400000.f;
             bool icoord_like = std::abs(as_i) > 500 && std::abs(as_i) < 400000;
             std::cerr << "0x" << std::hex << std::setw(4) << off << "  "
                       << "0x" << std::setw(10) << raw << "  "
@@ -121,7 +121,7 @@ void runCalibrate(const std::string& config_path, int argc, char* argv[]) {
         std::cerr << "  obj[" << i << "] 0x" << std::hex << oPtr << std::dec;
         for (uintptr_t off = 0x10; off <= 0x100; off += 4) {
             float v = scanner.rpm_pub<float>(oPtr + off);
-            if (std::isfinite(v) && std::fabsf(v) > 500.f && std::fabsf(v) < 400000.f)
+            if (std::isfinite(v) && std::fabs(v) > 500.f && std::fabs(v) < 400000.f)
                 std::cerr << " [0x" << std::hex << off << "=" << std::dec << (int)v << "]";
         }
         std::cerr << "\n";

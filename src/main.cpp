@@ -561,7 +561,7 @@ int main(int argc, char* argv[]) {
                     // OR-логіка: достатньо X>500 або Z>500.
                     // Y (0x28) може бути ~0 в певних зонах (LoA/ToI) → AND-перевірка хибно скидала базу.
                     bool base_valid = (std::isfinite(vx) && std::isfinite(vz) &&
-                                       (std::fabsf(vx) > 500.f || std::fabsf(vz) > 500.f));
+                                       (std::fabs(vx) > 500.f || std::fabs(vz) > 500.f));
                     if (!base_valid) {
                         std::cerr << "[KnownList] PlayerBase невалідний → скидаємо для re-scan\n";
                         brain.SetPlayerBase(0);
@@ -578,8 +578,8 @@ int main(int argc, char* argv[]) {
                     float cy = kl_scanner->rpm_pub<float>(cached + OFF_PLAYER_Y);
                     // AND-логіка: обидві координати > 200 (OR раніше помилково приймало X=1098,Y=0).
                     // Y=0 → false positive (Wine .data секція, статична адреса).
-                    bool cache_valid = (std::isfinite(cx) && std::fabsf(cx) > 200.f && std::fabsf(cx) < 327000.f
-                                     && std::isfinite(cy) && std::fabsf(cy) > 200.f && std::fabsf(cy) < 327000.f);
+                    bool cache_valid = (std::isfinite(cx) && std::fabs(cx) > 200.f && std::fabs(cx) < 327000.f
+                                     && std::isfinite(cy) && std::fabs(cy) > 200.f && std::fabs(cy) < 327000.f);
                     if (cache_valid) {
                         std::cerr << "[KnownList] playerBaseCache=0x" << std::hex << cached
                                   << " валідний XYZ=(" << (int)cx << "," << (int)cy << ")"
