@@ -39,6 +39,9 @@ set(SOURCES
     src/LearningWorker.cpp
     src/ShadowLogger.cpp
     src/MemoryValidator.cpp
+    src/Blackboard.cpp
+    src/DirectorSystem.cpp
+    src/AllocStats.cpp
 )
 
 # ── Recast/Detour (optional NavMesh) ─────────────────────────────────────────

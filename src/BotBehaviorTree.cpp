@@ -6,6 +6,8 @@
 #include "Input.h"
 #include "Geodata.h"
 #include "navmesh_builder.h"
+#include "Blackboard.h"
+#include "BotMood.h"
 #include <iostream>
 #include <cmath>
 #include <algorithm>
@@ -188,7 +190,28 @@ bool BotBehaviorTree::condIsDead(GameState& gs) {
 
 bool BotBehaviorTree::condNeedsRest(GameState& gs) {
     if (!gs.hp_valid || gs.is_dead || gs.in_grace || gs.has_target) return false;
-    const bool low_hp = gs.hp > 0 && gs.hp < gs.cfg.hp_threshold;
+
+    // Director FLEE directive: відпочити щоб відновити HP перед ескапом.
+    // Не тригеримо якщо вже в бою (hp_falling або моби впритул).
+    if (gs.blackboard && gs.blackboard->getB(BB::Bool::FLEE_ACTIVE)) {
+        if (!gs.hp_falling && !gs.minimap_close_threat) {
+            gs.log("[REST] FLEE директива → відновлюємо HP");
+            return true;
+        }
+    }
+
+    // Mood-aware HP threshold: CAUTIOUS/FLEE ↑ поріг до 55%, AGGRESSIVE ↓ до 30%.
+    // Дефолт = hp_threshold з INI (45% після MR52).
+    int hp_thresh = gs.cfg.hp_threshold;
+    if (gs.blackboard) {
+        const auto mood = static_cast<BotMood>(gs.blackboard->getI(BB::Int::CURRENT_MOOD));
+        if (mood == BotMood::CAUTIOUS || mood == BotMood::FLEE)
+            hp_thresh = std::max(hp_thresh, 55);
+        else if (mood == BotMood::AGGRESSIVE)
+            hp_thresh = std::min(hp_thresh, 30);
+    }
+
+    const bool low_hp = gs.hp > 0 && gs.hp < hp_thresh;
     const bool low_mp = gs.mp > 0 && gs.mp < gs.cfg.mp_threshold;
     if (low_hp || low_mp) {
         // Якщо буф вже прострочений — не блокуємо Buff гілку через Rest

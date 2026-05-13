@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Brain.h"
+#include "AllocStats.h"
 #include "Utils.h"
 #include <iostream>
 #include <fstream>
@@ -38,6 +39,9 @@ Brain::Brain(Eyes& eyes, Hands& hands, const Config& cfg)
     m_bot_bt.setLogFn([this](const std::string& msg){ Log(msg); });
     m_bot_bt.init(m_cfg);
     Log("[BT] BotBehaviorTree: " + std::to_string(m_bot_bt.nodeCount()) + " вузлів");
+
+    // Director: стратегічний рівень (аналіз 500ms кадрів → Blackboard)
+    m_director.setLogFn([this](const std::string& s){ Log(s); });
 
     // Shadow Logger: створюємо якщо ShadowMode увімкнено (MR26)
     if (m_cfg.mem_shadow_mode && m_cfg.knownlist_enabled) {
@@ -194,8 +198,18 @@ void Brain::Process(bool debug) {
     gs.is_dead = is_dead_now;  // передаємо поточний стан смерті
 
     std::string branch = m_bot_bt.tick(gs);
+
+    // Director: синхронізуємо Blackboard після тіку + аналіз (якщо 500ms минуло)
+    m_bb.syncFromGameState(gs);
+    m_director.tick(gs);
+
     if (m_heartbeat_tick % 50 == 1)
-        Log("[BT] " + branch + " avg=" + std::to_string(m_bot_bt.avgTimeUs()) + "µs");
+        Log("[BT] " + branch + " avg=" + std::to_string(m_bot_bt.avgTimeUs()) + "µs"
+            + " " + m_bb.dump());
+#ifdef RDGA1BOT_ALLOC_STATS
+    if (m_heartbeat_tick % 600 == 0)
+        Log(AllocStats::report());
+#endif
     if (branch != m_prev_obj_name)
         m_prev_obj_name = branch;
 
@@ -261,6 +275,14 @@ void Brain::updateGameState(GameState& gs) {
     }
     gs.minimap_dots = m_minimap_cache;
 
+    // NPC cache: async (VisionWorker) або sync — викликається раз на тік у Brain,
+    // не всередині BT вузлів. Sync гілка тільки якщо фіча активна (nearby_y_threshold).
+    if (m_has_async_vision && m_async_npcs.has_value()) {
+        gs.npcs = *m_async_npcs;
+    } else if (m_cfg.nearby_y_threshold > 0 && !m_cfg.target_macro_keys.empty()) {
+        gs.npcs = m_eyes.DetectNPCs();
+    }
+
     // hp_falling: будь-яке зменшення HP порівняно з попереднім тіком.
     // Порогу нема — навіть -1 одиниця означає активну атаку (Vampiric Rage: зупинка = смерть).
     if (gs.hp_valid && m_hp_prev >= 0) {
@@ -286,7 +308,7 @@ void Brain::updateGameState(GameState& gs) {
     // Без цієї умови WorldState bg thread може повертати stale garbage-дані
     // після reset PlayerBase (кожні 30с validity check).
     if (m_world && m_player_base) {
-        gs.kl_mobs        = m_world->mobs();
+        m_world->copyMobsTo(gs.kl_mobs);
         gs.kl_alive_count = m_world->aliveCount();
         gs.kl_mob_died    = m_world->anyMobDiedThisTick();
     } else {
@@ -334,6 +356,9 @@ void Brain::updateGameState(GameState& gs) {
         if (!m_world) return std::nullopt;
         return m_world->findNearestMob(mobs, px, py, range);
     };
+
+    // Director/Agent Blackboard — BT вузли читають настрій, директиву, FLEE
+    gs.blackboard = &m_bb;
 }
 
 // ── CheckPotions ──────────────────────────────────────────────────────────────

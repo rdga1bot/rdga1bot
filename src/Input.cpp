@@ -159,6 +159,14 @@ void Input::AddKeyboardKeyEvent(KeyboardKey key, ::Intercept::KeyboardKeyEvent e
     AddEvent(key_event);
 }
 
+Input::~Input() {
+    // Wait for all detached Send() threads to finish before m_intercept is destroyed.
+    // Threads decrement m_threads as their last action — when it reaches 0 all
+    // accesses to *this are complete.
+    for (int i = 0; i < 200 && m_threads.load() > 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+
 void Input::Send(int sleep)
 {
     if (m_events.empty()) {

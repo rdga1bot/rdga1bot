@@ -23,6 +23,8 @@
 #include "BotBehaviorTree.h"
 #include "MemoryValidator.h"
 #include "ShadowLogger.h"
+#include "Blackboard.h"
+#include "DirectorSystem.h"
 
 class Brain {
 public:
@@ -191,6 +193,11 @@ private:
     // BehaviorTree планувальник
     BotBehaviorTree m_bot_bt;
     std::string     m_prev_obj_name; // для детекції переходів (RecordDeath тощо)
+
+    // Director/Agent layer (CATHODE-inspired)
+    // m_bb MUST precede m_director — DirectorSystem holds a Blackboard&.
+    Blackboard     m_bb;
+    DirectorSystem m_director{m_bb};
 
     // Diagnostics
     int m_detect_me_fail_count = 0;

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            cmake ninja-build \
+            libopencv-dev \
+            libx11-dev libxtst-dev libxext-dev \
+            libncursesw5-dev \
+            libgtest-dev \
+            xvfb
+
+      - name: Configure (debug-fast)
+        run: cmake --preset debug-fast
+
+      - name: Build
+        run: ninja -C build_debug
+
+      - name: Run sanitized unit tests
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
+          sleep 1
+          DISPLAY=:99 make -C tests run-san

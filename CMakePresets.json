@@ -1,0 +1,56 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "debug-fast",
+      "displayName": "Debug Fast — без санітайзерів, швидка компіляція",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build_debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-O0 -g -D_GLIBCXX_ASSERTIONS"
+      },
+      "description": "Fast debug build for daily development. No sanitizers — compile time ~1-2min. Use qa-debug for pre-release UB/memory checks."
+    },
+    {
+      "name": "release",
+      "displayName": "Release (production)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "qa-debug",
+      "displayName": "QA Debug — ASan + UBSan + libstdc++ assertions",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build_qa",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS":
+          "-O1 -g -fno-omit-frame-pointer -D_GLIBCXX_ASSERTIONS -DRDGA1BOT_ALLOC_STATS=1 -fsanitize=address,undefined",
+        "CMAKE_EXE_LINKER_FLAGS":
+          "-fsanitize=address,undefined"
+      },
+      "description": "Catches: out-of-bounds vector[], null deref, signed overflow, use-after-free, invalid iterator use. Do NOT run against Wine — use for standalone unit/integration tests only."
+    }
+  ],
+
+  "buildPresets": [
+    {
+      "name": "debug-fast",
+      "configurePreset": "debug-fast"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "qa-debug",
+      "configurePreset": "qa-debug"
+    }
+  ]
+}

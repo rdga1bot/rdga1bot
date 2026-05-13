@@ -14,6 +14,7 @@
 
 class Geodata;
 class NavMeshBuilder;
+class Blackboard;
 
 // ── GameState ─────────────────────────────────────────────────────────────────
 // Повний знімок стану гри + доступ до інструментів.
@@ -45,6 +46,11 @@ struct GameState {
     std::optional<Eyes::Target> target;
     bool has_target = false;
     int  target_hp  = 0;
+
+    // ── NPC (OpenCV) — кешується Brain::updateGameState() раз на тік ───────────
+    // Async-результат VisionWorker або sync DetectNPCs() (якщо VisionWorker вимкнено).
+    // BT вузли читають звідси — НЕ викликають DetectNPCs() напряму.
+    std::vector<Eyes::NPC> npcs;
 
     // ── Мінімапа ──────────────────────────────────────────────────────────────
     std::vector<Eyes::MinimapDot> minimap_dots;
@@ -105,4 +111,8 @@ struct GameState {
 
     // ── Утиліти ───────────────────────────────────────────────────────────────
     bool hasLiveMobs() const { return kl_alive_count > 0 || !minimap_dots.empty(); }
+
+    // Director/Agent Blackboard — nullable. Set by Brain::updateGameState().
+    // BT nodes read strategic hints: mood, directive, flee_active, zone.
+    Blackboard* blackboard = nullptr;
 };

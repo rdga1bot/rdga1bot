@@ -2,7 +2,6 @@
 
 #include <vector>
 #include <optional>
-#include <array>
 
 #include <opencv2/opencv.hpp>
 #include "Config.h"
@@ -32,12 +31,6 @@ public:
         std::uint32_t CenterId() const      { return center.x << 16 | center.y; }
         bool Selected() const               { return state == State::Selected; }
         bool Hovered() const                { return state == State::Hovered; }
-    };
-
-    struct FarNPC : TrackableNPC
-    {
-        cv::Rect rect;
-        std::uint32_t Id() const override { return tracking_id; }
     };
 
     // ── Мінімапа ─────────────────────────────────────────────────────────────
@@ -74,13 +67,6 @@ public:
     double m_npc_name_color_threshold       = 0.2;
     int m_npc_name_center_offset            = 17;
 
-    // far NPC detection
-    int m_far_npc_min_height    = 25;
-    int m_far_npc_max_height    = 200;
-    int m_far_npc_min_width     = 25;
-    int m_far_npc_max_width     = 200;
-    int m_far_npc_limit         = 10;
-
     // selected target detection
     int m_target_circle_area_height             = 25;
     int m_target_circle_area_width              = 25;
@@ -116,11 +102,7 @@ public:
     cv::Scalar m_target_hp_color_from_hsv   = {0, 100, 90};
     cv::Scalar m_target_hp_color_to_hsv     = {12, 220, 160};
 
-    Eyes() :
-        m_hsv_frames{},
-        m_frame     {0},
-        m_diffs     {}
-    {}
+    Eyes() {}
 
     const std::optional<cv::Rect> &TargetHPBar() const { return m_target_hp_bar; }
     const std::optional<struct MyBars> &MyBars() const { return m_my_bars; }
@@ -167,13 +149,11 @@ public:
     float GetMinimapFlow() const;
 
     void Open(const cv::Mat &bgr);
-    // Fix #3: clone усунено — DetectFarNPCs() не використовується
-    void Close()    { m_frame++; }
+    void Close()         {}
     void Reset()         { m_my_bars = {}; m_target_hp_bar = {}; }
     void ResetTarget()   { m_target_hp_bar = {}; }
 
     std::vector<NPC> DetectNPCs();
-    std::vector<FarNPC> DetectFarNPCs();
     std::optional<Me> DetectMe();
     std::optional<Target> DetectTarget();
 
@@ -195,14 +175,10 @@ public:
 private:
     cv::Mat m_bgr;
     cv::Mat m_hsv;
-    std::array<cv::Mat, 5> m_hsv_frames; // previous frames buffer
-    std::array<cv::Mat, 5>::size_type m_frame; // current frame index
 
     std::optional<struct MyBars> m_my_bars;
     std::optional<cv::Rect> m_target_hp_bar;
-    std::array<cv::Mat, 15> m_diffs; // used for far NPCs detection
-    std::vector<NPC> m_npcs; // previously detected NPCs
-    std::vector<FarNPC> m_far_npcs; // previously detected far NPCs
+    std::vector<NPC> m_npcs; // previously detected NPCs (NPC tracking)
 
     std::optional<struct MyBars> DetectMyBars() const;
     std::optional<cv::Rect> DetectTargetHPBar() const;

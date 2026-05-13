@@ -4,7 +4,7 @@
 #include <string>
 #include <atomic>
 #include <chrono>
-#include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <sys/types.h>
 #include "l2_objects.h"
@@ -27,7 +27,7 @@ public:
 
     // Оновити playerBase (якщо re-scan знайшов нову адресу)
     void setPlayerBase(uintptr_t pb) {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        std::lock_guard<std::shared_mutex> lk(m_mutex);
         m_playerBase = pb;
     }
 
@@ -37,15 +37,20 @@ public:
 
     // Аксесори — повертають snapshot-copy під lock (bg thread може оновлювати m_mobs)
     std::vector<L2Character> mobs() const {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        std::shared_lock<std::shared_mutex> lk(m_mutex);
         return m_mobs;
     }
+    // Копіює безпосередньо в out (без тимчасового вектора); reuse capacity якщо out персистентний.
+    void copyMobsTo(std::vector<L2Character>& out) const {
+        std::shared_lock<std::shared_mutex> lk(m_mutex);
+        out = m_mobs;
+    }
     std::vector<L2Object> items() const {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        std::shared_lock<std::shared_mutex> lk(m_mutex);
         return m_items;
     }
     std::optional<L2Character> target() const {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        std::shared_lock<std::shared_mutex> lk(m_mutex);
         return m_target;
     }
 
@@ -59,7 +64,7 @@ public:
 
     // Кількість живих мобів поблизу (за останнім скануванням bg thread)
     int aliveCount() const {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        std::shared_lock<std::shared_mutex> lk(m_mutex);
         return m_prev_alive_count < 0 ? 0 : m_prev_alive_count;
     }
 
@@ -109,7 +114,7 @@ private:
 
     // Фоновий сканер
     std::thread             m_bg_thread;
-    mutable std::mutex      m_mutex;
+    mutable std::shared_mutex m_mutex;
     std::atomic<bool>       m_bg_stop{false};
     uintptr_t               m_playerBase   = 0;
     float                   m_mob_range    = 2500.f;

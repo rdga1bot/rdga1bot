@@ -148,6 +148,7 @@ public:
         m_mouse_position{MousePosition()},
         m_threads       {0}
     {}
+    ~Input();
 
     void MoveMouse(const Point &point)
         { AddEvent(MouseMoveEvent{point.x, point.y}); m_mouse_position = point; }

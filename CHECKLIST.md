@@ -5,23 +5,21 @@
 ### Залежності
 - [ ] `g++` з підтримкою C++17: `g++ --version`
 - [ ] OpenCV 4.x: `pkg-config --modversion opencv4`
-- [ ] X11/XTest/XShm: `pkg-config --exists x11 xtst xext && echo ok`
-- [ ] `/dev/uinput` доступний: `ls -la /dev/uinput`
+- [ ] X11/XTest/XExt: `pkg-config --exists x11 xtst xext && echo ok`
+- [ ] ncurses: `pkg-config --exists ncursesw && echo ok`
+- [ ] cmake + ninja: `cmake --version && ninja --version`
 - [ ] `curl` для Telegram: `which curl`
 
-### Права на /dev/uinput
-```bash
-# Варіант 1: через udev (рекомендовано)
-echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-uinput.rules
-sudo usermod -aG input $USER
-# Перелогінитись
-
-# Варіант 2: sudo при запуску (launch.sh робить автоматично)
-```
-
 ### Збірка
-- [ ] `./build.sh` — завершується без помилок
-- [ ] `./rdga1bot` — бінарник існує і не 0 байт
+```bash
+# Рекомендовано (CMake):
+cmake --preset debug-fast && ninja -C build_debug
+
+# Або старий спосіб:
+bash build.sh
+```
+- [ ] Збірка завершується без помилок
+- [ ] `./rdga1bot` або `./build_debug/rdga1bot` — бінарник існує і не 0 байт
 
 ---
 
@@ -90,12 +88,6 @@ sudo usermod -aG input $USER
 - Перевірити правильність назв мобів у макросах `/target`
 - Назва чутлива до регістру та пробілів
 - Спробувати натиснути макрос вручну — чи таргетується моб?
-
-### /dev/uinput не доступний
-```bash
-sudo chmod 666 /dev/uinput  # тимчасово
-# або використати launch.sh — автоматично sudo
-```
 
 ### Персонаж відкриває чат замість руху
 - НЕ повинно траплятись: бот використовує стрілки ↑↓←→, не WASD

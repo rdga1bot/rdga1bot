@@ -6,11 +6,14 @@
 #include <cmath>
 
 WorldState::WorldState(pid_t pid, const OffsetScanner& offsets)
-    : m_reader(pid, offsets), m_pid(pid), m_off(offsets) {}
+    : m_reader(pid, offsets), m_pid(pid), m_off(offsets)
+{
+    m_mobs.reserve(KnownListReader::KL_MAX_OBJECTS);
+}
 
 bool WorldState::refreshPlayerXYZ() {
     uintptr_t pb;
-    { std::lock_guard<std::mutex> lk(m_mutex); pb = m_playerBase; }
+    { std::shared_lock<std::shared_mutex> lk(m_mutex); pb = m_playerBase; }
     if (!pb) return false;
 
     float x = 0.f, y = 0.f, z = 0.f;
@@ -30,7 +33,7 @@ bool WorldState::refreshPlayerXYZ() {
 
 bool WorldState::refreshPlayerXYZClient() {
     uintptr_t pb;
-    { std::lock_guard<std::mutex> lk(m_mutex); pb = m_playerBase; }
+    { std::shared_lock<std::shared_mutex> lk(m_mutex); pb = m_playerBase; }
     if (!pb) return false;
 
     float x = 0.f, y = 0.f, z = 0.f;
@@ -58,78 +61,67 @@ void WorldState::bgLoop() {
 
     while (!m_bg_stop.load(std::memory_order_relaxed)) {
         uintptr_t pb;
-        float mob_r, item_r;
+        float mob_r;
         {
-            std::lock_guard<std::mutex> lk(m_mutex);
-            pb     = m_playerBase;
-            mob_r  = m_mob_range;
-            item_r = m_item_range;
+            std::shared_lock<std::shared_mutex> lk(m_mutex);
+            pb    = m_playerBase;
+            mob_r = m_mob_range;
         }
 
         if (pb) {
-            std::vector<L2Character> mobs;
-            std::vector<L2Object>    items; // server-side loot — завжди empty
-            bool all_mobs_empty = false;
-
             if (++scan_skip >= SCAN_EVERY_N) {
                 scan_skip = 0;
-                mobs = m_reader.readMobsRegionScan(pb, mob_r);
-                // readAllAsChars fallback вилучено: KnownList ptr=0 у цьому клієнті → завжди empty
-                // readItemsRegionScan вилучено: OFF_OBJ_TYPE не розрізняє items + server-side loot
-                all_mobs_empty = mobs.empty();
+                std::vector<L2Character> mobs = m_reader.readMobsRegionScan(pb, mob_r);
+                bool all_mobs_empty = mobs.empty();
+
+                int alive = 0;
+                for (const auto& mob : mobs) if (mob.isAlive()) alive++;
+
+                {
+                    std::lock_guard<std::shared_mutex> lk(m_mutex);
+                    bool died = (m_prev_alive_count > 0 && alive < m_prev_alive_count);
+                    m_mobs = std::move(mobs);
+                    m_mob_died_this_tick.store(died, std::memory_order_relaxed);
+                    m_prev_alive_count = alive;
+                    if (m_targetID != 0) {
+                        auto it = std::find_if(m_mobs.begin(), m_mobs.end(),
+                            [&](const L2Character& c){ return c.objectID == m_targetID; });
+                        if (it != m_mobs.end()) m_target = *it;
+                        else                    m_target = std::nullopt;
+                    }
+                }
+
+                size_t snap_mobs = 0;
+                { std::shared_lock<std::shared_mutex> lk(m_mutex); snap_mobs = m_mobs.size(); }
+                static size_t prev_log_mobs = SIZE_MAX;
+                if (snap_mobs != prev_log_mobs) {
+                    std::cerr << "[KnownList] mobs=" << snap_mobs
+                              << " alive=" << alive << "\n";
+                    prev_log_mobs = snap_mobs;
+                }
+
+                static bool diagnosed = false;
+                if (!diagnosed && all_mobs_empty) {
+                    std::cerr << "[KnownList] WARN: обидва методи повернули 0 мобів.\n"
+                              << "[KnownList] Запусти: ./rdga1bot --dump-objects\n"
+                              << "[KnownList] і перевір objTypeOff в offsets.json\n";
+                    m_reader.diagnoseTypes(pb);
+                    diagnosed = true;
+                }
             } else {
-                // Між повними сканами: використовуємо попередній snapshot
-                std::lock_guard<std::mutex> lk(m_mutex);
-                mobs  = m_mobs;
-                items = m_items;
-            }
-
-            int alive = 0;
-            for (const auto& mob : mobs)
-                if (mob.isAlive()) alive++;
-
-            {
-                std::lock_guard<std::mutex> lk(m_mutex);
+                // Між повними сканами: рахуємо alive прямо на m_mobs — без копіювання
+                std::lock_guard<std::shared_mutex> lk(m_mutex);
+                int alive = 0;
+                for (const auto& mob : m_mobs) if (mob.isAlive()) alive++;
                 bool died = (m_prev_alive_count > 0 && alive < m_prev_alive_count);
-                m_mobs  = std::move(mobs);
-                m_items = std::move(items);
                 m_mob_died_this_tick.store(died, std::memory_order_relaxed);
-                m_prev_alive_count   = alive;
-
-                // Оновлюємо поточний таргет якщо він є
+                m_prev_alive_count = alive;
                 if (m_targetID != 0) {
                     auto it = std::find_if(m_mobs.begin(), m_mobs.end(),
                         [&](const L2Character& c){ return c.objectID == m_targetID; });
                     if (it != m_mobs.end()) m_target = *it;
                     else                    m_target = std::nullopt;
                 }
-            }
-
-            // Зберігаємо розміри під lock для безпечного логування поза lock
-            size_t snap_mobs = 0, snap_items = 0;
-            {
-                std::lock_guard<std::mutex> lk2(m_mutex);
-                snap_mobs  = m_mobs.size();
-                snap_items = m_items.size();
-            }
-
-            static size_t prev_log_mobs = SIZE_MAX;
-            if (snap_mobs != prev_log_mobs) {
-                std::cerr << "[KnownList] mobs=" << snap_mobs
-                          << " alive=" << alive
-                          << " items=" << snap_items << "\n";
-                prev_log_mobs = snap_mobs;
-            }
-
-            // Одноразова діагностика при першому порожньому скані
-            // (обидва методи повернули 0 — objTypeOff або offsets не відкалібровані)
-            static bool diagnosed = false;
-            if (!diagnosed && all_mobs_empty) {
-                std::cerr << "[KnownList] WARN: обидва методи повернули 0 мобів.\n"
-                          << "[KnownList] Запусти: ./rdga1bot --dump-objects\n"
-                          << "[KnownList] і перевір objTypeOff в offsets.json\n";
-                m_reader.diagnoseTypes(pb);
-                diagnosed = true;
             }
         }
 
@@ -142,7 +134,7 @@ void WorldState::bgLoop() {
 void WorldState::startBackground(uintptr_t playerBase, float mob_range, float item_range) {
     stopBackground();
     {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        std::lock_guard<std::shared_mutex> lk(m_mutex);
         m_playerBase  = playerBase;
         m_mob_range   = mob_range;
         m_item_range  = item_range;
@@ -165,7 +157,7 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
 
     // Оновлюємо playerBase/range якщо змінились
     {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        std::lock_guard<std::shared_mutex> lk(m_mutex);
         m_playerBase = playerBase;
         m_mob_range  = mob_range;
         m_item_range = item_range;
@@ -179,7 +171,7 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
 
     // Fast re-read: перечитуємо hp/isDead поточного таргету між скануваннями
     m_mob_died_this_tick.store(false, std::memory_order_relaxed); // atomic — не потребує mutex
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::lock_guard<std::shared_mutex> lk(m_mutex);
     if (m_target.has_value() && m_target->memPtr) {
         // MR43: 2-hop HP read via game_obj (render_node+0x58 → game_obj → +0x14, uint32)
         // render_node+0x100 = interpolated X (NOT HP), render_node+0x180 = always 0x80000000 (NOT isDead)
@@ -200,18 +192,18 @@ void WorldState::update(uintptr_t playerBase, float mob_range, float item_range)
 }
 
 bool WorldState::hasValidTarget() const {
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::shared_lock<std::shared_mutex> lk(m_mutex);
     return m_target.has_value() && !m_target->isDead && m_target->hp > 0.f;
 }
 
 bool WorldState::targetIsDead() const {
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::shared_lock<std::shared_mutex> lk(m_mutex);
     if (!m_target.has_value()) return false;
     return m_target->isDead || m_target->hp <= 0.f;
 }
 
 bool WorldState::hasLootNearby(float px, float py, float range) const {
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::shared_lock<std::shared_mutex> lk(m_mutex);
     for (const auto& item : m_items)
         if (item.distanceTo(px, py) <= range)
             return true;
@@ -219,7 +211,7 @@ bool WorldState::hasLootNearby(float px, float py, float range) const {
 }
 
 void WorldState::setTarget(int objectID) {
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::lock_guard<std::shared_mutex> lk(m_mutex);
     m_targetID = objectID;
     auto it = std::find_if(m_mobs.begin(), m_mobs.end(),
         [&](const L2Character& c) { return c.objectID == objectID; });
@@ -228,7 +220,7 @@ void WorldState::setTarget(int objectID) {
 }
 
 void WorldState::clearTarget() {
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::lock_guard<std::shared_mutex> lk(m_mutex);
     m_targetID = 0;
     m_target   = std::nullopt;
 }

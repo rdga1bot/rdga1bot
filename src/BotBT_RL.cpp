@@ -16,6 +16,8 @@
 #include "BotBehaviorTree.h"
 #include "FeatureExtractor.h"
 #include "RewardCalculator.h"
+#include "Blackboard.h"
+#include "BotMood.h"
 
 void BotBehaviorTree::initRL(const Config& cfg) {
     const auto& lc = cfg.learning;
@@ -121,6 +123,20 @@ void BotBehaviorTree::rlPostTick(GameState& gs) {
     sig.targeting_failed   = m_rl_sig_targeting_failed;
     sig.buff_done          = m_rl_sig_buff_done;
     float reward = RewardCalculator::compute(sig, gs.stats);
+
+    // Mood-aware reward shaping: Director context scales kill/death components.
+    // E.g. AGGRESSIVE → kill ×1.25, FLEE → death ×2.0 (RL learns danger faster).
+    // Applied as a delta on top of base reward — idle penalty stays unchanged.
+    if (gs.blackboard) {
+        const auto mood  = static_cast<BotMood>(gs.blackboard->getI(BB::Int::CURRENT_MOOD));
+        const auto scale = getMoodRewardScale(mood);
+        if (sig.kill_happened)
+            reward += RewardCalculator::REWARD_KILL  * (scale.kill_scale  - 1.f);
+        if (sig.death_happened)
+            reward += RewardCalculator::REWARD_DEATH * (scale.death_scale - 1.f);
+        if (scale.rest_bonus > 0.f && !sig.kill_happened && !sig.death_happened)
+            reward += scale.rest_bonus;
+    }
 
     Eigen::VectorXf phi_next = FeatureExtractor::extract(gs);
     bool done = m_rl_sig_death;

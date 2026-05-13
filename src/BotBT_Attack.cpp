@@ -29,8 +29,7 @@ BTStatus BotBehaviorTree::actAttack(GameState& gs) {
         const int kMaxFarRejects    = gs.cfg.max_far_rejects;
         if (kNearbyYThreshold > 0 && !gs.cfg.target_macro_keys.empty()
             && self.m_tgt_far_rejects < kMaxFarRejects) {
-            auto npcs = gs.eyes.DetectNPCs();
-            for (const auto& npc : npcs) {
+            for (const auto& npc : gs.npcs) {
                 if (npc.Selected() && npc.center.y < kNearbyYThreshold) {
                     gs.log("[TARGETING] Моб далеко (cy=" + std::to_string(npc.center.y)
                         + ", reject=" + std::to_string(self.m_tgt_far_rejects + 1)

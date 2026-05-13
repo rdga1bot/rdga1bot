@@ -98,6 +98,14 @@ void Notify::SendSync(const std::string& text) {
 #endif
 }
 
+Notify::~Notify() {
+    // Wait for all detached Send() threads to finish before this object is freed.
+    // Threads access m_token/m_chat_id/m_pending via `this`; m_pending reaches 0
+    // only after the last access to *this, so waiting here is sufficient.
+    for (int i = 0; i < 100 && m_pending.load() > 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+
 void Notify::Send(const std::string& text) {
     if (!m_enabled) return;
     if (m_pending.load() >= kMaxPendingForks) {

@@ -11,6 +11,7 @@ public:
     Notify() = default;
     Notify(const std::string& token, const std::string& chat_id,
            bool on_death = true, int stats_interval = 3600);
+    ~Notify();
 
     void NotifyDeath(int hp = -1);
     void NotifyStats(const struct Stats& stats);

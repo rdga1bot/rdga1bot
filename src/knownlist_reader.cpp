@@ -61,6 +61,7 @@ std::vector<L2Object> KnownListReader::readAll(uintptr_t playerBase) const {
 // ── Тільки моби ──────────────────────────────────────────────────────────────
 std::vector<L2Character> KnownListReader::readMobs(uintptr_t playerBase) const {
     std::vector<L2Character> result;
+    result.reserve(30);
     if (!playerBase) return result;
 
     uintptr_t knownListPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
@@ -109,6 +110,7 @@ std::vector<L2Object> KnownListReader::readItems(uintptr_t playerBase) const {
 // Критерій валідності: координати в межах L2 world + hpMax в розумних межах.
 std::vector<L2Character> KnownListReader::readAllAsChars(uintptr_t playerBase) const {
     std::vector<L2Character> result;
+    result.reserve(30);
     if (!playerBase) return result;
 
     uintptr_t knownListPtr = rpm<uint32_t>(playerBase + m_off.knownListOff);
@@ -291,6 +293,7 @@ std::vector<L2Character> KnownListReader::readMobsRegionScan(
 
     std::vector<uint8_t> chunk(kChunk);
     std::vector<L2Character> result;
+    result.reserve(30);
     std::unordered_set<uintptr_t> seen;
     seen.reserve(64);
 
