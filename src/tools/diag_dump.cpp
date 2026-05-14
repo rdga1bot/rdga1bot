@@ -734,7 +734,7 @@ void runDiscoverKlist(const std::string& config_path) {
                         float dx = fx - ppx2, dy = fy - ppy2;
                         std::cerr << "  LL[" << std::dec << li << "] 0x" << std::hex << llCur
                                   << " XY@+0x" << xoff << "=(" << std::dec << (int)fx << "," << (int)fy
-                                  << ") dist=" << (int)std::sqrtf(dx*dx+dy*dy) << "\n";
+                                  << ") dist=" << (int)std::sqrt(dx*dx+dy*dy) << "\n";
                         found_xy = true; break;
                     }
                     if (!found_xy)
@@ -808,7 +808,7 @@ void runDiscoverKlist(const std::string& config_path) {
                                  || !std::isfinite(fy) || std::fabs(fy) < 1000.f
                                  || std::fabs(fx) > 330000.f || std::fabs(fy) > 330000.f) continue;
                                 float dx = fx - ppx, dy = fy - ppy;
-                                float dist = std::sqrtf(dx*dx + dy*dy);
+                                float dist = std::sqrt(dx*dx + dy*dy);
                                 std::cerr << "  bucket[" << std::dec << bi
                                           << "] node+0x" << std::hex << ni << "→0x" << charPtr
                                           << " XY@+0x" << xoff << "=("

@@ -143,7 +143,7 @@ void DirectorSystem::publishDirective(const GameState& gs) {
     } else if (m_zone_initialized && gs.coords_valid) {
         float dx   = gs.player_x - m_zone.cx;
         float dy   = gs.player_y - m_zone.cy;
-        float dist = std::sqrtf(dx * dx + dy * dy);
+        float dist = std::sqrt(dx * dx + dy * dy);
         if (dist > m_zone.radius * 2.0f)
             dir = StrategicDirective::RETURN_TO_ZONE;
     }

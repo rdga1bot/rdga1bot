@@ -478,7 +478,7 @@ uintptr_t OffsetScanner::autoDiscoverKnownList(uintptr_t playerBase,
             }
             if (verbose && found_xy && printed < 10) {
                 float dx = found_ox - px, dy = found_oy - py;
-                float dist = std::sqrtf(dx*dx + dy*dy);
+                float dist = std::sqrt(dx*dx + dy*dy);
                 std::cerr << "    [obj " << std::dec << std::setw(2) << i
                           << "] 0x" << std::hex << obj
                           << " XY=(" << std::dec << (int)found_ox << "," << (int)found_oy
