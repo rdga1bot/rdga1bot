@@ -7,7 +7,11 @@
 - Папка: /home/rdga1/rdga1prj/l2net/
 - Build: `cmake --preset debug-fast && ninja -C build_debug` (або `bash build.sh`)
 
-## Поточний стан (2026-05-13)
+## Ліцензія та публічність
+- Репо **публічне**: https://github.com/rdga1bot/rdga1bot
+- Ліцензія: **GPL-3.0** (LICENSE файл в корені)
+
+## Поточний стан (2026-05-15)
 
 - **BotBehaviorTree** — єдиний планувальник. RL: `[Learning] Enabled=true` за замовчуванням.
 - **MR80** — HP читання з пам'яті ПІДТВЕРДЖЕНО. Два механізми (пріоритет: hp_abs > anchor > game_obj):
@@ -117,6 +121,7 @@
 - Мінімальні цільові зміни — не робити broad rewrites
 - BT tick() сигнатура: `std::string tick(GameState& gs)` — НЕ міняти
 - m_children[] масив — НЕ переставляти під час виконання (ламає BTState)
+- **CI portability**: НЕ використовувати `std::fabsf`/`std::sqrtf` та інші `*f`-варіанти з `<cmath>` — GCC Ubuntu 22.04 їх не підтримує. Завжди `std::fabs`/`std::sqrt` (overloaded для float)
 
 ## Ключові файли
 - src/Brain.cpp               — координатор (сприйняття + потіони + dispatch)

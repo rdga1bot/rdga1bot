@@ -135,6 +135,15 @@
   - ubuntu-22.04: cmake --preset debug-fast → ninja → Xvfb + make -C tests run-san
   - Залежності: libopencv-dev, libx11-dev, libxtst-dev, libxext-dev, libncursesw5-dev, libgtest-dev, xvfb
 
+### ✅ CI portability fixes (2026-05-13/14)
+  - `std::fabsf` → `std::fabs` (9 файлів): GCC Ubuntu 22.04 не має `std::fabsf` в `<cmath>`
+  - `std::sqrtf` → `std::sqrt` (3 файли: DirectorSystem.cpp, offset_scanner.cpp, tools/diag_dump.cpp)
+  - Правило: ніколи не використовувати float-суфіксні варіанти (`fabsf`, `sqrtf`, `sinf` тощо) через `std::`
+
+### ✅ Публічне репо + GPL-3 (2026-05-15)
+  - rdga1bot/rdga1bot зроблено публічним на GitHub
+  - Ліцензія GPL-3.0 (LICENSE файл присутній з initial commit)
+
 ### ✅ AllocStats (qa-debug preset)
   - src/AllocStats.h/.cpp: operator new/delete atomic counters під #ifdef RDGA1BOT_ALLOC_STATS
   - Brain heartbeat: [AllocStats] allocs=N total_kb=M кожні 600 тіків
