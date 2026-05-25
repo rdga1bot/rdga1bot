@@ -154,5 +154,17 @@
   - BotMood: NEUTRAL/AGGRESSIVE/CAUTIOUS/FLEE/SUSPICIOUS + hysteresis + MoodRewardScale
   - SenseSystem: tiered perception MINIMAL→FULL (inline evaluator)
 
+### ✅ NavMesh з BSP геодати ToI 11 (2026-05-26)
+  - Побудовано навмеш для Tower of Insolence 11 (тайл 23_18.unr, 835 полігонів, 152 KB)
+  - `tools/bsp_to_navmesh.cpp` — використовує l2mapconv unreal lib + Recast:
+    - Парсинг BSP Level→Model→nodes (plane.z>0.5 = підлога)
+    - Фан-тріангуляція BSP полігонів; фільтр |coord|≥250000 (UE2 huge-brush zone)
+    - Повний Recast pipeline → Detour .bin
+  - Тайл 23_18 = L2 X=[107193,120581], Y=[5290,30758] (підтверджено centroid=112997,15401)
+  - rdga1bot.ini: [NavMesh] Enabled=true, NavMeshFile=navmesh_toi11.bin
+  - `tools/bsp_to_navmesh`: compile:
+    `g++ -std=c++20 -O2 tools/bsp_to_navmesh.cpp src/recast/Recast/Source/*.cpp src/recast/Detour/Source/*.cpp -I.../unreal/include -I.../utils/include -I.../math/include -I.../llvm/include .../libunreal.a .../libutils.a .../libmath.a -Isrc/recast/Recast/Include -Isrc/recast/Detour/Include -o /tmp/bsp_to_navmesh`
+    run: `/tmp/bsp_to_navmesh /home/rdga1/deiceland navmesh_toi11.bin 23_18`
+
 ### ✅ CMakePresets.json
   - debug-fast: -O0 -g (2хв); release: -O2 (5хв); qa-debug: ASan+UBSan+AllocStats (15хв)
